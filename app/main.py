@@ -320,6 +320,7 @@ class ImportItem(BaseModel):
     link: str
     rating: int = 3
     tags: list[str] = []
+    name: str = ""
 
 
 class ImportCollectionRequest(BaseModel):
@@ -350,6 +351,8 @@ async def api_import_collection(request: ImportCollectionRequest):
             }
             if item.tags:
                 fields["标签"] = item.tags
+            if item.name:
+                fields["账号名称"] = item.name
             
             f.create_record(app_token, table_id, fields)
             success_count += 1
