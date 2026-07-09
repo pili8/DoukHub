@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}重复账号处理 - DoukHub{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>重复账号处理</h2>
+    <button class="btn btn-secondary" onclick="syncAndCheck()">🔄 同步并检测重复</button>
+</div>
+
+<div class="card" id="dup-result" style="display: none;">
+    <h3>检测结果</h3>
+    <div id="dup-content"></div>
+</div>
+
+<div class="card">
+    <div class="empty-state" id="dup-empty">
+        点击"同步并检测重复"按钮开始检测飞书表中的重复账号
+    </div>
+    <div id="dup-list"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    let duplicatesData = [];
+
+    async function syncAndCheck() {
+        showToast('正在同步飞书...');
+        const data = await apiCall('/api/sync', 'POST');
+        if (!data.success) {
+            showToast(data.message, 'error');
+            return;
+        }
+
+        showToast(`同步完成: ${data.message}`);
+
+        if (data.duplicates && data.duplicates.length > 0) {
+            duplicatesData = data.duplicates;
+            showDuplicates(data.duplicates);
+        } else {
+            document.getElementById('dup-empty').textContent = '✅ 未发现重复账号';
+            document.getElementById('dup-list').innerHTML = '';
+        }
+    }
+
+    function showDuplicates(dups) {
+        document.getElementById('dup-empty').style.display = 'none';
+        let html = '<p style="margin-bottom:16px;color:#e74c3c;">⚠️ 发现 ' + dups.length + ' 个重复账号，请选择处理方式：</p>';
+
+        dups.forEach((dup, i) => {
+            html += `
+            <div class="card" style="border-left: 4px solid #e74c3c;">
+                <h3>重复 #${i + 1}: ${dup.new_name}</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0;">
+                    <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
+                        <strong>🆕 新条目</strong><br>
+                        名称: ${dup.new_name}<br>
+                        链接: ${dup.new_link}<br>
+                        sec_user_id: ${dup.new_sec_user_id || '(未获取)'}<br>
+                        评级: ${'⭐'.repeat(dup.new_rating || 3)}
+                    </div>
+                    <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
+                        <strong>📋 已有条目</strong><br>
+                        名称: ${dup.existing_name}<br>
+                        链接: ${dup.existing_link}<br>
+                        sec_user_id: ${dup.existing_sec_user_id}<br>
+                        评级: ${'⭐'.repeat(dup.existing_rating || 3)}
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-primary btn-sm" onclick="resolveDup(${i},'keep_new')">保留新条目</button>
+                    <button class="btn btn-secondary btn-sm" onclick="resolveDup(${i},'keep_old')">保留旧条目</button>
+                    <button class="btn btn-secondary btn-sm" onclick="resolveDup(${i},'keep_both')">两条都保留</button>
+                    <button class="btn btn-secondary btn-sm" onclick="resolveDup(${i},'skip')">跳过</button>
+                </div>
+            </div>`;
+        });
+
+        document.getElementById('dup-list').innerHTML = html;
+    }
+
+    async function resolveDup(index, action) {
+        const dup = duplicatesData[index];
+        const data = await apiCall('/api/duplicates/resolve', 'POST', {
+            action: action,
+            new_record_id: dup.record_id,
+            existing_record_id: dup.existing_record_id || '',
+        });
+
+        if (data.success) {
+            showToast(data.message);
+            // 移除已处理的条目
+            duplicatesData.splice(index, 1);
+            if (duplicatesData.length > 0) {
+                showDuplicates(duplicatesData);
+            } else {
+                document.getElementById('dup-list').innerHTML = '';
+                document.getElementById('dup-empty').textContent = '✅ 所有重复账号已处理完毕';
+                document.getElementById('dup-empty').style.display = 'block';
+            }
+        } else {
+            showToast(data.message, 'error');
+        }
+    }
+</script>
+{% endblock %}

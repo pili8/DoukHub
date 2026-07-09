@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}定时任务 - DoukHub{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>定时任务</h2>
+    <button class="btn btn-primary" onclick="showAddForm()">+ 新建任务</button>
+</div>
+
+<div class="card" id="add-form" style="display: none;">
+    <h3>新建定时任务</h3>
+    <form onsubmit="addTask(event)">
+        <div class="form-group">
+            <label>任务名称</label>
+            <input type="text" name="name" required placeholder="如：每日巡检-竞品">
+        </div>
+        <div class="form-group">
+            <label>Cron 表达式</label>
+            <input type="text" name="cron_expression" required placeholder="0 2 * * *">
+            <small style="color: #888;">
+                格式：分 时 日 月 周<br>
+                示例：0 2 * * * = 每天凌晨2点 | 0 */6 * * * = 每6小时 | 0 9 * * 1-5 = 工作日9点
+            </small>
+        </div>
+        <div class="form-group">
+            <label>评级筛选（采集哪些星级，逗号分隔）</label>
+            <input type="text" name="rating_filter" value="3,4,5" placeholder="3,4,5">
+        </div>
+        <button type="submit" class="btn btn-primary">创建</button>
+        <button type="button" class="btn btn-secondary" onclick="hideAddForm()">取消</button>
+    </form>
+</div>
+
+<div class="card">
+    {% for task in tasks %}
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid #eee;">
+        <div>
+            <strong>{{ task.name }}</strong>
+            <div style="font-size: 13px; color: #888; margin-top: 6px;">
+                Cron: <code>{{ task.cron_expression }}</code> |
+                评级: {{ task.rating_filter }} |
+                <span style="color: {{ '#27ae60' if task.enabled else '#e74c3c' }}">
+                    {{ '🟢 启用' if task.enabled else '🔴 禁用' }}
+                </span>
+                {% if task.last_run_at %}<br>上次执行: {{ task.last_run_at }}{% endif %}
+                {% for job in jobs %}
+                    {% if job.id == 'task_' ~ task.id %}
+                        {% if job.next_run %}<br>下次执行: {{ job.next_run }}{% endif %}
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-primary btn-sm" onclick="runNow({{ task.id }})">立即执行</button>
+            <button class="btn btn-secondary btn-sm" onclick="toggleTask({{ task.id }})">
+                {{ '禁用' if task.enabled else '启用' }}
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="deleteTask({{ task.id }})">删除</button>
+        </div>
+    </div>
+    {% endfor %}
+    {% if not tasks %}
+    <div class="empty-state">暂无定时任务，点击"新建任务"创建</div>
+    {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    function showAddForm() { document.getElementById('add-form').style.display = 'block'; }
+    function hideAddForm() { document.getElementById('add-form').style.display = 'none'; }
+
+    async function addTask(e) {
+        e.preventDefault();
+        const form = new FormData(e.target);
+        const data = await apiCall('/api/schedule', 'POST', form);
+        if (data.success) {
+            showToast('任务创建成功');
+            setTimeout(() => location.reload(), 500);
+        } else {
+            showToast(data.message, 'error');
+        }
+    }
+
+    async function toggleTask(id) {
+        const data = await apiCall(`/api/schedule/${id}/toggle`, 'POST');
+        if (data.success) {
+            showToast(data.enabled ? '已启用' : '已禁用');
+            location.reload();
+        }
+    }
+
+    async function deleteTask(id) {
+        if (!confirm('确定删除此定时任务？')) return;
+        const data = await apiCall(`/api/schedule/${id}/delete`, 'POST');
+        if (data.success) {
+            showToast('已删除');
+            location.reload();
+        }
+    }
+
+    async function runNow(id) {
+        if (!confirm('确定立即执行此任务？')) return;
+        showToast('正在执行...');
+        const data = await apiCall(`/api/schedule/${id}/run`, 'POST');
+        showToast(data.message, data.success ? 'success' : 'error');
+    }
+</script>
+{% endblock %}

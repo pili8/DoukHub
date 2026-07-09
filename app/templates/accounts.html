@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}账号管理 - DoukHub{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>账号管理</h2>
+    <div>
+        <button class="btn btn-secondary" onclick="syncFeishu()">🔄 同步飞书</button>
+    </div>
+</div>
+
+<div class="card">
+    <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+        <select id="filter-platform" onchange="filterAccounts()">
+            <option value="">全部平台</option>
+            <option value="抖音">抖音</option>
+            <option value="TikTok">TikTok</option>
+            <option value="小红书">小红书</option>
+        </select>
+        <select id="filter-rating" onchange="filterAccounts()">
+            <option value="">全部评级</option>
+            <option value="5">⭐⭐⭐⭐⭐</option>
+            <option value="4">⭐⭐⭐⭐</option>
+            <option value="3">⭐⭐⭐</option>
+            <option value="2">⭐⭐</option>
+            <option value="1">⭐</option>
+        </select>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>名称</th>
+                <th>平台</th>
+                <th>评级</th>
+                <th>昵称</th>
+                <th>粉丝</th>
+                <th>作品</th>
+                <th>标签</th>
+                <th>启用</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody id="account-table">
+            {% for acc in accounts %}
+            <tr class="account-row" data-platform="{{ acc.platform }}" data-rating="{{ acc.rating }}">
+                <td>{{ acc.name }}</td>
+                <td><span class="platform-tag platform-{{ acc.platform }}">{{ acc.platform }}</span></td>
+                <td class="rating">{{ '⭐' * acc.rating }}</td>
+                <td>{{ acc.nickname or '-' }}</td>
+                <td>{{ acc.follower_count if acc.follower_count else '-' }}</td>
+                <td>{{ acc.aweme_count if acc.aweme_count else '-' }}</td>
+                <td>
+                    {% for tag in acc.tags %}
+                    <span class="tag">{{ tag }}</span>
+                    {% endfor %}
+                </td>
+                <td>{{ '🟢' if acc.enabled else '🔴' }}</td>
+                <td><a href="{{ acc.link }}" target="_blank" class="btn btn-secondary btn-sm">查看</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if not accounts %}
+    <div class="empty-state">暂无账号数据，请先同步飞书配置</div>
+    {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+    function filterAccounts() {
+        const platform = document.getElementById('filter-platform').value;
+        const rating = document.getElementById('filter-rating').value;
+        document.querySelectorAll('.account-row').forEach(row => {
+            const matchPlatform = !platform || row.dataset.platform === platform;
+            const matchRating = !rating || parseInt(row.dataset.rating) >= parseInt(rating);
+            row.style.display = (matchPlatform && matchRating) ? '' : 'none';
+        });
+    }
+    async function syncFeishu() {
+        showToast('正在同步飞书...');
+        const data = await apiCall('/api/sync', 'POST');
+        if (data.success) {
+            showToast(data.message);
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showToast(data.message, 'error');
+        }
+    }
+</script>
+{% endblock %}

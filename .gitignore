@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+
+# 配置（含敏感信息）
+config/doukhub.json
+
+# 数据文件
+app/data/
+*.db
+
+# macOS
+.DS_Store
+DoukHub.app/
+
+# 子项目（独立仓库）
+TikTokDownloader/
+XHS-Downloader/
+
+# 临时文件
+*_launcher.py
+*.log

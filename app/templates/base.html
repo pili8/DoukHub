@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}DoukHub{% endblock %}</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; }
+        .layout { display: flex; min-height: 100vh; }
+        .sidebar { width: 200px; background: #1a1a2e; color: #fff; padding: 20px 0; flex-shrink: 0; position: relative; }
+        .sidebar h1 { font-size: 20px; padding: 0 20px 20px; border-bottom: 1px solid #333; margin-bottom: 10px; }
+        .sidebar a { display: block; padding: 12px 20px; color: #ccc; text-decoration: none; transition: all 0.2s; }
+        .sidebar a:hover, .sidebar a.active { background: #16213e; color: #fff; border-left: 3px solid #e94560; }
+        .main { flex: 1; padding: 24px; max-width: 1200px; }
+        .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .page-header h2 { font-size: 24px; }
+        .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .card h3 { margin-bottom: 12px; font-size: 16px; color: #555; }
+        .btn { display: inline-block; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+        .btn-primary { background: #e94560; color: #fff; }
+        .btn-primary:hover { background: #c73e54; }
+        .btn-secondary { background: #eee; color: #333; }
+        .btn-secondary:hover { background: #ddd; }
+        .btn-success { background: #27ae60; color: #fff; }
+        .btn-success:hover { background: #219a52; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+        .status-running { background: #27ae60; }
+        .status-stopped { background: #e74c3c; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; font-weight: 600; font-size: 13px; color: #666; }
+        tr:hover { background: #f8f9fa; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+        .form-group textarea { min-height: 100px; resize: vertical; }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: #fff; border-radius: 8px; padding: 20px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .stat-card .number { font-size: 32px; font-weight: bold; color: #e94560; }
+        .stat-card .label { font-size: 13px; color: #888; margin-top: 4px; }
+        .service-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px; }
+        .service-card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .service-card .name { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+        .service-card .port { font-size: 13px; color: #888; }
+        .toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; color: #fff; z-index: 1000; display: none; }
+        .toast-success { background: #27ae60; }
+        .toast-error { background: #e74c3c; }
+        .loading { opacity: 0.5; pointer-events: none; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; background: #eee; color: #666; margin-right: 4px; }
+        .rating { color: #f39c12; }
+        .platform-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+        .platform-抖音 { background: #fff3e0; color: #e65100; }
+        .platform-TikTok { background: #e3f2fd; color: #1565c0; }
+        .platform-小红书 { background: #fce4ec; color: #c62828; }
+        .empty-state { text-align: center; padding: 40px; color: #999; }
+    </style>
+</head>
+<body>
+    <div class="layout">
+        <nav class="sidebar">
+            <h1>DoukHub</h1>
+            <a href="/" class="{% if page == 'dashboard' %}active{% endif %}">📊 仪表盘</a>
+            <a href="/accounts" class="{% if page == 'accounts' %}active{% endif %}">👤 账号</a>
+            <a href="/collect" class="{% if page == 'collect' %}active{% endif %}">📥 采集</a>
+            <a href="/schedule" class="{% if page == 'schedule' %}active{% endif %}">⏰ 定时</a>
+            <a href="/history" class="{% if page == 'history' %}active{% endif %}">📋 记录</a>
+            <a href="/duplicates" class="{% if page == 'duplicates' %}active{% endif %}">🔍 查重</a>
+            <a href="/settings" class="{% if page == 'settings' %}active{% endif %}">⚙️ 设置</a>
+            <div style="position:absolute;bottom:20px;left:0;right:0;padding:0 20px;">
+                <button onclick="restartSystem()" style="width:100%;padding:8px;margin-bottom:8px;background:#2c3e50;color:#ccc;border:none;border-radius:4px;cursor:pointer;font-size:13px;">🔄 重启</button>
+                <button onclick="exitSystem()" style="width:100%;padding:8px;background:#c0392b;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;">⏻ 退出</button>
+            </div>
+        </nav>
+        <main class="main">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+    <div id="toast" class="toast"></div>
+    <script>
+        function showToast(msg, type = 'success') {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast toast-' + type;
+            t.style.display = 'block';
+            setTimeout(() => t.style.display = 'none', 3000);
+        }
+        async function apiCall(url, method = 'GET', body = null) {
+            const opts = { method };
+            if (body) {
+                if (body instanceof FormData) {
+                    opts.body = body;
+                } else {
+                    opts.headers = { 'Content-Type': 'application/json' };
+                    opts.body = JSON.stringify(body);
+                }
+            }
+            const resp = await fetch(url, opts);
+            return resp.json();
+        }
+        async function restartSystem() {
+            if (!confirm('确定要重启 DoukHub 吗？')) return;
+            showToast('正在重启...');
+            await apiCall('/api/system/restart', 'POST');
+            // 等待服务重启后刷新页面
+            setTimeout(() => location.reload(), 3000);
+        }
+        async function exitSystem() {
+            if (!confirm('确定要退出 DoukHub 吗？')) return;
+            showToast('正在退出...');
+            await apiCall('/api/system/exit', 'POST');
+            // 显示退出提示
+            setTimeout(() => {
+                document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-size:18px;color:#666;">DoukHub 已退出，可以关闭此窗口</div>';
+            }, 1500);
+        }
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

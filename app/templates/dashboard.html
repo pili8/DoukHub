@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 - DoukHub{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>仪表盘</h2>
+    <div>
+        <button class="btn btn-secondary" onclick="syncFeishu()">🔄 同步飞书</button>
+        <a href="/collect" class="btn btn-primary">📥 开始采集</a>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="number" id="stat-today">{{ stats.today }}</div>
+        <div class="label">今日采集</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="stat-total">{{ stats.total }}</div>
+        <div class="label">总采集次数</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" style="color:#27ae60" id="stat-success">{{ stats.success }}</div>
+        <div class="label">成功</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" style="color:#e74c3c" id="stat-failed">{{ stats.failed }}</div>
+        <div class="label">失败</div>
+    </div>
+</div>
+
+<div class="service-grid">
+    {% for svc in services %}
+    <div class="service-card" id="svc-{{ svc.name }}">
+        <div class="name">
+            <span class="status-dot {{ 'status-running' if svc.running else 'status-stopped' }}"></span>
+            {{ svc.name }}
+        </div>
+        <div class="port">端口: {{ svc.port }} | {{ svc.url }}</div>
+        <div style="margin-top: 12px;">
+            {% if svc.running %}
+            <button class="btn btn-danger btn-sm" onclick="stopService('{{ svc.name }}')">停止</button>
+            {% else %}
+            <button class="btn btn-success btn-sm" onclick="startService('{{ svc.name }}')">启动</button>
+            {% endif %}
+            <button class="btn btn-secondary btn-sm" onclick="updateService('{{ svc.name }}')">更新</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if jobs %}
+<div class="card">
+    <h3>定时任务</h3>
+    <table>
+        <tr><th>任务</th><th>下次执行</th></tr>
+        {% for job in jobs %}
+        <tr>
+            <td>{{ job.name }}</td>
+            <td>{{ job.next_run or '-' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+    async function syncFeishu() {
+        showToast('正在同步飞书...');
+        const data = await apiCall('/api/sync', 'POST');
+        if (data.success) {
+            showToast(data.message);
+            if (data.duplicate_count > 0) {
+                showToast(`发现 ${data.duplicate_count} 个重复账号，请前往查重页面处理`, 'error');
+            }
+        } else {
+            showToast(data.message, 'error');
+        }
+    }
+    async function startService(name) {
+        const data = await apiCall(`/api/services/${name}/start`, 'POST');
+        showToast(data.message, data.success ? 'success' : 'error');
+        if (data.success) setTimeout(() => location.reload(), 2000);
+    }
+    async function stopService(name) {
+        const data = await apiCall(`/api/services/${name}/stop`, 'POST');
+        showToast(data.message, data.success ? 'success' : 'error');
+        if (data.success) setTimeout(() => location.reload(), 1000);
+    }
+    async function updateService(name) {
+        if (!confirm(`确定更新 ${name}？正在运行的服务会自动重启。`)) return;
+        showToast(`正在更新 ${name}...`);
+        const data = await apiCall(`/api/services/${name}/update`, 'POST');
+        showToast(data.message, data.success ? 'success' : 'error');
+        if (data.success) setTimeout(() => location.reload(), 2000);
+    }
+</script>
+{% endblock %}

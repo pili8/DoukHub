@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+httpx
+openpyxl
+jinja2
+python-multipart
+apscheduler

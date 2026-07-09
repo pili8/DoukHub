@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}采集记录 - DoukHub{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>采集记录</h2>
+</div>
+
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>账号</th>
+                <th>平台</th>
+                <th>类型</th>
+                <th>作品数</th>
+                <th>状态</th>
+                <th>耗时</th>
+                <th>时间</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in records %}
+            <tr>
+                <td>{{ r.id }}</td>
+                <td>{{ r.account_name }}</td>
+                <td>{{ r.platform }}</td>
+                <td>{{ r.collection_type }}</td>
+                <td>{{ r.works_count }}</td>
+                <td>
+                    {% if r.status == 'success' %}✅
+                    {% elif r.status == 'failed' %}❌
+                    {% else %}⏳{% endif %}
+                </td>
+                <td>{{ '%.1f'|format(r.duration_seconds) }}s</td>
+                <td>{{ r.started_at or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if not records %}
+    <div class="empty-state">暂无采集记录</div>
+    {% endif %}
+</div>
+{% endblock %}

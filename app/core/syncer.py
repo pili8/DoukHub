@@ -1,0 +1,408 @@
+"""飞书同步引擎 — 读取采集表 → 解析短链接 → 获取账号信息 → 写入账号表"""
+import asyncio
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import openpyxl
+
+from .collector import Account, Collector
+from .feishu import FeishuClient
+from .link_resolver import detect_platform, extract_sec_user_id, extract_url_from_text
+
+
+# 飞书账号表字段名 → Account 属性名 的映射
+ACCOUNT_FIELD_MAP = {
+    "账号名称": "name",
+    "平台": "platform",
+    "链接": "link",
+    "采集类型": "collection_type",
+    "代理": "proxy",
+    "启用": "enabled",
+    "等级": "rating",
+    "标签": "tags",
+    "备注": "note",
+    "sec_user_id": "sec_user_id",
+    "昵称": "nickname",
+    "粉丝数": "follower_count",
+    "作品数": "aweme_count",
+    "签名": "signature",
+    "头像": "avatar",
+    "同步时间": "synced_at",
+}
+
+# 采集表字段名
+COLLECTION_FIELDS = {
+    "地址": "link",
+    "等级": "rating",
+    "标签": "tags",
+    "账号名称": "name",
+    "平台": "platform",
+    "备注": "note",
+    "sec_user_id": "sec_user_id",
+    "昵称": "nickname",
+    "粉丝数": "follower_count",
+    "作品数": "aweme_count",
+    "签名": "signature",
+    "头像": "avatar",
+    "同步状态": "sync_status",
+    "同步时间": "synced_at",
+}
+
+# Cookie 表字段名
+COOKIE_FIELDS = {
+    "Cookie": "cookie",
+    "平台": "platform",
+    "状态": "status",
+    "启用": "enabled",
+    "备注": "note",
+    "最后验证时间": "verified_at",
+}
+
+
+def _parse_rating(value: Any) -> int:
+    """解析评级字段 — 支持数字和文本混合格式（如 '个3' → 3）"""
+    if isinstance(value, (int, float)):
+        return max(1, min(4, int(value)))
+    if isinstance(value, str):
+        # 提取文本中的数字
+        import re
+        numbers = re.findall(r"\d+", value)
+        if numbers:
+            return max(1, min(4, int(numbers[0])))
+    return 3  # 默认 3 星
+
+
+def _parse_tags(value: Any) -> list[str]:
+    """解析标签字段"""
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    if isinstance(value, str):
+        return [t.strip() for t in value.split(",") if t.strip()]
+    return []
+
+
+def _parse_enabled(value: Any) -> bool:
+    """解析启用字段"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "是", "1", "yes")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return True
+
+
+def _parse_collection_record(record: dict) -> dict:
+    """解析采集表记录为 dict"""
+    fields = record.get("fields", {})
+    data = {"record_id": record.get("record_id", "")}
+
+    for feishu_name, attr_name in COLLECTION_FIELDS.items():
+        value = fields.get(feishu_name)
+        if value is None:
+            continue
+
+        if attr_name == "rating":
+            data[attr_name] = _parse_rating(value)
+        elif attr_name == "tags":
+            data[attr_name] = _parse_tags(value)
+        elif attr_name == "enabled":
+            data[attr_name] = _parse_enabled(value)
+        elif attr_name in ("follower_count", "aweme_count"):
+            try:
+                data[attr_name] = int(value)
+            except (ValueError, TypeError):
+                data[attr_name] = 0
+        elif attr_name == "link":
+            if isinstance(value, dict):
+                data[attr_name] = value.get("link", value.get("text", ""))
+            else:
+                data[attr_name] = str(value)
+        else:
+            data[attr_name] = str(value) if value else ""
+
+    return data
+
+
+def _parse_cookie_record(record: dict) -> dict:
+    """解析 Cookie 表记录"""
+    fields = record.get("fields", {})
+    data = {"record_id": record.get("record_id", "")}
+
+    for feishu_name, attr_name in COOKIE_FIELDS.items():
+        value = fields.get(feishu_name)
+        if value is None:
+            continue
+        if attr_name == "enabled":
+            data[attr_name] = _parse_enabled(value)
+        else:
+            data[attr_name] = str(value) if value else ""
+
+    return data
+
+
+class SyncResult:
+    """同步结果"""
+
+    def __init__(self):
+        self.total: int = 0
+        self.new_accounts: int = 0
+        self.updated_accounts: int = 0
+        self.errors: list[str] = []
+        self.success: bool = False
+        self.message: str = ""
+
+    @property
+    def summary(self) -> str:
+        parts = [f"共 {self.total} 条记录"]
+        if self.new_accounts:
+            parts.append(f"新增 {self.new_accounts} 个")
+        if self.updated_accounts:
+            parts.append(f"更新 {self.updated_accounts} 个")
+        if self.errors:
+            parts.append(f"{len(self.errors)} 个错误")
+        return "，".join(parts)
+
+
+class Syncer:
+    """飞书同步引擎"""
+
+    def __init__(
+        self,
+        feishu: FeishuClient,
+        collector: Collector,
+        app_token: str,
+        collection_table_id: str,
+        account_table_id: str,
+        cookie_table_id: str = "",
+        data_dir: Path = None,
+    ):
+        self.feishu = feishu
+        self.collector = collector
+        self.app_token = app_token
+        self.collection_table_id = collection_table_id
+        self.account_table_id = account_table_id
+        self.cookie_table_id = cookie_table_id
+        self.data_dir = data_dir
+        self.accounts_file = data_dir / "accounts.xlsx" if data_dir else None
+        self.cookies_file = data_dir / "cookies.xlsx" if data_dir else None
+
+    async def sync(self) -> SyncResult:
+        """执行同步：采集表 → 解析短链接 → 获取账号信息 → 写入账号表"""
+        result = SyncResult()
+
+        try:
+            # 1. 读取采集表全部记录
+            records = self.feishu.get_all_records(self.app_token, self.collection_table_id)
+            result.total = len(records)
+
+            # 2. 解析记录
+            entries = [_parse_collection_record(r) for r in records]
+            entries = [e for e in entries if e.get("link")]  # 过滤空链接
+
+            # 3. 获取 Cookie 池
+            cookies = self.load_local_cookies()
+            active_cookies = [c["cookie"] for c in cookies if c.get("enabled", True) and c.get("status", "正常") == "正常"]
+
+            # 4. 加载已有账号（按 sec_user_id 去重）
+            existing_accounts = {}
+            if self.accounts_file and self.accounts_file.exists():
+                for acc in self.load_local_accounts():
+                    if acc.sec_user_id:
+                        existing_accounts[acc.sec_user_id] = acc
+
+            # 5. 逐条处理
+            for entry in entries:
+                link = entry["link"]
+                rating = entry.get("rating", 3)
+                record_id = entry["record_id"]
+
+                try:
+                    # 平台识别（纯正则）
+                    platform = entry.get("platform", "") or detect_platform(link)
+
+                    # 通过 TTD API 解析短链接 → 获取完整 URL
+                    cookie = active_cookies[0] if active_cookies else ""
+                    resolved_url = await self.collector.resolve_short_url(link, platform)
+
+                    # 从完整 URL 中提取 sec_user_id（纯正则）
+                    sec_user_id = extract_sec_user_id(resolved_url, platform)
+
+                    if not sec_user_id:
+                        self._update_collection_status(record_id, "失败", "无法解析短链接")
+                        result.errors.append(f"{link}: 无法解析")
+                        continue
+
+                    # 通过 TTD API 获取账号详情
+                    info = await self.collector.get_account_info(sec_user_id, platform, cookie)
+
+                    # 构建 Account
+                    account = Account(
+                        name=entry.get("name", "") or info.get("nickname", ""),
+                        platform=platform,
+                        link=resolved_url or link,
+                        rating=rating,
+                        tags=entry.get("tags", []),
+                        note=entry.get("note", ""),
+                        sec_user_id=sec_user_id,
+                        nickname=info.get("nickname", ""),
+                        follower_count=info.get("follower_count", 0),
+                        aweme_count=info.get("aweme_count", 0),
+                        signature=info.get("signature", ""),
+                        avatar=info.get("avatar", ""),
+                        synced_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        enabled=True,
+                    )
+
+                    # 写入或更新
+                    if sec_user_id in existing_accounts:
+                        result.updated_accounts += 1
+                    else:
+                        result.new_accounts += 1
+                        existing_accounts[sec_user_id] = account
+
+                    # 更新采集表状态
+                    self._update_collection_status(record_id, "已同步", "", sec_user_id)
+
+                except Exception as e:
+                    self._update_collection_status(record_id, "失败", str(e))
+                    result.errors.append(f"{link}: {e}")
+
+            # 6. 保存本地账号缓存
+            self._save_local_xlsx(list(existing_accounts.values()))
+
+            result.success = True
+            result.message = result.summary
+
+        except Exception as e:
+            result.success = False
+            result.message = f"同步失败: {e}"
+
+        return result
+
+    def _update_collection_status(self, record_id: str, status: str, error: str = "", sec_user_id: str = "") -> None:
+        """更新采集表中的同步状态"""
+        if not record_id:
+            return
+        fields = {
+            "同步状态": status,
+            "同步时间": int(datetime.now().timestamp() * 1000),  # 飞书日期字段需要毫秒时间戳
+        }
+        if sec_user_id:
+            fields["sec_user_id"] = sec_user_id
+        try:
+            self.feishu.update_record(
+                self.app_token, self.collection_table_id, record_id, fields
+            )
+        except Exception:
+            pass  # 回填失败不影响主流程
+
+    def _save_local_xlsx(self, accounts: list[Account]) -> None:
+        """保存账号列表到本地 XLSX"""
+        if not self.accounts_file:
+            return
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "账号列表"
+
+        headers = list(ACCOUNT_FIELD_MAP.keys())
+        ws.append(headers)
+
+        for acc in accounts:
+            row = []
+            for feishu_name, attr_name in ACCOUNT_FIELD_MAP.items():
+                value = getattr(acc, attr_name, "")
+                if isinstance(value, list):
+                    value = ", ".join(value)
+                row.append(value)
+            ws.append(row)
+
+        self.accounts_file.parent.mkdir(parents=True, exist_ok=True)
+        wb.save(str(self.accounts_file))
+
+    def load_local_accounts(self) -> list[Account]:
+        """从本地 XLSX 加载账号列表"""
+        if not self.accounts_file or not self.accounts_file.exists():
+            return []
+
+        wb = openpyxl.load_workbook(str(self.accounts_file))
+        ws = wb.active
+        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        headers = list(ACCOUNT_FIELD_MAP.keys())
+
+        accounts = []
+        for row in rows:
+            data = dict(zip(headers, row))
+            account = Account()
+            for feishu_name, attr_name in ACCOUNT_FIELD_MAP.items():
+                value = data.get(feishu_name)
+                if attr_name == "rating":
+                    setattr(account, attr_name, _parse_rating(value))
+                elif attr_name == "tags":
+                    setattr(account, attr_name, _parse_tags(value))
+                elif attr_name == "enabled":
+                    setattr(account, attr_name, _parse_enabled(value))
+                elif attr_name in ("follower_count", "aweme_count"):
+                    try:
+                        setattr(account, attr_name, int(value or 0))
+                    except (ValueError, TypeError):
+                        setattr(account, attr_name, 0)
+                else:
+                    setattr(account, attr_name, str(value) if value else "")
+            accounts.append(account)
+
+        wb.close()
+        return accounts
+
+    def load_local_cookies(self) -> list[dict]:
+        """从本地 XLSX 加载 Cookie 列表"""
+        if not self.cookies_file or not self.cookies_file.exists():
+            return []
+
+        wb = openpyxl.load_workbook(str(self.cookies_file))
+        ws = wb.active
+        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        headers = list(COOKIE_FIELDS.keys())
+
+        cookies = []
+        for row in rows:
+            data = dict(zip(headers, row))
+            cookie = {}
+            for feishu_name, attr_name in COOKIE_FIELDS.items():
+                value = data.get(feishu_name)
+                if attr_name == "enabled":
+                    cookie[attr_name] = _parse_enabled(value)
+                else:
+                    cookie[attr_name] = str(value) if value else ""
+            cookies.append(cookie)
+
+        wb.close()
+        return cookies
+
+    def sync_cookies(self) -> dict:
+        """同步 Cookie 表到本地"""
+        if not self.cookie_table_id:
+            return {"success": False, "message": "未配置 Cookie 表"}
+
+        try:
+            records = self.feishu.get_all_records(self.app_token, self.cookie_table_id)
+            cookies = [_parse_cookie_record(r) for r in records]
+
+            # 保存到本地
+            if self.cookies_file:
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = "Cookie 池"
+                headers = list(COOKIE_FIELDS.keys())
+                ws.append(headers)
+                for c in cookies:
+                    row = [c.get(attr, "") for attr in COOKIE_FIELDS.values()]
+                    ws.append(row)
+                self.cookies_file.parent.mkdir(parents=True, exist_ok=True)
+                wb.save(str(self.cookies_file))
+
+            return {"success": True, "message": f"同步 {len(cookies)} 个 Cookie"}
+        except Exception as e:
+            return {"success": False, "message": f"同步失败: {e}"}
