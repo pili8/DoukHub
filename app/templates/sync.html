@@ -31,6 +31,32 @@
     </div>
 </div>
 
+<!-- 数据导入 -->
+<div class="card">
+    <h3>📥 数据导入 <span style="font-size:13px;color:#888;font-weight:normal;">（解析原始数据到采集表）</span></h3>
+    <div class="form-group">
+        <label>粘贴数据或拖拽文件到下方（格式：标签等级@地址，如 个2@iMLuCKjq）</label>
+        <textarea id="import-text" rows="10" placeholder="街拍@iMLuCKjq&#10;个2@iMLuGfEv&#10;分享2@iMNmCtfn&#10;图3@iMFHdYNA&#10;..." style="font-family:monospace;font-size:13px;" ondrop="handleDrop(event)" ondragover="event.preventDefault()" ondragenter="this.style.borderColor='#e94560'" ondragleave="this.style.borderColor=''"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" onclick="parseImport()">🔍 解析预览</button>
+        <button class="btn btn-primary" onclick="writeToFeishu()" id="write-btn" style="display:none;">📤 写入采集表</button>
+        <span id="import-status" style="line-height:36px;color:#888;font-size:13px;"></span>
+    </div>
+    <div id="import-preview" style="display:none;margin-top:16px;">
+        <table>
+            <thead>
+                <tr>
+                    <th>地址</th>
+                    <th>等级</th>
+                    <th>标签</th>
+                </tr>
+            </thead>
+            <tbody id="preview-body"></tbody>
+        </table>
+    </div>
+</div>
+
 <!-- 同步进度 -->
 <div class="card" id="progress-card" style="display:none;">
     <h3>同步进度</h3>
@@ -210,6 +236,106 @@
         const data = await apiCall(`/api/services/${name}/${action}`, 'POST');
         showToast(data.message, data.success ? 'success' : 'error');
         if (data.success) setTimeout(() => location.reload(), 1000);
+    }
+
+    // 数据导入功能
+    let parsedData = [];
+
+    function handleDrop(event) {
+        event.preventDefault();
+        event.target.style.borderColor = '';
+        const files = event.dataTransfer.files;
+        if (files.length > 0) {
+            const file = files[0];
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                document.getElementById('import-text').value = e.target.result;
+                document.getElementById('import-status').textContent = `已加载文件: ${file.name}`;
+            };
+            reader.readAsText(file);
+        }
+    }
+
+    function parseImport() {
+        const text = document.getElementById('import-text').value.trim();
+        if (!text) {
+            showToast('请输入数据', 'error');
+            return;
+        }
+
+        const lines = text.split('\n').filter(l => l.trim());
+        parsedData = [];
+
+        for (const line of lines) {
+            const match = line.match(/^(.+?)@(.+)$/);
+            if (match) {
+                const prefix = match[1].trim();
+                const link = match[2].trim();
+                
+                // 提取等级（末尾数字）
+                const ratingMatch = prefix.match(/(\d)$/);
+                let rating = 3; // 默认3星
+                let tagsStr = prefix;
+                
+                if (ratingMatch) {
+                    rating = parseInt(ratingMatch[1]);
+                    tagsStr = prefix.slice(0, -1);
+                }
+                
+                // 标签就是剩余的部分
+                const tags = tagsStr ? [tagsStr] : [];
+                
+                parsedData.push({ link, rating, tags });
+            }
+        }
+
+        if (parsedData.length === 0) {
+            showToast('未解析到有效数据', 'error');
+            return;
+        }
+
+        // 显示预览
+        const previewBody = document.getElementById('preview-body');
+        previewBody.innerHTML = parsedData.map(item => `
+            <tr>
+                <td><code>${item.link}</code></td>
+                <td>${'⭐'.repeat(item.rating)}</td>
+                <td>${item.tags.map(t => `<span class="tag">${t}</span>`).join('')}</td>
+            </tr>
+        `).join('');
+        
+        document.getElementById('import-preview').style.display = 'block';
+        document.getElementById('write-btn').style.display = 'inline-block';
+        document.getElementById('import-status').textContent = `解析完成: ${parsedData.length} 条记录`;
+    }
+
+    async function writeToFeishu() {
+        if (parsedData.length === 0) {
+            showToast('没有可写入的数据', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('write-btn');
+        btn.disabled = true;
+        btn.textContent = '写入中...';
+
+        try {
+            const data = await apiCall('/api/import/collection', 'POST', { items: parsedData });
+            if (data.success) {
+                showToast(`成功写入 ${data.count} 条记录到采集表`, 'success');
+                document.getElementById('import-text').value = '';
+                document.getElementById('import-preview').style.display = 'none';
+                document.getElementById('write-btn').style.display = 'none';
+                parsedData = [];
+            } else {
+                showToast(data.message || '写入失败', 'error');
+            }
+        } catch (e) {
+            showToast(`写入失败: ${e.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '📤 写入采集表';
+        }
     }
 </script>
 {% endblock %}

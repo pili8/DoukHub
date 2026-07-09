@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 
 from .core.config import Config
 from .core.feishu import FeishuClient
@@ -312,6 +313,54 @@ async def api_sync():
         "api_calls": result.api_calls,
         "error_count": len(result.errors),
         "errors": result.errors,
+    }
+
+
+class ImportItem(BaseModel):
+    link: str
+    rating: int = 3
+    tags: list[str] = []
+
+
+class ImportCollectionRequest(BaseModel):
+    items: list[ImportItem]
+
+
+@app.post("/api/import/collection")
+async def api_import_collection(request: ImportCollectionRequest):
+    """将解析后的数据写入飞书采集表"""
+    f = get_feishu()
+    if not f:
+        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
+
+    app_token = config.feishu.get("app_token", "")
+    table_id = config.feishu.get("collection_table_id", "")
+    if not app_token or not table_id:
+        return JSONResponse({"success": False, "message": "未配置采集表 Table ID"}, status_code=400)
+
+    success_count = 0
+    errors = []
+
+    for item in request.items:
+        try:
+            fields = {
+                "地址": item.link,
+                "等级": item.rating,
+                "同步状态": "待同步",
+            }
+            if item.tags:
+                fields["标签"] = item.tags
+            
+            f.create_record(app_token, table_id, fields)
+            success_count += 1
+        except Exception as e:
+            errors.append(f"{item.link}: {e}")
+
+    return {
+        "success": len(errors) == 0,
+        "message": f"成功写入 {success_count} 条" + (f"，{len(errors)} 条失败" if errors else ""),
+        "count": success_count,
+        "errors": errors,
     }
 
 
