@@ -331,7 +331,7 @@ class ImportCollectionRequest(BaseModel):
 
 @app.post("/api/import/collection")
 async def api_import_collection(request: ImportCollectionRequest):
-    """将解析后的数据写入飞书采集表"""
+    """将解析后的数据写入飞书采集表（批量写入，一次最多500条）"""
     f = get_feishu()
     if not f:
         return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
@@ -341,29 +341,39 @@ async def api_import_collection(request: ImportCollectionRequest):
     if not app_token or not table_id:
         return JSONResponse({"success": False, "message": "未配置采集表 Table ID"}, status_code=400)
 
+    # 构建批量记录
+    records = []
+    for item in request.items:
+        fields = {
+            "地址": item.link,
+            "等级": item.rating,
+            "同步状态": "待同步",
+        }
+        if item.tags:
+            fields["标签"] = item.tags
+        if item.name:
+            fields["账号名称"] = item.name
+        if item.follower_count:
+            fields["粉丝数"] = item.follower_count
+        if item.aweme_count:
+            fields["作品数"] = item.aweme_count
+        records.append({"fields": fields})
+
     success_count = 0
     errors = []
 
-    for item in request.items:
+    # 分批写入，每批最多 500 条
+    batch_size = 500
+    for i in range(0, len(records), batch_size):
+        batch = records[i:i + batch_size]
         try:
-            fields = {
-                "地址": item.link,
-                "等级": item.rating,
-                "同步状态": "待同步",
-            }
-            if item.tags:
-                fields["标签"] = item.tags
-            if item.name:
-                fields["账号名称"] = item.name
-            if item.follower_count:
-                fields["粉丝数"] = item.follower_count
-            if item.aweme_count:
-                fields["作品数"] = item.aweme_count
-
-            f.create_record(app_token, table_id, fields)
-            success_count += 1
+            result = f.batch_create_records(app_token, table_id, batch)
+            if result.get("code") == 0:
+                success_count += len(batch)
+            else:
+                errors.append(f"批次 {i//batch_size + 1}: {result.get('msg', '未知错误')}")
         except Exception as e:
-            errors.append(f"{item.link}: {e}")
+            errors.append(f"批次 {i//batch_size + 1}: {e}")
 
     return {
         "success": len(errors) == 0,

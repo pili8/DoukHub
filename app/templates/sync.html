@@ -421,34 +421,37 @@
         progressBar.style.width = '0%';
 
         const total = parsedData.length;
-        let success = 0, failed = 0;
+        progressText.textContent = `批量写入 ${total} 条记录...`;
+        progressCount.textContent = `1 批次 (≤500条/批)`;
+        addLog(logBox, `<div class="log-info">→ 正在批量写入 ${total} 条记录...</div>`);
+        progressBar.style.width = '30%';
 
-        for (let i = 0; i < total; i++) {
-            const item = parsedData[i];
-            const pct = Math.round(((i + 1) / total) * 100);
-            progressBar.style.width = pct + '%';
-            progressText.textContent = `正在写入: ${item.link}`;
-            progressCount.textContent = `${i + 1}/${total}`;
-
-            try {
-                const data = await apiCall('/api/import/collection', 'POST', { items: [item] });
-                if (data.success) {
-                    success++;
-                    addLog(logBox, `<div class="log-ok">✅ [${i+1}/${total}] ${item.link} → 写入成功</div>`);
-                } else {
-                    failed++;
-                    addLog(logBox, `<div class="log-err">❌ [${i+1}/${total}] ${item.link} → ${data.message}</div>`);
+        try {
+            // 一次性发送所有数据，后端分批处理
+            const data = await apiCall('/api/import/collection', 'POST', { items: parsedData });
+            
+            progressBar.style.width = '100%';
+            
+            if (data.success) {
+                addLog(logBox, `<div class="log-ok">✅ 写入完成: ${data.count} 条成功</div>`);
+                progressText.textContent = `完成: 成功 ${data.count} 条`;
+                showToast(`写入完成: ${data.count} 条`, 'success');
+            } else {
+                addLog(logBox, `<div class="log-err">❌ ${data.message}</div>`);
+                if (data.errors) {
+                    data.errors.forEach(e => addLog(logBox, `<div class="log-err">  → ${e}</div>`));
                 }
-            } catch (e) {
-                failed++;
-                addLog(logBox, `<div class="log-err">❌ [${i+1}/${total}] ${item.link} → ${e.message}</div>`);
+                progressText.textContent = data.message;
+                showToast(data.message, 'error');
             }
+        } catch (e) {
+            addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
+            progressText.textContent = `请求失败`;
+            showToast('写入请求失败', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '📤 写入采集表';
         }
-
-        progressText.textContent = `完成: 成功 ${success} 条，失败 ${failed} 条`;
-        btn.disabled = false;
-        btn.textContent = '📤 写入采集表';
-        showToast(`写入完成: ${success} 成功, ${failed} 失败`, failed ? 'error' : 'success');
     }
 
     // ========== 同步 ==========
