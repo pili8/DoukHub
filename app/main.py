@@ -166,9 +166,17 @@ async def page_sync(request: Request):
 async def page_collect(request: Request):
     s = get_syncer()
     accounts = s.load_local_accounts() if s else []
+    h = get_history()
+    tasks = h.get_tasks()
+    sched = get_scheduler()
+    jobs_info = {j["id"]: j for j in sched.get_jobs_info()}
+    for task in tasks:
+        job = jobs_info.get(f"task_{task['id']}")
+        task["next_run"] = job["next_run"] if job else None
     return templates.TemplateResponse(request, "collect.html", context={
         "request": request,
         "accounts": accounts,
+        "tasks": tasks,
         "page": "collect",
     })
 

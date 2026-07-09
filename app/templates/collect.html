@@ -2,16 +2,28 @@
 {% block title %}采集 - DoukHub{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>采集任务</h2>
+    <h2>采集</h2>
 </div>
 
-<div class="card">
+<!-- 采集方式选择 -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+    <div class="card" style="cursor:pointer;transition:all 0.2s;" onclick="showCollectMode('account')" id="mode-account-btn">
+        <h3 style="margin-bottom:8px;">📥 整号采集</h3>
+        <p style="font-size:13px;color:#666;">按账号批量采集所有作品，支持评级筛选</p>
+    </div>
+    <div class="card" style="cursor:pointer;transition:all 0.2s;" onclick="showCollectMode('detail')" id="mode-detail-btn">
+        <h3 style="margin-bottom:8px;">🔗 单品采集</h3>
+        <p style="font-size:13px;color:#666;">粘贴作品链接，采集指定作品</p>
+    </div>
+</div>
+
+<!-- 整号采集 -->
+<div class="card" id="account-form-card">
     <h3>📥 整号采集</h3>
     <form id="account-form" onsubmit="submitAccountCollect(event)">
         <div class="form-group">
-            <label>评级筛选（只采集选中星级以上）</label>
-            <div style="display: flex; gap: 12px;">
-                <label><input type="checkbox" name="rating" value="5" checked> ⭐⭐⭐⭐⭐</label>
+            <label>等级筛选（只采集选中等级以上）</label>
+            <div style="display:flex;gap:16px;">
                 <label><input type="checkbox" name="rating" value="4" checked> ⭐⭐⭐⭐</label>
                 <label><input type="checkbox" name="rating" value="3" checked> ⭐⭐⭐</label>
                 <label><input type="checkbox" name="rating" value="2"> ⭐⭐</label>
@@ -22,76 +34,323 @@
             <label>指定账号（留空=采集所有符合条件的账号）</label>
             <input type="text" name="account_names" placeholder="输入账号名称，多个用逗号分隔">
         </div>
-        <button type="submit" class="btn btn-primary">开始整号采集</button>
+        <button type="submit" class="btn btn-primary" id="account-submit">开始整号采集</button>
     </form>
 </div>
 
-<div class="card">
+<!-- 单品采集 -->
+<div class="card" id="detail-form-card" style="display:none;">
     <h3>🔗 单品采集</h3>
     <form id="detail-form" onsubmit="submitDetailCollect(event)">
         <div class="form-group">
             <label>粘贴作品链接（支持多个，一行一个，自动识别平台）</label>
-            <textarea name="links" rows="6" placeholder="https://www.douyin.com/video/...&#10;https://www.xiaohongshu.com/explore/..."></textarea>
+            <textarea name="links" rows="6" placeholder="https://www.douyin.com/video/...&#10;https://www.xiaohongshu.com/explore/...&#10;m3HL2u1R1YM（短链接也行）"></textarea>
         </div>
-        <button type="submit" class="btn btn-primary">开始单品采集</button>
+        <button type="submit" class="btn btn-primary" id="detail-submit">开始单品采集</button>
     </form>
 </div>
 
-<div class="card" id="result-card" style="display: none;">
-    <h3>执行结果</h3>
-    <div id="result-content"></div>
+<!-- 采集进度 -->
+<div class="card" id="progress-card" style="display:none;">
+    <h3>采集进度</h3>
+    <div id="progress-content">
+        <div class="progress-step" id="step-prepare">
+            <span class="step-icon">⏳</span>
+            <span class="step-text">准备中...</span>
+        </div>
+        <div class="progress-step" id="step-collecting">
+            <span class="step-icon">⏳</span>
+            <span class="step-text">等待开始...</span>
+        </div>
+        <div class="progress-step" id="step-complete">
+            <span class="step-icon">⏳</span>
+            <span class="step-text">完成</span>
+        </div>
+    </div>
+    <div id="progress-stats" style="margin-top:16px;padding:12px;background:#f0f8ff;border-radius:6px;display:none;">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;">
+            <div>
+                <div style="font-size:24px;font-weight:bold;color:#e94560;" id="stat-accounts">0</div>
+                <div style="font-size:12px;color:#888;">账号数</div>
+            </div>
+            <div>
+                <div style="font-size:24px;font-weight:bold;color:#27ae60;" id="stat-works">0</div>
+                <div style="font-size:12px;color:#888;">作品数</div>
+            </div>
+            <div>
+                <div style="font-size:24px;font-weight:bold;color:#f39c12;" id="stat-api">0</div>
+                <div style="font-size:12px;color:#888;">API 调用</div>
+            </div>
+            <div>
+                <div style="font-size:24px;font-weight:bold;color:#e74c3c;" id="stat-failed">0</div>
+                <div style="font-size:12px;color:#888;">失败</div>
+            </div>
+        </div>
+    </div>
 </div>
+
+<!-- 定时任务 -->
+<div class="card">
+    <h3>⏰ 定时任务 <span style="font-size:13px;color:#888;font-weight:normal;">（可选）</span></h3>
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button class="btn btn-secondary" onclick="showAddTask()">+ 新建定时任务</button>
+    </div>
+    <div id="task-list">
+        {% if tasks %}
+        <table>
+            <thead>
+                <tr>
+                    <th>任务名</th>
+                    <th>Cron</th>
+                    <th>等级</th>
+                    <th>状态</th>
+                    <th>下次执行</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for task in tasks %}
+                <tr>
+                    <td>{{ task.name }}</td>
+                    <td><code>{{ task.cron_expression }}</code></td>
+                    <td>{{ task.rating_filter }}</td>
+                    <td>{{ '🟢 启用' if task.enabled else '🔴 禁用' }}</td>
+                    <td>{{ task.next_run or '-' }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary" onclick="toggleTask({{ task.id }})">{{ '禁用' if task.enabled else '启用' }}</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteTask({{ task.id }})">删除</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div style="color:#999;font-size:13px;">暂无定时任务</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 新建任务弹窗 -->
+<div id="task-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;">
+    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:24px;border-radius:8px;width:400px;">
+        <h3 style="margin-bottom:16px;">新建定时任务</h3>
+        <form onsubmit="addTask(event)">
+            <div class="form-group">
+                <label>任务名称</label>
+                <input type="text" name="name" required placeholder="如：每日采集4星以上账号">
+            </div>
+            <div class="form-group">
+                <label>Cron 表达式</label>
+                <input type="text" name="cron_expression" required placeholder="0 2 * * *">
+                <small style="color:#888;">格式：分 时 日 月 周 | 示例：0 2 * * * = 每天凌晨2点</small>
+            </div>
+            <div class="form-group">
+                <label>等级筛选（逗号分隔）</label>
+                <input type="text" name="rating_filter" value="3,4" placeholder="3,4">
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="hideAddTask()">取消</button>
+                <button type="submit" class="btn btn-primary">创建</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.progress-step {
+    padding: 12px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.progress-step.active {
+    background: #e3f2fd;
+    border-left: 3px solid #2196f3;
+}
+.progress-step.done {
+    background: #e8f5e9;
+    border-left: 3px solid #4caf50;
+}
+.progress-step.error {
+    background: #ffebee;
+    border-left: 3px solid #f44336;
+}
+.step-icon {
+    font-size: 20px;
+}
+.step-text {
+    font-size: 14px;
+}
+#mode-account-btn:hover, #mode-detail-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+</style>
 {% endblock %}
 {% block scripts %}
 <script>
+    function showCollectMode(mode) {
+        document.getElementById('account-form-card').style.display = mode === 'account' ? 'block' : 'none';
+        document.getElementById('detail-form-card').style.display = mode === 'detail' ? 'block' : 'none';
+        document.getElementById('mode-account-btn').style.border = mode === 'account' ? '2px solid #e94560' : 'none';
+        document.getElementById('mode-detail-btn').style.border = mode === 'detail' ? '2px solid #e94560' : 'none';
+    }
+    
+    // 默认显示整号采集
+    showCollectMode('account');
+
     async function submitAccountCollect(e) {
         e.preventDefault();
         const form = new FormData(e.target);
-        // 获取最小评级
         const ratings = form.getAll('rating');
         const minRating = ratings.length ? Math.min(...ratings.map(Number)) : 3;
         const body = new FormData();
         body.append('account_names', form.get('account_names') || '');
         body.append('rating_min', minRating);
 
-        showToast('开始采集...');
-        const data = await apiCall('/api/collect/account', 'POST', body);
-        showResults(data);
+        showProgress();
+        updateStep('step-prepare', 'active', '🔄', '准备采集...');
+        
+        const btn = document.getElementById('account-submit');
+        btn.disabled = true;
+        btn.textContent = '采集中...';
+
+        try {
+            updateStep('step-collecting', 'active', '🔄', '正在采集...');
+            const data = await apiCall('/api/collect/account', 'POST', body);
+            
+            if (data.success) {
+                updateStep('step-prepare', 'done', '✅', '准备完成');
+                updateStep('step-collecting', 'done', '✅', `采集完成: ${data.results?.length || 0} 个账号`);
+                updateStep('step-complete', 'done', '✅', '全部完成');
+                
+                // 显示统计
+                showCollectStats(data);
+                showToast('采集完成', 'success');
+            } else {
+                updateStep('step-collecting', 'error', '❌', data.message);
+                showToast(data.message, 'error');
+            }
+        } catch (e) {
+            updateStep('step-collecting', 'error', '❌', `请求失败: ${e.message}`);
+            showToast('采集请求失败', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '开始整号采集';
+        }
     }
+
     async function submitDetailCollect(e) {
         e.preventDefault();
         const form = new FormData(e.target);
         const body = new FormData();
         body.append('links', form.get('links'));
 
-        showToast('开始采集...');
-        const data = await apiCall('/api/collect/detail', 'POST', body);
-        showResults(data);
-    }
-    function showResults(data) {
-        const card = document.getElementById('result-card');
-        const content = document.getElementById('result-content');
-        card.style.display = 'block';
+        showProgress();
+        updateStep('step-prepare', 'active', '🔄', '准备采集...');
+        
+        const btn = document.getElementById('detail-submit');
+        btn.disabled = true;
+        btn.textContent = '采集中...';
 
-        if (data.results) {
-            let html = '<table><tr><th>名称/链接</th><th>平台</th><th>状态</th><th>作品数</th><th>耗时</th><th>信息</th></tr>';
-            for (const r of data.results) {
-                const status = r.status === 'success' ? '✅' : '❌';
-                html += `<tr>
-                    <td>${r.name || r.link || '-'}</td>
-                    <td>${r.platform || '-'}</td>
-                    <td>${status}</td>
-                    <td>${r.works_count || 0}</td>
-                    <td>${r.duration || '-'}</td>
-                    <td>${r.message || ''}</td>
-                </tr>`;
+        try {
+            updateStep('step-collecting', 'active', '🔄', '正在采集...');
+            const data = await apiCall('/api/collect/detail', 'POST', body);
+            
+            if (data.success) {
+                updateStep('step-prepare', 'done', '✅', '准备完成');
+                updateStep('step-collecting', 'done', '✅', `采集完成: ${data.results?.length || 0} 个作品`);
+                updateStep('step-complete', 'done', '✅', '全部完成');
+                
+                showCollectStats(data);
+                showToast('采集完成', 'success');
+            } else {
+                updateStep('step-collecting', 'error', '❌', data.message);
+                showToast(data.message, 'error');
             }
-            html += '</table>';
-            content.innerHTML = html;
-        } else {
-            content.innerHTML = `<p>${data.message || '未知错误'}</p>`;
+        } catch (e) {
+            updateStep('step-collecting', 'error', '❌', `请求失败: ${e.message}`);
+            showToast('采集请求失败', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '开始单品采集';
         }
-        showToast(data.message || '完成', data.success ? 'success' : 'error');
+    }
+
+    function showProgress() {
+        document.getElementById('progress-card').style.display = 'block';
+        ['step-prepare', 'step-collecting', 'step-complete'].forEach(id => {
+            const el = document.getElementById(id);
+            el.className = 'progress-step';
+            el.querySelector('.step-icon').textContent = '⏳';
+        });
+        document.getElementById('progress-stats').style.display = 'none';
+    }
+
+    function updateStep(stepId, status, icon, text) {
+        const el = document.getElementById(stepId);
+        el.className = `progress-step ${status}`;
+        el.querySelector('.step-icon').textContent = icon;
+        el.querySelector('.step-text').textContent = text;
+    }
+
+    function showCollectStats(data) {
+        const statsDiv = document.getElementById('progress-stats');
+        statsDiv.style.display = 'block';
+        
+        let totalWorks = 0;
+        let failedCount = 0;
+        if (data.results) {
+            data.results.forEach(r => {
+                totalWorks += r.works_count || 0;
+                if (r.status !== 'success') failedCount++;
+            });
+        }
+        
+        document.getElementById('stat-accounts').textContent = data.results?.length || 0;
+        document.getElementById('stat-works').textContent = totalWorks;
+        document.getElementById('stat-api').textContent = totalWorks; // 简化：每个作品约1次API调用
+        document.getElementById('stat-failed').textContent = failedCount;
+    }
+
+    // 定时任务
+    function showAddTask() {
+        document.getElementById('task-modal').style.display = 'block';
+    }
+    function hideAddTask() {
+        document.getElementById('task-modal').style.display = 'none';
+    }
+
+    async function addTask(e) {
+        e.preventDefault();
+        const form = new FormData(e.target);
+        const data = await apiCall('/api/schedule', 'POST', form);
+        if (data.success) {
+            showToast('任务创建成功');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showToast(data.message, 'error');
+        }
+    }
+
+    async function toggleTask(id) {
+        const data = await apiCall(`/api/schedule/${id}/toggle`, 'POST');
+        if (data.success) {
+            showToast(data.enabled ? '已启用' : '已禁用');
+            setTimeout(() => location.reload(), 500);
+        }
+    }
+
+    async function deleteTask(id) {
+        if (!confirm('确定删除此任务？')) return;
+        const data = await apiCall(`/api/schedule/${id}/delete`, 'POST');
+        if (data.success) {
+            showToast('已删除');
+            setTimeout(() => location.reload(), 500);
+        }
     }
 </script>
 {% endblock %}
