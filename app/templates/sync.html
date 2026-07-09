@@ -260,6 +260,16 @@
         return TAG_MAP[tag] || tag;
     }
 
+    // 添加日志（只保留最近 10 条）
+    function addLog(logBox, html) {
+        const lines = logBox.querySelectorAll('div');
+        if (lines.length >= 10) {
+            lines[0].remove();
+        }
+        logBox.innerHTML += html;
+        logBox.scrollTop = logBox.scrollHeight;
+    }
+
     // ========== 服务控制 ==========
     async function controlService(name, action) {
         const data = await apiCall(`/api/services/${name}/${action}`, 'POST');
@@ -389,16 +399,15 @@
                 const data = await apiCall('/api/import/collection', 'POST', { items: [item] });
                 if (data.success) {
                     success++;
-                    logBox.innerHTML += `<div class="log-ok">✅ [${i+1}/${total}] ${item.link} → 写入成功</div>`;
+                    addLog(logBox, `<div class="log-ok">✅ [${i+1}/${total}] ${item.link} → 写入成功</div>`);
                 } else {
                     failed++;
-                    logBox.innerHTML += `<div class="log-err">❌ [${i+1}/${total}] ${item.link} → ${data.message}</div>`;
+                    addLog(logBox, `<div class="log-err">❌ [${i+1}/${total}] ${item.link} → ${data.message}</div>`);
                 }
             } catch (e) {
                 failed++;
-                logBox.innerHTML += `<div class="log-err">❌ [${i+1}/${total}] ${item.link} → ${e.message}</div>`;
+                addLog(logBox, `<div class="log-err">❌ [${i+1}/${total}] ${item.link} → ${e.message}</div>`);
             }
-            logBox.scrollTop = logBox.scrollHeight;
         }
 
         progressText.textContent = `完成: 成功 ${success} 条，失败 ${failed} 条`;
@@ -429,7 +438,7 @@
         document.getElementById('stat-failed').textContent = '0';
 
         progressText.textContent = '连接飞书，读取采集表...';
-        logBox.innerHTML += '<div class="log-info">→ 正在连接飞书...</div>';
+        addLog(logBox, '<div class="log-info">→ 正在连接飞书...</div>');
 
         try {
             const data = await apiCall('/api/sync', 'POST');
@@ -442,34 +451,36 @@
                 document.getElementById('stat-api').textContent = data.api_calls || 0;
                 document.getElementById('stat-failed').textContent = data.error_count || 0;
 
-                logBox.innerHTML += `<div class="log-ok">✅ 飞书连接成功</div>`;
-                logBox.innerHTML += `<div class="log-info">→ 读取采集表: ${data.total} 条记录</div>`;
-                logBox.innerHTML += `<div class="log-info">→ API 调用: ${data.api_calls} 次</div>`;
-                logBox.innerHTML += `<div class="log-ok">✅ 同步完成: 新增 ${data.new_count}, 更新 ${data.updated_count}</div>`;
+                addLog(logBox, `<div class="log-ok">✅ 飞书连接成功</div>`);
+                addLog(logBox, `<div class="log-info">→ 读取采集表: ${data.total} 条记录</div>`);
+                addLog(logBox, `<div class="log-info">→ API 调用: ${data.api_calls} 次</div>`);
+                addLog(logBox, `<div class="log-ok">✅ 同步完成: 新增 ${data.new_count}, 更新 ${data.updated_count}</div>`);
 
                 if (data.errors && data.errors.length > 0) {
-                    data.errors.forEach(e => {
-                        logBox.innerHTML += `<div class="log-err">❌ ${e}</div>`;
+                    data.errors.slice(0, 5).forEach(e => {
+                        addLog(logBox, `<div class="log-err">❌ ${e}</div>`);
                     });
+                    if (data.errors.length > 5) {
+                        addLog(logBox, `<div class="log-err">... 还有 ${data.errors.length - 5} 个错误</div>`);
+                    }
                 }
 
                 progressText.textContent = `同步完成: ${data.message}`;
                 showToast('同步完成', 'success');
                 setTimeout(() => location.reload(), 2000);
             } else {
-                logBox.innerHTML += `<div class="log-err">❌ 同步失败: ${data.message}</div>`;
+                addLog(logBox, `<div class="log-err">❌ 同步失败: ${data.message}</div>`);
                 progressText.textContent = `失败: ${data.message}`;
                 progressBar.style.background = '#f44336';
                 showToast(data.message, 'error');
             }
         } catch (e) {
-            logBox.innerHTML += `<div class="log-err">❌ 请求失败: ${e.message}</div>`;
+            addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
             progressText.textContent = `请求失败`;
             showToast('同步请求失败', 'error');
         } finally {
             btn.disabled = false;
             btn.textContent = '开始同步';
-            logBox.scrollTop = logBox.scrollHeight;
         }
     }
 </script>
