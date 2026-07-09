@@ -3,6 +3,10 @@
 {% block content %}
 <div class="page-header">
     <h2>设置</h2>
+    <div style="display:flex;gap:8px;">
+        <button type="button" onclick="restartSystem()" style="padding:4px 12px;background:transparent;color:#999;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-size:12px;">🔄 重启</button>
+        <button type="button" onclick="exitSystem()" style="padding:4px 12px;background:transparent;color:#999;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-size:12px;">⏻ 退出</button>
+    </div>
 </div>
 
 <form onsubmit="saveSettings(event)">
@@ -41,9 +45,12 @@
             <label>Cookie 表 Table ID</label>
             <input type="text" name="feishu.cookie_table_id" value="{{ config.feishu.cookie_table_id or '' }}" placeholder="Cookie 池表（可选）">
         </div>
-        <div style="display:flex;gap:8px;align-items:center;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <button type="button" class="btn btn-secondary" onclick="testFeishu()">测试连接</button>
-            <button type="button" class="btn btn-secondary" onclick="ensureFields()">检测并创建字段</button>
+            <button type="button" class="btn btn-secondary" onclick="ensureFields('all')">一键创建所有表字段</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('collection')">采集表</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('account')">账号表</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('cookie')">Cookie表</button>
             <span id="feishu-status"></span>
         </div>
     </div>
@@ -167,12 +174,20 @@
         status.textContent = data.message;
         status.style.color = data.success ? '#27ae60' : '#e74c3c';
     }
-    async function ensureFields() {
+    async function ensureFields(tableType = 'all') {
         const status = document.getElementById('feishu-status');
-        status.textContent = '正在检测字段...';
-        const data = await apiCall('/api/ensure-fields', 'POST');
-        status.textContent = data.message;
-        status.style.color = data.success ? '#27ae60' : '#e74c3c';
+        const label = tableType === 'all' ? '所有表' : tableType;
+        status.textContent = `正在创建 ${label} 字段...`;
+        status.style.color = '#888';
+        const data = await apiCall('/api/ensure-fields', 'POST', { table_type: tableType });
+        if (data.results) {
+            const msgs = data.results.map(r => `${r.table}: ${r.message || (r.success ? '完成' : '失败')}`);
+            status.textContent = msgs.join(' | ');
+            status.style.color = data.success ? '#27ae60' : '#e74c3c';
+        } else {
+            status.textContent = data.message || '完成';
+            status.style.color = data.success ? '#27ae60' : '#e74c3c';
+        }
     }
     async function updateAll() {
         const status = document.getElementById('update-status');

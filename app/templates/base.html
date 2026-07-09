@@ -9,7 +9,7 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; }
         .layout { display: flex; min-height: 100vh; }
-        .sidebar { width: 200px; background: #1a1a2e; color: #fff; padding: 20px 0; flex-shrink: 0; position: relative; }
+        .sidebar { width: 200px; background: #1a1a2e; color: #fff; padding: 20px 0; flex-shrink: 0; }
         .sidebar h1 { font-size: 20px; padding: 0 20px 20px; border-bottom: 1px solid #333; margin-bottom: 10px; }
         .sidebar a { display: block; padding: 12px 20px; color: #ccc; text-decoration: none; transition: all 0.2s; }
         .sidebar a:hover, .sidebar a.active { background: #16213e; color: #fff; border-left: 3px solid #e94560; }
@@ -71,10 +71,6 @@
             <a href="/history" class="{% if page == 'history' %}active{% endif %}">📋 记录</a>
             <a href="/duplicates" class="{% if page == 'duplicates' %}active{% endif %}">🔍 查重</a>
             <a href="/settings" class="{% if page == 'settings' %}active{% endif %}">⚙️ 设置</a>
-            <div style="position:absolute;bottom:20px;left:0;right:0;padding:0 20px;">
-                <button onclick="restartSystem()" style="width:100%;padding:8px;margin-bottom:8px;background:#2c3e50;color:#ccc;border:none;border-radius:4px;cursor:pointer;font-size:13px;">🔄 重启</button>
-                <button onclick="exitSystem()" style="width:100%;padding:8px;background:#c0392b;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;">⏻ 退出</button>
-            </div>
         </nav>
         <main class="main">
             {% block content %}{% endblock %}

@@ -623,17 +623,40 @@ async def api_save_settings(request: Request):
 
 
 @app.post("/api/ensure-fields")
-async def api_ensure_fields():
-    """检测并创建缺失的飞书表格字段"""
+async def api_ensure_fields(request: Request):
+    """检测并创建缺失的飞书表格字段，支持指定表类型"""
     f = get_feishu()
     if not f:
         return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
+
     try:
-        result = f.ensure_fields(
-            config.feishu["app_token"],
-            config.feishu["account_table_id"],
-        )
-        return result
+        data = await request.json()
+        table_type = data.get("table_type", "all")  # account | collection | cookie | all
+        app_token = config.feishu.get("app_token", "")
+
+        results = []
+        table_map = {
+            "account": config.feishu.get("account_table_id", ""),
+            "collection": config.feishu.get("collection_table_id", ""),
+            "cookie": config.feishu.get("cookie_table_id", ""),
+        }
+
+        types_to_process = list(table_map.keys()) if table_type == "all" else [table_type]
+
+        for t in types_to_process:
+            table_id = table_map.get(t, "")
+            if not table_id:
+                results.append({"table": t, "success": False, "message": "未配置 Table ID"})
+                continue
+            try:
+                r = f.ensure_fields(app_token, table_id, table_type=t)
+                results.append({"table": t, **r})
+            except Exception as e:
+                results.append({"table": t, "success": False, "message": str(e)})
+
+        all_ok = all(r.get("success", False) for r in results)
+        return {"success": all_ok, "results": results}
+
     except Exception as e:
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
