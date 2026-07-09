@@ -134,6 +134,16 @@
         </div>
     </div>
 
+    <div class="card">
+        <h3>标签映射</h3>
+        <p style="color:#888;font-size:13px;margin-bottom:12px;">每行一个映射，格式：缩写=完整标签。未匹配的缩写会作为新标签保留。</p>
+        <div class="form-group">
+            <textarea name="tags_text" rows="12" style="font-family:monospace;font-size:13px;" placeholder="个=个人&#10;图=图集&#10;分享=分享&#10;街拍=街拍">{% for k, v in config.tags.items() %}{{ k }}={{ v }}
+{% endfor %}</textarea>
+        </div>
+        <small style="color:#888;">示例：个=个人 | 图=图集 | 街拍=街拍 | 太多=多</small>
+    </div>
+
     <button type="submit" class="btn btn-primary">保存设置</button>
 </form>
 {% endblock %}
@@ -164,6 +174,21 @@
             }
             obj[parts[parts.length - 1]] = value;
         });
+
+        // 解析标签映射
+        const tagsText = form.querySelector('[name="tags_text"]').value;
+        data.tags = {};
+        tagsText.split('\n').forEach(line => {
+            const parts = line.split('=');
+            if (parts.length === 2) {
+                const key = parts[0].trim();
+                const value = parts[1].trim();
+                if (key && value) {
+                    data.tags[key] = value;
+                }
+            }
+        });
+
         const resp = await apiCall('/api/settings', 'POST', data);
         showToast(resp.message || '保存成功');
     }

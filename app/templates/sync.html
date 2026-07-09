@@ -197,69 +197,30 @@
 
 {% block scripts %}
 <script>
-    // 标签缩写映射（多种缩写 → 完整标签，尽量覆盖所有可能的缩写）
-    const TAG_MAP = {
-        // 个人
-        '个': '个人',
-        '个人': '个人',
-        // 图集
-        '图': '图集',
-        '集': '图集',
-        '图集': '图集',
-        // 自拍
-        '自': '自拍',
-        '拍': '自拍',
-        '自拍': '自拍',
-        // 分享
-        '分': '分享',
-        '享': '分享',
-        '分享': '分享',
-        // 街拍
-        '街': '街拍',
-        '街拍': '街拍',
-        // COS
-        'COS': 'COS',
-        'cos': 'COS',
-        'C': 'COS',
-        'c': 'COS',
-        // 商业
-        '商': '商业',
-        '业': '商业',
-        '商业': '商业',
-        // 模特
-        '模': '模特',
-        '特': '模特',
-        '模特': '模特',
-        // 展会
-        '展': '展会',
-        '会': '展会',
-        '展会': '展会',
-        // 直播LIVE
-        '直': '直播LIVE',
-        '播': '直播LIVE',
-        '直播': '直播LIVE',
-        'LIVE': '直播LIVE',
-        'live': '直播LIVE',
-        'L': '直播LIVE',
-        'l': '直播LIVE',
-        // 长腿
-        '长': '长腿',
-        '腿': '长腿',
-        '长腿': '长腿',
-        // 酒吧
-        '酒': '酒吧',
-        '吧': '酒吧',
-        '酒吧': '酒吧',
-        // 多（数量多）
-        '多': '多',
-        // 户外
-        '户': '户外',
-        '外': '户外',
-        '户外': '户外',
-    };
+    // 标签映射（从配置加载）
+    let TAG_MAP = {};
+
+    // 加载标签映射
+    async function loadTags() {
+        try {
+            const data = await apiCall('/api/tags', 'GET');
+            TAG_MAP = data || {};
+        } catch (e) {
+            console.error('加载标签映射失败:', e);
+            TAG_MAP = {};
+        }
+    }
+
+    // 页面加载时初始化
+    loadTags();
 
     function mapTag(tag) {
-        return TAG_MAP[tag] || tag;
+        // 先精确匹配
+        if (TAG_MAP[tag]) {
+            return TAG_MAP[tag];
+        }
+        // 未匹配则作为新标签保留
+        return tag;
     }
 
     // 添加日志（只保留最近 10 条）
@@ -334,13 +295,30 @@
             if (match) {
                 const prefix = match[1].trim();
                 const link = match[2].trim();
-                const ratingMatch = prefix.match(/(\d)$/);
-                let rating = 3, tagsStr = prefix;
-                if (ratingMatch) {
-                    rating = Math.max(1, Math.min(4, parseInt(ratingMatch[1])));
-                    tagsStr = prefix.slice(0, -1);
+
+                // 按逗号分割（支持中文逗号和英文逗号）
+                const parts = prefix.split(/[,，]/).map(s => s.trim()).filter(s => s);
+                let rating = 3;
+                const tags = [];
+
+                for (const part of parts) {
+                    // 提取末尾数字作为等级
+                    const numMatch = part.match(/(\d+)$/);
+                    if (numMatch) {
+                        rating = Math.max(1, Math.min(4, parseInt(numMatch[1])));
+                        const tagPart = part.slice(0, -numMatch[1].length).trim();
+                        if (tagPart) {
+                            tags.push(mapTag(tagPart));
+                        }
+                    } else if (/^\d+$/.test(part)) {
+                        // 纯数字
+                        rating = Math.max(1, Math.min(4, parseInt(part)));
+                    } else {
+                        // 纯标签
+                        tags.push(mapTag(part));
+                    }
                 }
-                const tags = tagsStr ? [mapTag(tagsStr)] : [];
+
                 parsedData.push({ link, rating, tags, name: '' });
             }
         }

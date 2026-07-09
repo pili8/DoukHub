@@ -675,6 +675,12 @@ async def api_save_settings(request: Request):
     return {"success": True, "message": "设置已保存"}
 
 
+@app.get("/api/tags")
+async def api_get_tags():
+    """获取标签映射"""
+    return config._data.get("tags", {})
+
+
 @app.post("/api/ensure-fields")
 async def api_ensure_fields(request: Request):
     """检测并创建缺失的飞书表格字段，支持指定表类型"""
