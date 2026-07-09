@@ -114,6 +114,8 @@
                     <th>等级</th>
                     <th>标签</th>
                     <th>名称</th>
+                    <th>粉丝</th>
+                    <th>作品</th>
                 </tr>
             </thead>
             <tbody id="preview-body"></tbody>
@@ -314,6 +316,8 @@
                 <td>${'⭐'.repeat(item.rating)}</td>
                 <td>${item.tags.map(t => `<span class="tag">${t}</span>`).join('')}</td>
                 <td>${item.name || '-'}</td>
+                <td style="font-size:12px;">${item.follower_count ? item.follower_count.toLocaleString() : '-'}</td>
+                <td style="font-size:12px;">${item.aweme_count || '-'}</td>
             </tr>
         `).join('');
 
@@ -351,18 +355,49 @@
                 const link = data['地址'] || '';
                 const grade = data['等级'] || '';
                 const name = data['用户'] || '';
+                // 解析粉丝数（去掉"万"等后缀）
+                let follower_count = 0;
+                const fansStr = data['粉丝'] || '';
+                const fansMatch = fansStr.match(/([\d.]+)/);
+                if (fansMatch) {
+                    let fansNum = parseFloat(fansMatch[1]);
+                    if (fansStr.includes('万')) fansNum *= 10000;
+                    follower_count = Math.round(fansNum);
+                }
+                // 解析作品数
+                let aweme_count = 0;
+                const worksStr = data['作品'] || '';
+                const worksMatch = worksStr.match(/(\d+)/);
+                if (worksMatch) {
+                    aweme_count = parseInt(worksMatch[1]);
+                }
+
                 if (!link) continue;
+
+                // 解析等级字段：先按逗号分割，每部分提取数字和标签
                 const parts = grade.split(/[,，]/).map(s => s.trim()).filter(s => s);
                 let rating = 3;
                 const tags = [];
+
                 for (const part of parts) {
-                    if (/^\d+$/.test(part)) {
+                    // 提取末尾数字作为等级
+                    const numMatch = part.match(/(\d+)$/);
+                    if (numMatch) {
+                        rating = Math.max(1, Math.min(4, parseInt(numMatch[1])));
+                        const tagPart = part.slice(0, -numMatch[1].length).trim();
+                        if (tagPart) {
+                            tags.push(mapTag(tagPart));
+                        }
+                    } else if (/^\d+$/.test(part)) {
+                        // 纯数字
                         rating = Math.max(1, Math.min(4, parseInt(part)));
                     } else {
+                        // 纯标签
                         tags.push(mapTag(part));
                     }
                 }
-                parsedData.push({ link, rating, tags, name });
+
+                parsedData.push({ link, rating, tags, name, follower_count, aweme_count });
             } catch (e) { /* skip */ }
         }
     }

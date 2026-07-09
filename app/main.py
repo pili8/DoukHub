@@ -321,6 +321,8 @@ class ImportItem(BaseModel):
     rating: int = 3
     tags: list[str] = []
     name: str = ""
+    follower_count: int = 0
+    aweme_count: int = 0
 
 
 class ImportCollectionRequest(BaseModel):
@@ -353,7 +355,11 @@ async def api_import_collection(request: ImportCollectionRequest):
                 fields["标签"] = item.tags
             if item.name:
                 fields["账号名称"] = item.name
-            
+            if item.follower_count:
+                fields["粉丝数"] = item.follower_count
+            if item.aweme_count:
+                fields["作品数"] = item.aweme_count
+
             f.create_record(app_token, table_id, fields)
             success_count += 1
         except Exception as e:
