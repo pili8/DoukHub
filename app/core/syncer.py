@@ -152,6 +152,7 @@ class SyncResult:
         self.errors: list[str] = []
         self.success: bool = False
         self.message: str = ""
+        self.api_calls: int = 0  # API 调用次数
 
     @property
     def summary(self) -> str:
@@ -162,6 +163,8 @@ class SyncResult:
             parts.append(f"更新 {self.updated_accounts} 个")
         if self.errors:
             parts.append(f"{len(self.errors)} 个错误")
+        if self.api_calls:
+            parts.append(f"{self.api_calls} 次 API 调用")
         return "，".join(parts)
 
 
@@ -229,6 +232,7 @@ class Syncer:
                     # 通过 TTD API 解析短链接 → 获取完整 URL
                     cookie = active_cookies[0] if active_cookies else ""
                     resolved_url = await self.collector.resolve_short_url(link, platform)
+                    result.api_calls += 1  # 记录 API 调用
 
                     # 从完整 URL 中提取 sec_user_id（纯正则）
                     sec_user_id = extract_sec_user_id(resolved_url, platform)
@@ -240,6 +244,7 @@ class Syncer:
 
                     # 通过 TTD API 获取账号详情
                     info = await self.collector.get_account_info(sec_user_id, platform, cookie)
+                    result.api_calls += 1  # 记录 API 调用
 
                     # 构建 Account
                     account = Account(

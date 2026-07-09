@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}同步 - DoukHub{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>同步</h2>
+    <div>
+        <button class="btn btn-primary" onclick="startSync()" id="sync-btn">🔄 开始同步</button>
+    </div>
+</div>
+
+<!-- 服务状态 -->
+<div class="card">
+    <h3>服务状态</h3>
+    <div class="service-grid">
+        {% for svc in services %}
+        <div style="display:flex;align-items:center;gap:12px;padding:12px;background:#f8f9fa;border-radius:6px;">
+            <span class="status-dot {{ 'status-running' if svc.running else 'status-stopped' }}"></span>
+            <div>
+                <div style="font-weight:600;">{{ svc.name }}</div>
+                <div style="font-size:12px;color:#888;">端口 {{ svc.port }}</div>
+            </div>
+            <div style="margin-left:auto;">
+                {% if svc.running %}
+                <button class="btn btn-danger btn-sm" onclick="controlService('{{ svc.name }}', 'stop')">停止</button>
+                {% else %}
+                <button class="btn btn-success btn-sm" onclick="controlService('{{ svc.name }}', 'start')">启动</button>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- 同步进度 -->
+<div class="card" id="progress-card" style="display:none;">
+    <h3>同步进度</h3>
+    <div id="progress-content">
+        <div class="progress-step" id="step-feishu">
+            <span class="step-icon">⏳</span>
+            <span class="step-text">连接飞书...</span>
+        </div>
+        <div class="progress-step" id="step-collection">
+            <span class="step-icon">⏳</span>
+            <span class="step-text">读取采集表...</span>
+        </div>
+        <div class="progress-step" id="step-resolve">
+            <span class="step-icon">⏳</span>
+            <span class="step-text">解析短链接...</span>
+        </div>
+        <div class="progress-step" id="step-account">
+            <span class="step-icon">⏳</span>
+            <span class="step-text">获取账号信息...</span>
+        </div>
+        <div class="progress-step" id="step-complete">
+            <span class="step-icon">⏳</span>
+            <span class="step-text">完成同步</span>
+        </div>
+    </div>
+    <div id="progress-stats" style="margin-top:16px;padding:12px;background:#f0f8ff;border-radius:6px;display:none;">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;">
+            <div>
+                <div style="font-size:24px;font-weight:bold;color:#e94560;" id="stat-total">0</div>
+                <div style="font-size:12px;color:#888;">采集表记录</div>
+            </div>
+            <div>
+                <div style="font-size:24px;font-weight:bold;color:#27ae60;" id="stat-success">0</div>
+                <div style="font-size:12px;color:#888;">同步成功</div>
+            </div>
+            <div>
+                <div style="font-size:24px;font-weight:bold;color:#f39c12;" id="stat-api">0</div>
+                <div style="font-size:12px;color:#888;">API 调用</div>
+            </div>
+            <div>
+                <div style="font-size:24px;font-weight:bold;color:#e74c3c;" id="stat-failed">0</div>
+                <div style="font-size:12px;color:#888;">失败</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 账号列表 -->
+<div class="card">
+    <h3>账号列表 <span style="font-size:13px;color:#888;font-weight:normal;">（共 <span id="account-count">{{ accounts|length }}</span> 个）</span></h3>
+    <table>
+        <thead>
+            <tr>
+                <th>名称</th>
+                <th>平台</th>
+                <th>等级</th>
+                <th>昵称</th>
+                <th>粉丝</th>
+                <th>标签</th>
+                <th>同步时间</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for acc in accounts %}
+            <tr>
+                <td>{{ acc.name or '-' }}</td>
+                <td><span class="platform-tag platform-{{ acc.platform }}">{{ acc.platform }}</span></td>
+                <td>{{ '⭐' * acc.rating if acc.rating else '-' }}</td>
+                <td>{{ acc.nickname or '-' }}</td>
+                <td>{{ acc.follower_count if acc.follower_count else '-' }}</td>
+                <td>
+                    {% for tag in acc.tags[:3] %}
+                    <span class="tag">{{ tag }}</span>
+                    {% endfor %}
+                </td>
+                <td style="font-size:12px;color:#888;">{{ acc.synced_at or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if not accounts %}
+    <div class="empty-state">暂无账号，请先点击「开始同步」从飞书采集表拉取账号信息</div>
+    {% endif %}
+</div>
+
+<style>
+.progress-step {
+    padding: 12px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.progress-step.active {
+    background: #e3f2fd;
+    border-left: 3px solid #2196f3;
+}
+.progress-step.done {
+    background: #e8f5e9;
+    border-left: 3px solid #4caf50;
+}
+.progress-step.error {
+    background: #ffebee;
+    border-left: 3px solid #f44336;
+}
+.step-icon {
+    font-size: 20px;
+}
+.step-text {
+    font-size: 14px;
+}
+</style>
+{% endblock %}
+{% block scripts %}
+<script>
+    async function startSync() {
+        const btn = document.getElementById('sync-btn');
+        btn.disabled = true;
+        btn.textContent = '同步中...';
+        
+        const progressCard = document.getElementById('progress-card');
+        progressCard.style.display = 'block';
+        
+        // 重置所有步骤
+        ['step-feishu', 'step-collection', 'step-resolve', 'step-account', 'step-complete'].forEach(id => {
+            const el = document.getElementById(id);
+            el.className = 'progress-step';
+            el.querySelector('.step-icon').textContent = '⏳';
+        });
+        
+        // 开始同步
+        updateStep('step-feishu', 'active', '🔄', '连接飞书...');
+        
+        try {
+            const data = await apiCall('/api/sync', 'POST');
+            
+            if (data.success) {
+                updateStep('step-feishu', 'done', '✅', '飞书连接成功');
+                updateStep('step-collection', 'done', '✅', `读取采集表: ${data.total || 0} 条记录`);
+                updateStep('step-resolve', 'done', '✅', `解析短链接完成`);
+                updateStep('step-account', 'done', '✅', `获取账号信息完成`);
+                updateStep('step-complete', 'done', '✅', '同步完成');
+                
+                // 显示统计
+                const statsDiv = document.getElementById('progress-stats');
+                statsDiv.style.display = 'block';
+                document.getElementById('stat-total').textContent = data.total || 0;
+                document.getElementById('stat-success').textContent = data.new_count || 0;
+                document.getElementById('stat-api').textContent = data.api_calls || 0;
+                document.getElementById('stat-failed').textContent = data.error_count || 0;
+                
+                showToast('同步完成', 'success');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                updateStep('step-feishu', 'error', '❌', `同步失败: ${data.message}`);
+                showToast(data.message, 'error');
+            }
+        } catch (e) {
+            updateStep('step-feishu', 'error', '❌', `请求失败: ${e.message}`);
+            showToast('同步请求失败', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔄 开始同步';
+        }
+    }
+    
+    function updateStep(stepId, status, icon, text) {
+        const el = document.getElementById(stepId);
+        el.className = `progress-step ${status}`;
+        el.querySelector('.step-icon').textContent = icon;
+        el.querySelector('.step-text').textContent = text;
+    }
+    
+    async function controlService(name, action) {
+        const data = await apiCall(`/api/services/${name}/${action}`, 'POST');
+        showToast(data.message, data.success ? 'success' : 'error');
+        if (data.success) setTimeout(() => location.reload(), 1000);
+    }
+</script>
+{% endblock %}

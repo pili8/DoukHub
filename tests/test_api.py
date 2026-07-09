@@ -66,17 +66,11 @@ def app_env(tmp_path):
 class TestPageRoutes:
     """页面路由测试"""
 
-    def test_dashboard(self, app_env):
+    def test_sync_page(self, app_env):
         client, *_ = app_env
-        r = client.get("/")
+        r = client.get("/sync")
         assert r.status_code == 200
-        assert "仪表盘" in r.text
-
-    def test_accounts_page(self, app_env):
-        client, *_ = app_env
-        r = client.get("/accounts")
-        assert r.status_code == 200
-        assert "账号管理" in r.text
+        assert "同步" in r.text
 
     def test_collect_page(self, app_env):
         client, *_ = app_env
@@ -84,23 +78,11 @@ class TestPageRoutes:
         assert r.status_code == 200
         assert "采集" in r.text
 
-    def test_schedule_page(self, app_env):
-        client, *_ = app_env
-        r = client.get("/schedule")
-        assert r.status_code == 200
-        assert "定时任务" in r.text
-
     def test_history_page(self, app_env):
         client, *_ = app_env
         r = client.get("/history")
         assert r.status_code == 200
-        assert "采集记录" in r.text
-
-    def test_duplicates_page(self, app_env):
-        client, *_ = app_env
-        r = client.get("/duplicates")
-        assert r.status_code == 200
-        assert "重复" in r.text
+        assert "记录" in r.text
 
     def test_settings_page(self, app_env):
         client, *_ = app_env

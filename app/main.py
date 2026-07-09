@@ -148,27 +148,17 @@ def detect_platform(link: str) -> str:
 # ========== 页面路由 ==========
 
 @app.get("/", response_class=HTMLResponse)
-async def page_dashboard(request: Request):
+@app.get("/sync", response_class=HTMLResponse)
+async def page_sync(request: Request):
+    """同步页面 - 整合仪表盘+账号管理"""
     svc = get_services()
-    h = get_history()
-    sched = get_scheduler()
-    return templates.TemplateResponse(request, "dashboard.html", context={
-        "request": request,
-        "services": svc.status_all(),
-        "stats": h.get_stats(),
-        "jobs": sched.get_jobs_info(),
-        "page": "dashboard",
-    })
-
-
-@app.get("/accounts", response_class=HTMLResponse)
-async def page_accounts(request: Request):
     s = get_syncer()
     accounts = s.load_local_accounts() if s else []
-    return templates.TemplateResponse(request, "accounts.html", context={
+    return templates.TemplateResponse(request, "sync.html", context={
         "request": request,
+        "services": svc.status_all(),
         "accounts": accounts,
-        "page": "accounts",
+        "page": "sync",
     })
 
 
@@ -309,24 +299,11 @@ async def api_sync():
         "success": result.success,
         "message": result.message,
         "total": result.total,
-        "new_count": len(result.new_accounts),
-        "duplicate_count": len(result.duplicates),
+        "new_count": result.new_accounts,
+        "updated_count": result.updated_accounts,
+        "api_calls": result.api_calls,
         "error_count": len(result.errors),
         "errors": result.errors,
-        "duplicates": [
-            {
-                "new_name": dup[0].name,
-                "new_link": dup[0].link,
-                "new_sec_user_id": dup[0].sec_user_id,
-                "new_rating": dup[0].rating,
-                "existing_name": dup[1].name,
-                "existing_link": dup[1].link,
-                "existing_sec_user_id": dup[1].sec_user_id,
-                "existing_rating": dup[1].rating,
-                "record_id": dup[0].record_id,
-            }
-            for dup in result.duplicates
-        ],
     }
 
 
