@@ -281,6 +281,10 @@ class Syncer:
             # 6. 保存本地账号缓存
             self._save_local_xlsx(list(existing_accounts.values()))
 
+            # 7. 写入飞书账号表
+            if self.account_table_id:
+                self._sync_to_feishu_account_table(list(existing_accounts.values()), result)
+
             result.success = True
             result.message = result.summary
 
@@ -330,6 +334,72 @@ class Syncer:
 
         self.accounts_file.parent.mkdir(parents=True, exist_ok=True)
         wb.save(str(self.accounts_file))
+
+    def _sync_to_feishu_account_table(self, accounts: list[Account], result: SyncResult) -> None:
+        """将账号数据同步到飞书账号表"""
+        if not self.account_table_id:
+            return
+
+        try:
+            # 读取飞书账号表现有记录（按 sec_user_id 索引）
+            existing_records = self.feishu.get_all_records(self.app_token, self.account_table_id)
+            existing_by_sec_id = {}
+            for record in existing_records:
+                fields = record.get("fields", {})
+                sec_id = fields.get("sec_user_id", "")
+                if sec_id:
+                    existing_by_sec_id[sec_id] = record.get("record_id", "")
+
+            # 准备要写入的记录
+            records_to_create = []
+            records_to_update = []
+
+            for acc in accounts:
+                if not acc.sec_user_id:
+                    continue
+
+                # 构建字段（反向映射：attr_name → feishu_name）
+                fields = {}
+                for feishu_name, attr_name in ACCOUNT_FIELD_MAP.items():
+                    value = getattr(acc, attr_name, "")
+                    if isinstance(value, list):
+                        value = value  # 多选字段保持列表
+                    elif isinstance(value, bool):
+                        value = value
+                    elif value != "" and value is not None:
+                        pass
+                    else:
+                        continue
+                    fields[feishu_name] = value
+
+                if acc.sec_user_id in existing_by_sec_id:
+                    # 更新现有记录
+                    records_to_update.append({
+                        "record_id": existing_by_sec_id[acc.sec_user_id],
+                        "fields": fields,
+                    })
+                else:
+                    # 创建新记录
+                    records_to_create.append({"fields": fields})
+
+            # 批量创建
+            if records_to_create:
+                batch_size = 500
+                for i in range(0, len(records_to_create), batch_size):
+                    batch = records_to_create[i:i + batch_size]
+                    self.feishu.batch_create_records(self.app_token, self.account_table_id, batch)
+                    result.api_calls += 1
+
+            # 批量更新
+            if records_to_update:
+                batch_size = 500
+                for i in range(0, len(records_to_update), batch_size):
+                    batch = records_to_update[i:i + batch_size]
+                    self.feishu.batch_update_records(self.app_token, self.account_table_id, batch)
+                    result.api_calls += 1
+
+        except Exception as e:
+            result.errors.append(f"写入账号表失败: {e}")
 
     def load_local_accounts(self) -> list[Account]:
         """从本地 XLSX 加载账号列表"""
