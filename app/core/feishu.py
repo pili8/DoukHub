@@ -178,7 +178,7 @@ class FeishuClient:
         if table_type == "collection":
             # 采集表：原始数据源
             return [
-                ("地址", 15, None),           # URL 短链接
+                ("地址", 1, None),             # 文本，可能是短链缩略路径如 m3HL2u1R1YM
                 ("等级", 2, None),             # 数字 1-4
                 ("标签", 4, None),             # 多选标签
                 ("账号名称", 1, None),         # 可选，不填则自动获取
@@ -189,7 +189,7 @@ class FeishuClient:
                 ("粉丝数", 2, None),           # 自动回填
                 ("作品数", 2, None),           # 自动回填
                 ("签名", 1, None),             # 自动回填
-                ("头像", 15, None),            # 自动回填
+                ("头像", 1, None),             # 自动回填（文本存 URL）
                 ("同步状态", 3, {"options": [{"name": "待同步"}, {"name": "已同步"}, {"name": "失败"}]}),
                 ("同步时间", 5, None),         # 自动回填
             ]

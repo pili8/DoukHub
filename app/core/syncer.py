@@ -219,6 +219,10 @@ class Syncer:
                 record_id = entry["record_id"]
 
                 try:
+                    # 补全短链接前缀（如果只有缩略路径如 m3HL2u1R1YM）
+                    if link and not link.startswith("http"):
+                        link = f"https://v.douyin.com/{link}"
+
                     # 平台识别（纯正则）
                     platform = entry.get("platform", "") or detect_platform(link)
 
