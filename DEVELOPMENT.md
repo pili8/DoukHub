@@ -412,6 +412,124 @@ POST /xhs/detail
 }
 ```
 
+### 数据库管理 API
+
+#### 统计信息
+
+```
+GET /api/database/stats
+```
+
+返回各表记录数：
+```json
+{
+  "collection_cache": 0,
+  "account_cache": 0,
+  "cookie_cache": 0,
+  "collection_history": 0,
+  "scheduled_tasks": 0
+}
+```
+
+#### 表数据
+
+```
+GET /api/database/table/{table_name}?limit=100&offset=0
+```
+
+**支持的表名：**
+- `collection_cache` - 采集表缓存
+- `account_cache` - 账号表缓存
+- `cookie_cache` - Cookie缓存
+- `collection_history` - 采集历史
+- `scheduled_tasks` - 定时任务
+
+#### 删除记录
+
+```
+DELETE /api/database/table/{table_name}/record/{record_id}
+```
+
+#### 清空表
+
+```
+DELETE /api/database/table/{table_name}
+```
+
+### 新同步器 API（v2）
+
+#### 步骤1：导入采集表
+
+```
+POST /api/sync/v2/import
+```
+
+**请求：**
+```json
+{
+  "text": "iMLuCKjq 3 街拍 户外\niMLuGfEv 2 个人"
+}
+```
+
+**响应：**
+```json
+{
+  "success": 2,
+  "message": "导入完成: 成功 2 条，失败 0 条，跳过 0 条",
+  "total": 2,
+  "failed": 0,
+  "skipped": 0,
+  "errors": []
+}
+```
+
+#### 步骤2：更新采集表（SSE）
+
+```
+POST /api/sync/v2/update-collection
+```
+
+**响应：** SSE 流式进度
+```
+data: {"type": "start", "message": "开始更新采集表"}
+data: {"type": "stats", "total": 10, "success": 0, "failed": 0}
+data: {"type": "progress", "message": "处理 [1/10]: iMLuCKjq"}
+data: {"type": "log", "level": "ok", "message": "✅ iMLuCKjq: MS4wLjAB..."}
+data: {"type": "complete", "success": true, "message": "更新完成"}
+```
+
+#### 步骤3：同步账号表（SSE）
+
+```
+POST /api/sync/v2/sync-account
+```
+
+**响应：** SSE 流式进度（同上）
+
+#### 一键同步
+
+```
+POST /api/sync/v2/all
+```
+
+**请求：**
+```json
+{
+  "text": "iMLuCKjq 3 街拍 户外"
+}
+```
+
+**响应：**
+```json
+{
+  "success": true,
+  "message": "一键同步完成",
+  "step1": {"total": 1, "success": 1, "failed": 0, "skipped": 0},
+  "step2": {"total": 1, "success": 1, "failed": 0, "skipped": 0},
+  "step3": {"total": 1, "success": 1, "failed": 0, "skipped": 0}
+}
+```
+
 ---
 
 ## 技术架构
@@ -423,8 +541,10 @@ app/
 ├── main.py              # FastAPI 应用入口
 ├── core/
 │   ├── config.py        # 配置管理
+│   ├── database.py      # SQLite 数据库管理（新增）
 │   ├── feishu.py        # 飞书 API 客户端
-│   ├── syncer.py        # 同步逻辑（采集表→账号表）
+│   ├── syncer.py        # 旧同步逻辑（采集表→账号表）
+│   ├── syncer_v2.py     # 新同步逻辑（使用数据库）（新增）
 │   ├── collector.py     # 数据采集器（调用 TTD/XHS API）
 │   ├── cookie_pool.py   # Cookie 轮换管理
 │   ├── history.py       # 历史记录管理
@@ -435,6 +555,7 @@ app/
 └── templates/
     ├── base.html        # 基础模板
     ├── sync.html        # 同步页面
+    ├── database.html    # 数据库管理页面（新增）
     ├── status.html      # 状态页面
     └── settings.html    # 设置页面
 ```
