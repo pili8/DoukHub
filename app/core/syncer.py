@@ -35,20 +35,18 @@ ACCOUNT_FIELD_MAP = {
     "已获取信息": "info_fetched",
 }
 
-# 采集表字段名
+# 采集表字段名（只读取必要信息，不反写）
 COLLECTION_FIELDS = {
-    "地址": "link",
-    "等级": "rating",
-    "标签": "tags",
-    "账号名称": "name",
-    "平台": "platform",
-    "备注": "note",
+    "地址": "link",           # 必填：短链接
+    "等级": "rating",         # 必填：评级
+    "标签": "tags",           # 可选：标签
+    "账号名称": "name",       # 可选：账号名称
+    "平台": "platform",       # 可选：平台（可自动识别）
+    "备注": "note",           # 可选：备注
+    # 以下字段如果采集表有则读取，没有则忽略
     "sec_user_id": "sec_user_id",
-    "昵称": "nickname",
     "粉丝数": "follower_count",
     "作品数": "aweme_count",
-    "签名": "signature",
-    "头像": "avatar",
     "同步状态": "sync_status",
     "同步时间": "synced_at",
 }
