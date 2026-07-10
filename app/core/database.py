@@ -136,6 +136,12 @@ class Database:
             row = conn.execute("SELECT * FROM collection_cache WHERE 分享码 = ?", (share,)).fetchone()
             return dict(row) if row else None
 
+    def get_collection_by_id(self, record_id: str) -> Optional[dict]:
+        """根据记录ID获取采集表记录"""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM collection_cache WHERE 记录ID = ?", (record_id,)).fetchone()
+            return dict(row) if row else None
+
     def get_collection_by_sec_user_id(self, sec_user_id: str) -> Optional[dict]:
         """根据账号标识获取记录"""
         with self._connect() as conn:
@@ -189,6 +195,12 @@ class Database:
         """根据账号标识获取记录"""
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM account_cache WHERE 账号标识 = ?", (sec_user_id,)).fetchone()
+            return dict(row) if row else None
+
+    def get_account_by_id(self, record_id: str) -> Optional[dict]:
+        """根据记录ID获取账号表记录"""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM account_cache WHERE 记录ID = ?", (record_id,)).fetchone()
             return dict(row) if row else None
 
     def insert_account(self, data: dict) -> bool:

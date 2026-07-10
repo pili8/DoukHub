@@ -16,6 +16,7 @@ from .core.cookie_pool import CookiePool
 from .core.syncer import Syncer
 from .core.syncer_v2 import Syncer as SyncerV2
 from .core.database import Database
+from .core.feishu_sync import FeishuSyncer
 from .core.history import HistoryDB
 from .core.scheduler import TaskScheduler
 from .services.downloader import ServiceManager
@@ -64,6 +65,14 @@ def get_database() -> Database:
     if database is None:
         database = Database()
     return database
+
+
+def get_feishu_syncer() -> FeishuSyncer | None:
+    """获取飞书同步器"""
+    f = get_feishu()
+    if f and config.feishu.get("app_token"):
+        return FeishuSyncer(f, config.feishu)
+    return None
 
 
 def get_syncer() -> Syncer | None:
@@ -1075,7 +1084,189 @@ async def api_database_clear_table(table_name: str):
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 
-# --- 采集 ---
+# --- 飞书同步 ---
+
+@app.post("/api/feishu/sync")
+async def api_feishu_sync():
+    """飞书双向同步"""
+    fs = get_feishu_syncer()
+    if not fs:
+        return JSONResponse(
+            {"success": False, "message": "飞书未配置"},
+            status_code=400,
+        )
+
+    try:
+        result = fs.sync_all()
+        return {
+            "success": len(result.errors) == 0,
+            "message": "飞书同步完成",
+            **result.to_dict(),
+        }
+    except Exception as e:
+        logger.error(f"飞书同步失败: {e}")
+        return JSONResponse(
+            {"success": False, "message": f"同步异常: {str(e)}"},
+            status_code=500,
+        )
+
+
+@app.post("/api/feishu/sync/to-feishu")
+async def api_feishu_sync_to():
+    """本地 → 飞书"""
+    fs = get_feishu_syncer()
+    if not fs:
+        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
+
+    try:
+        coll_result = fs.sync_collection_to_feishu()
+        acc_result = fs.sync_account_to_feishu()
+        return {
+            "success": True,
+            "message": f"同步到飞书完成: 采集表 {coll_result['created']}新增 {coll_result['updated']}更新, 账号表 {acc_result['created']}新增 {acc_result['updated']}更新",
+            "collection": coll_result,
+            "account": acc_result,
+        }
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@app.post("/api/feishu/sync/from-feishu")
+async def api_feishu_sync_from():
+    """飞书 → 本地"""
+    fs = get_feishu_syncer()
+    if not fs:
+        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
+
+    try:
+        coll_result = fs.sync_collection_from_feishu()
+        acc_result = fs.sync_account_from_feishu()
+        return {
+            "success": True,
+            "message": f"从飞书同步完成: 采集表 {coll_result['created']}新增 {coll_result['updated']}更新, 账号表 {acc_result['created']}新增 {acc_result['updated']}更新",
+            "collection": coll_result,
+            "account": acc_result,
+        }
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+# --- 采集（使用新数据库）---
+
+@app.post("/api/collect/v2/account")
+async def api_collect_v2_account(request: Request):
+    """整号采集（使用新数据库）- SSE 实时进度"""
+    db = get_database()
+    c = get_collector()
+
+    data = await request.json()
+    account_names = data.get("account_names", "")
+    rating_min = data.get("rating_min", 3)
+
+    # 从数据库获取账号
+    accounts = db.get_all_accounts()
+    if account_names:
+        names = [n.strip() for n in account_names.split(",") if n.strip()]
+        accounts = [a for a in accounts if a.get("账号名称") in names]
+    else:
+        accounts = [a for a in accounts if a.get("等级", 0) >= rating_min and a.get("账号标识")]
+
+    if not accounts:
+        return JSONResponse({"success": False, "message": "没有符合条件的账号"}, status_code=400)
+
+    # 按等级排序
+    accounts.sort(key=lambda a: a.get("等级", 0), reverse=True)
+
+    import json
+
+    async def collect_stream():
+        try:
+            yield f"data: {json.dumps({'type': 'start', 'message': '开始采集'})}\n\n"
+            yield f"data: {json.dumps({'type': 'stats', 'total': len(accounts), 'success': 0, 'failed': 0})}\n\n"
+
+            # 获取 Cookie
+            cookies = db.get_enabled_cookies()
+            cookie_list = [ck.get("Cookie", "") for ck in cookies]
+
+            success = 0
+            failed = 0
+
+            for i, account in enumerate(accounts):
+                account_name = account.get("账号名称") or account.get("昵称") or account.get("账号标识", "")
+                sec_user_id = account.get("账号标识", "")
+                platform = account.get("平台", "抖音")
+
+                yield f"data: {json.dumps({'type': 'progress', 'message': f'采集 [{i+1}/{len(accounts)}]: {account_name}'})}\n\n"
+
+                try:
+                    import time
+                    start_time = time.time()
+
+                    # 获取 Cookie
+                    cookie = cookie_list[i % len(cookie_list)] if cookie_list else ""
+
+                    # 调用 TTD API 采集
+                    result = await c.collect_account(
+                        Account(
+                            name=account_name,
+                            platform=platform,
+                            sec_user_id=sec_user_id,
+                            collection_type="发布",
+                        ),
+                        cookie=cookie,
+                    )
+
+                    end_time = time.time()
+
+                    if result.status == "success":
+                        success += 1
+                        # 记录历史
+                        db.add_history({
+                            "账号名称": account_name,
+                            "平台": platform,
+                            "账号标识": sec_user_id,
+                            "采集类型": "发布",
+                            "等级": account.get("等级"),
+                            "状态": "成功",
+                            "作品数": result.works_count,
+                            "开始时间": datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S"),
+                            "结束时间": datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S"),
+                            "耗时秒数": end_time - start_time,
+                        })
+                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ {account_name}: {result.works_count} 个作品'})}\n\n"
+                    else:
+                        failed += 1
+                        db.add_history({
+                            "账号名称": account_name,
+                            "平台": platform,
+                            "账号标识": sec_user_id,
+                            "采集类型": "发布",
+                            "等级": account.get("等级"),
+                            "状态": "失败",
+                            "作品数": 0,
+                            "开始时间": datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S"),
+                            "结束时间": datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S"),
+                            "耗时秒数": end_time - start_time,
+                            "错误信息": result.message,
+                        })
+                        yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {account_name}: {result.message}'})}\n\n"
+
+                    yield f"data: {json.dumps({'type': 'stats', 'total': len(accounts), 'success': success, 'failed': failed})}\n\n"
+
+                except Exception as e:
+                    failed += 1
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {account_name}: {e}'})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'complete', 'success': failed == 0, 'message': f'采集完成: 成功 {success} 个, 失败 {failed} 个', 'total': len(accounts), 'success_count': success, 'failed': failed})}\n\n"
+
+        except Exception as e:
+            logger.error(f"采集失败: {e}")
+            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'采集失败: {str(e)}', 'total': 0, 'success_count': 0, 'failed': 1})}\n\n"
+
+    return StreamingResponse(collect_stream(), media_type="text/event-stream")
+
+
+# --- 原有采集 ---
 
 @app.post("/api/collect/account")
 async def api_collect_account(
