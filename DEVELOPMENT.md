@@ -36,37 +36,70 @@ DoukHub 是一个社交媒体数据采集管理平台，整合 TikTokDownloader 
 
 ## 核心流程设计
 
-### 方案1：三步同步流程（当前讨论中）
+### 三步同步流程（已确认）
 
-```
-步骤1：导入采集表
-  输入：文本（正则提取）
-  操作：解析 → 写入采集表（share、等级、标签等）
-  状态：已同步=否
+#### 步骤1：导入采集表
 
-步骤2：更新采集表
-  读取：采集表每行
-  条件：已同步=否
-  操作：
-    - 读取 sec_user_id（如果有）
-    - 没有则读取 share → 调用 /douyin/share → 提取 sec_user_id
-    - 写入 sec_user_id 到采集表
-    - 成功：已同步=是
-    - 失败：同步错误="失败原因"
-  API：/douyin/share
+**输入：** 用户粘贴的文本（支持多种格式）
 
-步骤3：更新账号表
-  读取：采集表每行
-  条件：已同步=是
-  操作：
-    - 读取 sec_user_id
-    - 调用 /douyin/account → 获取账号详细信息
-    - 写入账号表（所有详细信息）
-    - 从采集表复制等级、标签到账号表
-    - 成功：已更新=是
-    - 失败：更新错误="失败原因"
-  API：/douyin/account
-```
+**操作：**
+1. 正则提取信息（share、等级、标签等）
+2. 标准化 share 格式（去掉 `https://v.douyin.com/` 前缀、参数等）
+3. 未匹配字段写入备注
+4. 去重检查（基于标准化后的 share）
+5. 重复处理：等级取高的，标签合并（去重），删除重复项
+6. 写入飞书采集表 + 本地数据库缓存
+
+**状态：** 已同步=否（等待步骤2）
+
+#### 步骤2：更新采集表（获取 sec_user_id）
+
+**条件：** sec_user_id 为空 的记录
+
+**操作：**
+1. 筛选 sec_user_id 为空的记录
+2. 读取 share → 调用 `/douyin/share` API
+3. 提取 sec_user_id
+4. 检查 sec_user_id 是否在采集表已存在
+5. 如果已存在：
+   - 等级取高的
+   - 标签合并
+   - 删除重复记录（保留有 sec_user_id 的记录）
+6. 如果不存在：
+   - 更新当前记录的 sec_user_id
+7. 成功：标记已同步=是
+8. 失败：记录同步错误，下次运行自动重试
+
+**API：** `/douyin/share`
+
+#### 步骤3：同步账号表
+
+**条件：** 已同步=否 的记录
+
+**操作：**
+1. 筛选已同步=否 的记录
+2. 读取 sec_user_id
+3. 检查账号表是否已有该 sec_user_id
+4. 如果已有：
+   - 等级取高的
+   - 标签合并
+   - 更新账号表
+   - 标记采集表已同步=是
+5. 如果没有：
+   - 调用 `/douyin/account` API 获取账号详细信息
+   - 创建新记录
+   - 标记采集表已同步=是
+6. 失败：记录更新错误，下次运行自动重试
+
+**API：** `/douyin/account`
+
+#### 一键同步
+
+**执行顺序：** 步骤1 → 步骤2 → 步骤3
+
+**进度显示：** 每个步骤都显示详细进度（处理 X/Y 条，成功 X 条，失败 X 条）
+
+**错误处理：** 即使某步骤失败，也继续后续步骤，最后汇总显示结果
 
 ### 数据流向
 
@@ -87,62 +120,220 @@ DoukHub 是一个社交媒体数据采集管理平台，整合 TikTokDownloader 
 
 ## 数据表设计
 
-### 采集表（Collection Table）
+### 设计原则
 
-| 字段 | 类型 | 用途 | 更新时机 |
+1. **字段尽量少**：只保留必要字段
+2. **飞书和本地数据库一致**：缓存表镜像飞书表，飞书挂了仍可工作
+3. **中文字段名**：所有字段使用中文
+4. **包含时间戳**：创建时间、更新时间
+
+### 三层架构
+
+```
+1. 工具层（DoukHub 代码）
+   └─ /Users/gm/AI/DoukHub/
+
+2. 配置层（个人信息）
+   └─ ~/.doukhub/
+      ├─ config.json          # 飞书凭证、路径设置（保留 JSON）
+      └─ doukhub.db           # SQLite 本地数据库
+
+3. 内核层（TTD/XHS）
+   └─ /Users/gm/AI/DoukHub/TikTokDownloader/
+   └─ /Users/gm/AI/DoukHub/XHS-Downloader/
+```
+
+### 飞书表设计
+
+#### 采集表（Collection Table）
+
+| 字段名 | 类型 | 说明 | 更新时机 |
 |---|---|---|---|
-| `share` | 文本 | 抖音分享码（如 iMLuCKjq） | 导入时写入 |
-| `等级` | 数字 | 1-4 | 导入时写入 |
-| `标签` | 多选 | 标签列表 | 导入时写入 |
-| `sec_user_id` | 文本 | 账号唯一标识 | 步骤2写入 |
-| `已同步` | 复选框 | 是否已获取 sec_user_id | 步骤2更新 |
-| `同步错误` | 文本 | 失败原因 | 步骤2失败时写入 |
-| `备注` | 文本 | 用户备注 | 导入时写入 |
-| `昵称` | 文本 | （次要，不用于流程） | 导入时写入 |
-| `粉丝` | 数字 | （次要，不用于流程） | 导入时写入 |
-| `作品` | 数字 | （次要，不用于流程） | 导入时写入 |
+| 分享码 | 文本 | 抖音分享码（如 iMLuCKjq） | 导入时写入 |
+| 平台 | 单选 | 抖音/小红书/TikTok | 导入时写入 |
+| 等级 | 数字 | 1-4 | 导入时写入，去重时取高的 |
+| 标签 | 多选 | 标签列表 | 导入时写入，去重时合并 |
+| 账号标识 | 文本 | sec_user_id（步骤2写入） | 步骤2写入 |
+| 已同步 | 复选框 | 是否已同步到账号表 | 步骤3更新 |
+| 同步错误 | 文本 | 失败原因 | 步骤2/3失败时写入 |
+| 备注 | 文本 | 用户备注 + 合并信息 | 导入时写入，合并时追加 |
+| 昵称 | 文本 | （次要，导入时可能有） | 导入时写入 |
+| 粉丝数 | 数字 | （次要，导入时可能有） | 导入时写入 |
+| 作品数 | 数字 | （次要，导入时可能有） | 导入时写入 |
 
-**说明：**
-- 采集表是元信息输入，只包含用户手动填写的基础信息
-- 粉丝数、作品数等详细信息不在采集表更新，只在账号表维护
-- `已同步` 表示是否已完成步骤2（获取 sec_user_id）
+#### 账号表（Account Table）
 
-### 账号表（Account Table）
-
-| 字段 | 类型 | 用途 | 更新时机 |
+| 字段名 | 类型 | 说明 | 更新时机 |
 |---|---|---|---|
-| `账号名称` | 文本 | 账号名称 | 步骤3写入 |
-| `平台` | 单选 | 抖音/TikTok/小红书 | 步骤3写入 |
-| `链接` | URL | 账号主页链接 | 步骤3写入 |
-| `sec_user_id` | 文本 | 账号唯一标识 | 步骤3写入 |
-| `等级` | 数字 | 从采集表复制 | 步骤3写入 |
-| `标签` | 多选 | 从采集表复制 | 步骤3写入 |
-| `昵称` | 文本 | API 获取 | 步骤3写入 |
-| `粉丝数` | 数字 | API 获取 | 步骤3写入 |
-| `作品数` | 数字 | API 获取 | 步骤3写入 |
-| `签名` | 文本 | API 获取 | 步骤3写入 |
-| `头像` | URL | API 获取 | 步骤3写入 |
-| `已更新` | 复选框 | 是否已获取详细信息 | 步骤3更新 |
-| `更新错误` | 文本 | 失败原因 | 步骤3失败时写入 |
+| 账号名称 | 文本 | 账号名称 | 步骤3写入 |
+| 平台 | 单选 | 抖音/小红书/TikTok | 步骤3写入 |
+| 链接 | URL | 账号主页链接 | 步骤3写入 |
+| 账号标识 | 文本 | sec_user_id（唯一索引） | 步骤3写入 |
+| 等级 | 数字 | 从采集表复制，去重时取高的 | 步骤3写入 |
+| 标签 | 多选 | 从采集表复制，去重时合并 | 步骤3写入 |
+| 昵称 | 文本 | API 获取 | 步骤3写入 |
+| 粉丝数 | 数字 | API 获取（以最新为准） | 步骤3写入 |
+| 作品数 | 数字 | API 获取（以最新为准） | 步骤3写入 |
+| 签名 | 文本 | API 获取 | 步骤3写入 |
+| 头像 | URL | API 获取 | 步骤3写入 |
+| 已更新 | 复选框 | 是否已获取详细信息 | 步骤3更新 |
+| 更新错误 | 文本 | 失败原因 | 步骤3失败时写入 |
 
-**说明：**
-- 账号表是详细信息输出，包含所有从 API 获取的数据
-- 等级和标签从采集表复制，保持一致
-- 粉丝数、作品数始终以 API 获取的最新数据为准
-- `已更新` 表示是否已完成步骤3（获取账号详细信息）
+#### Cookie 表（Cookie Table）
 
-### Cookie 表（Cookie Table）
-
-| 字段 | 类型 | 用途 |
+| 字段名 | 类型 | 说明 |
 |---|---|---|
-| `Cookie` | 文本 | Cookie 字符串 |
-| `平台` | 单选 | 抖音/TikTok/小红书/通用 |
-| `状态` | 单选 | 正常/失效 |
-| `启用` | 复选框 | 是否参与轮换 |
-| `备注` | 文本 | Cookie 说明 |
-| `最后验证时间` | 日期 | 上次验证时间 |
+| Cookie | 文本 | Cookie 字符串 |
+| 平台 | 单选 | 抖音/小红书/TikTok/通用 |
+| 状态 | 单选 | 正常/失效 |
+| 启用 | 复选框 | 是否参与轮换 |
+| 备注 | 文本 | Cookie 说明 |
+| 验证时间 | 日期 | 上次验证时间 |
 
 ---
+
+## 本地数据库设计
+
+### 数据库文件
+
+- **位置：** `~/.doukhub/doukhub.db`
+- **格式：** SQLite
+- **用途：** 飞书表的本地镜像、缓存、历史记录
+
+### 数据库表结构（5张表）
+
+#### 表1：采集表缓存（collection_cache）
+
+```sql
+CREATE TABLE collection_cache (
+    记录ID TEXT PRIMARY KEY,
+    分享码 TEXT UNIQUE NOT NULL,
+    平台 TEXT,
+    等级 INTEGER,
+    标签 TEXT,
+    账号标识 TEXT,
+    已同步 BOOLEAN DEFAULT 0,
+    同步错误 TEXT,
+    备注 TEXT,
+    昵称 TEXT,
+    粉丝数 INTEGER,
+    作品数 INTEGER,
+    创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+    更新时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_collection_share ON collection_cache(分享码);
+CREATE INDEX idx_collection_sec_user_id ON collection_cache(账号标识);
+```
+
+#### 表2：账号表缓存（account_cache）
+
+```sql
+CREATE TABLE account_cache (
+    记录ID TEXT PRIMARY KEY,
+    账号名称 TEXT,
+    平台 TEXT,
+    链接 TEXT,
+    账号标识 TEXT UNIQUE NOT NULL,
+    等级 INTEGER,
+    标签 TEXT,
+    昵称 TEXT,
+    粉丝数 INTEGER,
+    作品数 INTEGER,
+    签名 TEXT,
+    头像 TEXT,
+    已更新 BOOLEAN DEFAULT 0,
+    更新错误 TEXT,
+    创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+    更新时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_account_sec_user_id ON account_cache(账号标识);
+```
+
+#### 表3：Cookie表缓存（cookie_cache）
+
+```sql
+CREATE TABLE cookie_cache (
+    记录ID TEXT PRIMARY KEY,
+    Cookie TEXT NOT NULL,
+    平台 TEXT,
+    状态 TEXT DEFAULT '正常',
+    启用 BOOLEAN DEFAULT 1,
+    备注 TEXT,
+    验证时间 DATETIME,
+    创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+    更新时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### 表4：采集历史（collection_history）
+
+```sql
+CREATE TABLE collection_history (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    账号名称 TEXT,
+    平台 TEXT,
+    账号标识 TEXT,
+    采集类型 TEXT,
+    等级 INTEGER,
+    标签 TEXT,
+    状态 TEXT,
+    作品数 INTEGER,
+    开始时间 DATETIME,
+    结束时间 DATETIME,
+    耗时秒数 REAL,
+    错误信息 TEXT,
+    创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_history_sec_user_id ON collection_history(账号标识);
+CREATE INDEX idx_history_created_at ON collection_history(创建时间);
+```
+
+#### 表5：定时任务（scheduled_tasks）
+
+```sql
+CREATE TABLE scheduled_tasks (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    任务名称 TEXT NOT NULL,
+    Cron表达式 TEXT NOT NULL,
+    等级筛选 TEXT,
+    启用 BOOLEAN DEFAULT 1,
+    上次运行 DATETIME,
+    下次运行 DATETIME,
+    创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+    更新时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### 缓存同步策略
+
+```
+飞书表 → 本地缓存（读取飞书后立即更新）
+本地缓存 → 飞书表（修改后尽快写回，或记录待同步状态）
+
+同步状态字段（可选）：
+  - synced：已同步
+  - pending：待同步（本地修改，等待写回飞书）
+  - failed：同步失败
+```
+
+### 数据库管理界面
+
+**功能：**
+- 查看所有表（5张表）
+- 查看每张表的记录数
+- 浏览表内容（分页显示）
+- 支持搜索/筛选
+- 删除单条记录
+- 清空整张表
+- 导出为 Excel
+- 刷新缓存（从飞书重新同步）
+
+**位置：** 侧边栏增加"数据库"按钮
+
+**实现复杂度：** 中等（2-3小时）
 
 ## API 接口设计
 
@@ -156,7 +347,7 @@ DoukHub 是一个社交媒体数据采集管理平台，整合 TikTokDownloader 
 ```json
 POST /douyin/share
 {
-  "text": "iMLuCKjq"  // 或完整短链接
+  "text": "iMLuCKjq"
 }
 ```
 
@@ -183,6 +374,7 @@ POST /douyin/account
   "sec_user_id": "MS4wLjABAAAAXXX",
   "cookie": "sessionid=xxx",
   "tab": "post",
+  "count": 1,
   "source": false
 }
 ```
@@ -205,10 +397,6 @@ POST /douyin/account
   ]
 }
 ```
-
-**说明：**
-- 当前代码使用 `count=1` 参数减少数据量
-- 从第一个作品的 author 字段提取账号信息
 
 ### XHS-Downloader API
 
@@ -300,6 +488,185 @@ app/
 - `resolve_short_url()` - 跟随重定向获取完整 URL
 - `extract_sec_user_id()` - 从 URL 提取 sec_user_id
 - `detect_platform()` - 根据 URL 识别平台
+
+---
+
+## 去重和合并逻辑
+
+### 去重场景（4个）
+
+| 场景 | 触发时机 | 判断依据 | 处理方式 |
+|---|---|---|---|
+| **导入去重** | 导入采集表时 | 分享码相同 | 等级取高的，标签合并，删除重复项 |
+| **步骤2去重** | 获取 sec_user_id 后 | 账号标识在采集表已存在 | 等级取高的，标签合并，删除重复记录 |
+| **步骤3去重** | 同步账号表时 | 账号标识在账号表已存在 | 等级取高的，标签合并，更新账号表 |
+| **账号表去重** | 手动触发 | 账号标识在账号表重复 | 等级取高的，标签合并，删除重复记录 |
+
+### 等级更新逻辑
+
+**规则：等级取高的**
+
+```python
+# 伪代码
+new_level = max(existing_level, new_level)
+```
+
+**更新时机：**
+1. 导入采集表时：如果分享码重复，等级取高的
+2. 步骤2去重时：如果账号标识已存在，等级取高的
+3. 步骤3去重时：如果账号标识已存在，等级取高的
+
+### 标签合并逻辑
+
+**规则：合并去重，大小写不敏感**
+
+```python
+# 伪代码
+existing_tags = set(tag.lower() for tag in existing_tags)
+new_tags = set(tag.lower() for tag in new_tags)
+merged_tags = existing_tags.union(new_tags)
+```
+
+**示例：**
+```
+采集表标签：["街拍", "户外"]
+账号表标签：["街拍", "个人"]
+合并后：["街拍", "户外", "个人"]  ← "街拍"只保留一个
+```
+
+**大小写处理：**
+- "COS" 和 "cos" 视为相同标签
+- 合并后统一转换为小写或保持原样
+
+### 备注字段格式
+
+**合并信息记录格式：**
+```
+[操作类型] 详细信息
+
+示例：
+[导入合并] 原等级:1→3, 新增标签:[街拍,户外]
+[步骤2合并] 原等级:2→3
+[步骤3合并] 同步到账号表
+[去重合并] 合并自记录 recXXX
+[重试] 重试 2 次，原因：API 超时
+```
+
+---
+
+## 错误处理和重试机制
+
+### 失败处理
+
+**规则：**
+- API 调用失败：标记记录状态为"失败"，在错误字段记录原因
+- 不自动重试，下次运行时自动重试失败的记录
+- 不需要最大重试次数
+
+**筛选条件：**
+- 步骤2：`账号标识` 为空 且 `同步错误` 为空
+- 步骤3：`已同步` = 否 且 `更新错误` 为空
+
+### Cookie 失效处理
+
+**规则：**
+- API 返回 Cookie 失效时，标记该 Cookie 的"状态"字段为"失效"
+- 自动切换到下一个可用的 Cookie
+- 如果没有可用 Cookie，记录错误并停止
+
+**Cookie 轮换逻辑：**
+```python
+# 筛选启用的 Cookie
+enabled_cookies = [c for c in cookies if c.is_enabled and c.status == '正常']
+
+# 选择一个 Cookie
+cookie = select_cookie(enabled_cookies)
+
+# 调用 API
+try:
+    result = call_api(cookie)
+except CookieExpiredError:
+    # 标记 Cookie 失效
+    cookie.status = '失效'
+    # 切换到下一个
+    cookie = select_cookie(enabled_cookies)
+    result = call_api(cookie)
+```
+
+### 用户确认
+
+**规则：**
+- 正常操作不需要询问用户
+- 只有危险操作（如清空表、删除记录）才需要确认
+
+---
+
+## 前端界面设计
+
+### 同步页面按钮
+
+**4个按钮：**
+1. 📥 导入采集表（步骤1）
+2. 🔄 更新采集表（步骤2）
+3. 📤 更新账号表（步骤3）
+4. ⚡ 一键同步（执行步骤1→2→3）
+
+### 进度显示
+
+**每个步骤都显示详细进度：**
+```
+步骤1：导入采集表
+  ├─ 解析 X 条
+  ├─ 新增 X 条
+  ├─ 更新 X 条
+  └─ 跳过 X 条（重复）
+
+步骤2：更新采集表
+  ├─ 处理 X/Y 条
+  ├─ 成功 X 条
+  └─ 失败 X 条
+
+步骤3：更新账号表
+  ├─ 处理 X/Y 条
+  ├─ 成功 X 条
+  └─ 失败 X 条
+
+汇总：
+  ├─ 步骤1：新增 X，更新 X，跳过 X
+  ├─ 步骤2：成功 X，失败 X
+  └─ 步骤3：成功 X，失败 X
+```
+
+### 去重功能
+
+**前端按钮：**
+- 在"数据库"页面增加按钮："去除账号表重复"
+- 其他去重自动执行，不需要用户手动触发
+
+**去重结果显示：**
+```
+去重完成：
+  - 发现 X 个重复账号
+  - 合并 X 个标签
+  - 删除 X 条重复记录
+```
+
+---
+
+## 标签合并规则
+
+### 去重规则
+
+**合并时去重，大小写不敏感**
+
+**示例：**
+```
+采集表标签：["街拍", "户外"]
+账号表标签：["街拍", "个人"]
+合并后：["街拍", "户外", "个人"]  ← "街拍"只保留一个
+
+"COS" 和 "cos" 视为相同标签
+```
 
 ---
 
