@@ -110,6 +110,7 @@
         <table>
             <thead>
                 <tr>
+                    <th>原始内容</th>
                     <th>地址</th>
                     <th>等级</th>
                     <th>标签</th>
@@ -273,6 +274,7 @@
         const previewBody = document.getElementById('preview-body');
         previewBody.innerHTML = parsedData.map(item => `
             <tr>
+                <td style="font-size:12px;color:#666;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${item.raw}">${item.raw || '-'}</td>
                 <td><code style="font-size:12px;">${item.link}</code></td>
                 <td>${'⭐'.repeat(item.rating)}</td>
                 <td>${item.tags.map(t => `<span class="tag">${t}</span>`).join('')}</td>
@@ -319,7 +321,7 @@
                     }
                 }
 
-                parsedData.push({ link, rating, tags, name: '' });
+                parsedData.push({ link, rating, tags, name: '', raw: line.trim() });
             }
         }
     }
@@ -375,7 +377,7 @@
                     }
                 }
 
-                parsedData.push({ link, rating, tags, name, follower_count, aweme_count });
+                parsedData.push({ link, rating, tags, name, follower_count, aweme_count, raw: item.trim() });
             } catch (e) { /* skip */ }
         }
     }
