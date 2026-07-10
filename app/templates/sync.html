@@ -128,7 +128,14 @@
         <span class="collapse-icon">▼</span>
     </h3>
     <div class="card-content">
-    <button class="btn btn-primary" onclick="startSync()" id="sync-btn">开始同步</button>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button class="btn btn-primary" onclick="startSync()" id="sync-btn">① 快速同步</button>
+        <button class="btn btn-secondary" onclick="fetchAccountInfo()" id="fetch-info-btn">② 获取账号信息</button>
+    </div>
+    <div style="font-size:12px;color:#888;margin-bottom:12px;">
+        <div>① 快速同步：解析短链接，写入账号表（快，不获取详细信息）</div>
+        <div>② 获取账号信息：获取昵称、粉丝数等（慢，可后续执行）</div>
+    </div>
     <!-- 同步进度 -->
     <div id="sync-progress" style="display:none;margin-top:16px;">
         <div class="progress-bar-container">
@@ -513,7 +520,72 @@
             showToast('同步请求失败', 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = '开始同步';
+            btn.textContent = '① 快速同步';
+        }
+    }
+
+    async function fetchAccountInfo() {
+        const btn = document.getElementById('fetch-info-btn');
+        btn.disabled = true;
+        btn.textContent = '获取中...';
+
+        const progressDiv = document.getElementById('sync-progress');
+        const progressBar = document.getElementById('sync-progress-bar');
+        const progressText = document.getElementById('sync-progress-text');
+        const logBox = document.getElementById('sync-log');
+
+        progressDiv.style.display = 'block';
+        logBox.style.display = 'block';
+        logBox.innerHTML = '';
+        progressBar.style.width = '0%';
+        progressBar.style.background = 'linear-gradient(90deg, #e94560, #ff6b6b)';
+        document.getElementById('stat-total').textContent = '...';
+        document.getElementById('stat-success').textContent = '0';
+        document.getElementById('stat-api').textContent = '0';
+        document.getElementById('stat-failed').textContent = '0';
+
+        progressText.textContent = '正在获取账号信息...';
+        addLog(logBox, '<div class="log-info">→ 开始获取账号详细信息...</div>');
+
+        try {
+            const data = await apiCall('/api/sync/fetch-info', 'POST');
+
+            progressBar.style.width = '100%';
+
+            if (data.success) {
+                document.getElementById('stat-total').textContent = data.total || 0;
+                document.getElementById('stat-success').textContent = data.updated_count || 0;
+                document.getElementById('stat-api').textContent = data.api_calls || 0;
+                document.getElementById('stat-failed').textContent = data.error_count || 0;
+
+                addLog(logBox, `<div class="log-ok">✅ 获取完成: ${data.updated_count} 个账号</div>`);
+                addLog(logBox, `<div class="log-info">→ API 调用: ${data.api_calls} 次</div>`);
+
+                if (data.errors && data.errors.length > 0) {
+                    data.errors.slice(0, 5).forEach(e => {
+                        addLog(logBox, `<div class="log-err">❌ ${e}</div>`);
+                    });
+                    if (data.errors.length > 5) {
+                        addLog(logBox, `<div class="log-err">... 还有 ${data.errors.length - 5} 个错误</div>`);
+                    }
+                }
+
+                progressText.textContent = `获取完成: ${data.message}`;
+                showToast('获取完成', 'success');
+                setTimeout(() => location.reload(), 2000);
+            } else {
+                addLog(logBox, `<div class="log-err">❌ 获取失败: ${data.message}</div>`);
+                progressText.textContent = `失败: ${data.message}`;
+                progressBar.style.background = '#f44336';
+                showToast(data.message, 'error');
+            }
+        } catch (e) {
+            addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
+            progressText.textContent = `请求失败`;
+            showToast('获取请求失败', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '② 获取账号信息';
         }
     }
 </script>

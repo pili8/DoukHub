@@ -393,6 +393,7 @@ async def api_test_xhs_status():
 
 @app.post("/api/sync")
 async def api_sync():
+    """第一阶段：快速同步（只解析短链接，不获取账号信息）"""
     s = get_syncer()
     if not s:
         return JSONResponse(
@@ -426,6 +427,35 @@ async def api_sync():
         logger.error(f"同步失败: {e}")
         return JSONResponse(
             {"success": False, "message": f"同步异常: {str(e)}"},
+            status_code=500,
+        )
+
+
+@app.post("/api/sync/fetch-info")
+async def api_sync_fetch_info():
+    """第二阶段：获取账号详细信息"""
+    s = get_syncer()
+    if not s:
+        return JSONResponse(
+            {"success": False, "message": "飞书未配置"},
+            status_code=400,
+        )
+    
+    try:
+        result = await s.fetch_account_info()
+        return {
+            "success": result.success,
+            "message": result.message,
+            "total": result.total,
+            "updated_count": result.updated_accounts,
+            "api_calls": result.api_calls,
+            "error_count": len(result.errors),
+            "errors": result.errors,
+        }
+    except Exception as e:
+        logger.error(f"获取账号信息失败: {e}")
+        return JSONResponse(
+            {"success": False, "message": f"获取异常: {str(e)}"},
             status_code=500,
         )
 

@@ -196,7 +196,7 @@ class Syncer:
         self.cookies_file = data_dir / "cookies.xlsx" if data_dir else None
 
     async def sync(self) -> SyncResult:
-        """执行同步：采集表 → 解析短链接 → 获取账号信息 → 写入账号表"""
+        """执行同步：采集表 → 解析短链接 → 写入账号表（第一阶段：快速同步）"""
         result = SyncResult()
 
         try:
@@ -221,7 +221,7 @@ class Syncer:
                     if acc.sec_user_id:
                         existing_accounts[acc.sec_user_id] = acc
 
-            # 5. 逐条处理
+            # 5. 逐条处理（第一阶段：只解析短链接，不获取账号信息）
             for i, entry in enumerate(entries):
                 link = entry["link"]
                 rating = entry.get("rating", 3)
@@ -251,52 +251,36 @@ class Syncer:
                         result.errors.append(f"{link}: 无法解析")
                         continue
 
-                    # 检查是否已有账号信息
+                    # 检查是否已有账号
                     existing_account = existing_accounts.get(sec_user_id)
-                    info_fetched = existing_account.info_fetched if existing_account else False
 
-                    # 如果已获取信息，跳过 API 调用
-                    if info_fetched:
-                        logger.info(f"  跳过账号信息获取（已缓存）")
+                    if existing_account:
+                        # 更新已有账号
                         account = existing_account
                         account.link = resolved_url or link
+                        account.rating = rating
+                        account.tags = entry.get("tags", [])
+                        account.note = entry.get("note", "")
                         account.synced_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         result.updated_accounts += 1
+                        logger.info(f"  更新账号: {account.name or sec_user_id}")
                     else:
-                        # 通过 TTD API 获取账号详情
-                        info = await self.collector.get_account_info(sec_user_id, platform, cookie)
-                        result.api_calls += 1  # 记录 API 调用
-                        logger.info(f"  账号信息: {info.get('nickname', '')} ({info.get('follower_count', 0)} 粉丝)")
-
-                        # 构建 Account
+                        # 创建新账号（不获取详细信息）
                         account = Account(
-                            name=entry.get("name", "") or info.get("nickname", ""),
+                            name=entry.get("name", ""),
                             platform=platform,
                             link=resolved_url or link,
                             rating=rating,
                             tags=entry.get("tags", []),
                             note=entry.get("note", ""),
                             sec_user_id=sec_user_id,
-                            nickname=info.get("nickname", ""),
-                            follower_count=info.get("follower_count", 0),
-                            aweme_count=info.get("aweme_count", 0),
-                            signature=info.get("signature", ""),
-                            avatar=info.get("avatar", ""),
                             synced_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             enabled=True,
-                            info_fetched=True,
+                            info_fetched=False,  # 标记为未获取信息
                         )
-
-                        if sec_user_id in existing_accounts:
-                            result.updated_accounts += 1
-                            logger.info(f"  更新账号: {account.name}")
-                        else:
-                            result.new_accounts += 1
-                            existing_accounts[sec_user_id] = account
-                            logger.info(f"  新增账号: {account.name}")
-
-                    # 更新本地缓存
-                    existing_accounts[sec_user_id] = account
+                        result.new_accounts += 1
+                        existing_accounts[sec_user_id] = account
+                        logger.info(f"  新增账号: {account.name or sec_user_id}")
 
                     # 更新采集表状态
                     self._update_collection_status(record_id, "已同步", "", sec_user_id)
@@ -322,6 +306,82 @@ class Syncer:
             result.success = False
             result.message = f"同步失败: {e}"
             logger.error(f"同步失败: {e}")
+
+        return result
+
+    async def fetch_account_info(self) -> SyncResult:
+        """获取账号详细信息（第二阶段：异步获取）"""
+        result = SyncResult()
+
+        try:
+            # 1. 加载本地账号
+            if not self.accounts_file or not self.accounts_file.exists():
+                result.success = False
+                result.message = "没有本地账号缓存，请先执行同步"
+                return result
+
+            accounts = self.load_local_accounts()
+            result.total = len(accounts)
+
+            # 2. 筛选未获取信息的账号
+            accounts_to_fetch = [acc for acc in accounts if not acc.info_fetched and acc.sec_user_id]
+            logger.info(f"需要获取信息的账号: {len(accounts_to_fetch)} 个")
+
+            if not accounts_to_fetch:
+                result.success = True
+                result.message = "所有账号信息已获取"
+                return result
+
+            # 3. 获取 Cookie 池
+            cookies = self.load_local_cookies()
+            active_cookies = [c["cookie"] for c in cookies if c.get("enabled", True) and c.get("status", "正常") == "正常"]
+
+            # 4. 逐条获取账号信息
+            for i, account in enumerate(accounts_to_fetch):
+                logger.info(f"获取账号信息 [{i+1}/{len(accounts_to_fetch)}]: {account.sec_user_id}")
+
+                try:
+                    cookie = active_cookies[0] if active_cookies else ""
+                    info = await self.collector.get_account_info(account.sec_user_id, account.platform, cookie)
+                    result.api_calls += 1
+
+                    # 更新账号信息
+                    if info.get("nickname"):
+                        account.nickname = info.get("nickname", "")
+                        account.follower_count = info.get("follower_count", 0)
+                        account.aweme_count = info.get("aweme_count", 0)
+                        account.signature = info.get("signature", "")
+                        account.avatar = info.get("avatar", "")
+                        account.name = account.name or account.nickname
+                        account.info_fetched = True
+                        account.synced_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        result.updated_accounts += 1
+                        logger.info(f"  获取成功: {account.nickname} ({account.follower_count} 粉丝)")
+                    else:
+                        result.errors.append(f"{account.sec_user_id}: 获取信息失败")
+                        logger.warning(f"  获取失败: {account.sec_user_id}")
+
+                except Exception as e:
+                    result.errors.append(f"{account.sec_user_id}: {e}")
+                    logger.error(f"  获取异常: {account.sec_user_id} - {e}")
+
+            # 5. 保存本地账号缓存
+            logger.info("保存本地账号缓存...")
+            self._save_local_xlsx(accounts)
+
+            # 6. 写入飞书账号表
+            if self.account_table_id:
+                logger.info("写入飞书账号表...")
+                self._sync_to_feishu_account_table(accounts, result)
+
+            result.success = True
+            result.message = f"获取完成: {result.updated_accounts} 个账号"
+            logger.info(f"获取完成: {result.message}")
+
+        except Exception as e:
+            result.success = False
+            result.message = f"获取失败: {e}"
+            logger.error(f"获取失败: {e}")
 
         return result
 
