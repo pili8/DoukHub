@@ -391,9 +391,12 @@ async def api_test_xhs_status():
 
 # --- 飞书同步 ---
 
+from fastapi.responses import StreamingResponse
+
+
 @app.post("/api/sync")
 async def api_sync():
-    """第一阶段：快速同步（只解析短链接，不获取账号信息）"""
+    """第一阶段：快速同步（只解析短链接，不获取账号信息）- SSE 实时进度"""
     s = get_syncer()
     if not s:
         return JSONResponse(
@@ -411,24 +414,143 @@ async def api_sync():
         except Exception:
             pass
     
-    try:
-        result = await s.sync()
-        return {
-            "success": result.success,
-            "message": result.message,
-            "total": result.total,
-            "new_count": result.new_accounts,
-            "updated_count": result.updated_accounts,
-            "api_calls": result.api_calls,
-            "error_count": len(result.errors),
-            "errors": result.errors,
-        }
-    except Exception as e:
-        logger.error(f"同步失败: {e}")
-        return JSONResponse(
-            {"success": False, "message": f"同步异常: {str(e)}"},
-            status_code=500,
-        )
+    import json
+    import asyncio
+    
+    async def sync_stream():
+        """SSE 流式同步，实时返回进度"""
+        try:
+            # 发送开始事件
+            yield f"data: {json.dumps({'type': 'start', 'message': '开始同步'})}\n\n"
+            
+            # 1. 读取采集表
+            yield f"data: {json.dumps({'type': 'progress', 'message': '连接飞书...'})}\n\n"
+            records = s.feishu.get_all_records(s.app_token, s.collection_table_id)
+            total = len(records)
+            
+            yield f"data: {json.dumps({'type': 'stats', 'total': total, 'success': 0, 'api_calls': 0, 'failed': 0})}\n\n"
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'读取采集表: {total} 条记录'})}\n\n"
+            
+            # 2. 解析记录
+            from .core.syncer import _parse_collection_record
+            entries = [_parse_collection_record(r) for r in records]
+            entries = [e for e in entries if e.get("link")]
+            
+            # 3. 获取 Cookie 池
+            cookies = s.load_local_cookies()
+            active_cookies = [c["cookie"] for c in cookies if c.get("enabled", True) and c.get("status", "正常") == "正常"]
+            
+            # 4. 加载已有账号
+            existing_accounts = {}
+            if s.accounts_file and s.accounts_file.exists():
+                for acc in s.load_local_accounts():
+                    if acc.sec_user_id:
+                        existing_accounts[acc.sec_user_id] = acc
+            
+            # 5. 逐条处理
+            new_count = 0
+            updated_count = 0
+            api_calls = 0
+            failed = 0
+            errors = []
+            
+            for i, entry in enumerate(entries):
+                link = entry["link"]
+                rating = entry.get("rating", 3)
+                record_id = entry["record_id"]
+                
+                yield f"data: {json.dumps({'type': 'progress', 'message': f'处理 [{i+1}/{len(entries)}]: {link}'})}\n\n"
+                
+                try:
+                    # 补全短链接前缀
+                    if link and not link.startswith("http"):
+                        link = f"https://v.douyin.com/{link}"
+                    
+                    # 平台识别
+                    from .core.link_resolver import detect_platform, extract_sec_user_id
+                    platform = entry.get("platform", "") or detect_platform(link)
+                    
+                    # 解析短链接
+                    cookie = active_cookies[0] if active_cookies else ""
+                    resolved_url = await s.collector.resolve_short_url(link, platform)
+                    api_calls += 1
+                    
+                    # 提取 sec_user_id
+                    sec_user_id = extract_sec_user_id(resolved_url, platform)
+                    
+                    if not sec_user_id:
+                        s._update_collection_status(record_id, "失败", "无法解析短链接")
+                        errors.append(f"{link}: 无法解析")
+                        failed += 1
+                        yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {link}: 无法解析'})}\n\n"
+                        continue
+                    
+                    # 检查是否已有账号
+                    existing_account = existing_accounts.get(sec_user_id)
+                    
+                    if existing_account:
+                        account = existing_account
+                        account.link = resolved_url or link
+                        account.rating = rating
+                        account.tags = entry.get("tags", [])
+                        account.note = entry.get("note", "")
+                        from datetime import datetime
+                        account.synced_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        updated_count += 1
+                    else:
+                        from .core.collector import Account
+                        from datetime import datetime
+                        account = Account(
+                            name=entry.get("name", ""),
+                            platform=platform,
+                            link=resolved_url or link,
+                            rating=rating,
+                            tags=entry.get("tags", []),
+                            note=entry.get("note", ""),
+                            sec_user_id=sec_user_id,
+                            synced_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            enabled=True,
+                            info_fetched=False,
+                        )
+                        new_count += 1
+                        existing_accounts[sec_user_id] = account
+                    
+                    # 更新统计
+                    yield f"data: {json.dumps({'type': 'stats', 'total': total, 'success': new_count + updated_count, 'api_calls': api_calls, 'failed': failed})}\n\n"
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ [{i+1}/{len(entries)}] {account.name or sec_user_id}'})}\n\n"
+                    
+                    # 更新采集表状态
+                    s._update_collection_status(record_id, "已同步", "", sec_user_id)
+                    
+                    # 让出控制权，避免阻塞
+                    await asyncio.sleep(0)
+                    
+                except Exception as e:
+                    s._update_collection_status(record_id, "失败", str(e))
+                    errors.append(f"{link}: {e}")
+                    failed += 1
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ [{i+1}/{len(entries)}] {link}: {e}'})}\n\n"
+            
+            # 6. 保存本地账号缓存
+            yield f"data: {json.dumps({'type': 'progress', 'message': '保存本地账号缓存...'})}\n\n"
+            s._save_local_xlsx(list(existing_accounts.values()))
+            
+            # 7. 写入飞书账号表
+            if s.account_table_id:
+                yield f"data: {json.dumps({'type': 'progress', 'message': '写入飞书账号表...'})}\n\n"
+                from .core.syncer import SyncResult
+                result = SyncResult()
+                result.api_calls = api_calls
+                s._sync_to_feishu_account_table(list(existing_accounts.values()), result)
+            
+            # 发送完成事件
+            yield f"data: {json.dumps({'type': 'complete', 'success': True, 'message': f'同步完成: 新增 {new_count}, 更新 {updated_count}', 'total': total, 'new_count': new_count, 'updated_count': updated_count, 'api_calls': api_calls, 'error_count': failed, 'errors': errors[:5]})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"同步失败: {e}")
+            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'同步失败: {str(e)}', 'total': 0, 'new_count': 0, 'updated_count': 0, 'api_calls': 0, 'error_count': 1, 'errors': [str(e)]})}\n\n"
+    
+    return StreamingResponse(sync_stream(), media_type="text/event-stream")
 
 
 @app.post("/api/sync/fetch-info")

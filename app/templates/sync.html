@@ -457,6 +457,8 @@
     }
 
     // ========== 同步 ==========
+    let currentEventSource = null;
+    
     async function startSync() {
         const btn = document.getElementById('sync-btn');
         btn.disabled = true;
@@ -465,7 +467,6 @@
         const progressDiv = document.getElementById('sync-progress');
         const progressBar = document.getElementById('sync-progress-bar');
         const progressText = document.getElementById('sync-progress-text');
-        const progressCount = document.getElementById('sync-progress-count');
         const logBox = document.getElementById('sync-log');
 
         progressDiv.style.display = 'block';
@@ -477,43 +478,63 @@
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
 
-        progressText.textContent = '连接飞书，读取采集表...';
+        progressText.textContent = '连接飞书...';
         addLog(logBox, '<div class="log-info">→ 正在连接飞书...</div>');
 
+        // 关闭之前的 EventSource
+        if (currentEventSource) {
+            currentEventSource.close();
+        }
+
+        // 使用 fetch + POST 启动 SSE
         try {
-            const data = await apiCall('/api/sync', 'POST');
+            const response = await fetch('/api/sync', { method: 'POST' });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                addLog(logBox, `<div class="log-err">❌ ${error.message}</div>`);
+                progressText.textContent = `失败: ${error.message}`;
+                progressBar.style.background = '#f44336';
+                showToast(error.message, 'error');
+                btn.disabled = false;
+                btn.textContent = '① 快速同步';
+                return;
+            }
 
-            progressBar.style.width = '100%';
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
 
-            if (data.success) {
-                document.getElementById('stat-total').textContent = data.total || 0;
-                document.getElementById('stat-success').textContent = (data.new_count || 0) + (data.updated_count || 0);
-                document.getElementById('stat-api').textContent = data.api_calls || 0;
-                document.getElementById('stat-failed').textContent = data.error_count || 0;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-                addLog(logBox, `<div class="log-ok">✅ 飞书连接成功</div>`);
-                addLog(logBox, `<div class="log-info">→ 读取采集表: ${data.total} 条记录</div>`);
-                addLog(logBox, `<div class="log-info">→ API 调用: ${data.api_calls} 次</div>`);
-                addLog(logBox, `<div class="log-ok">✅ 同步完成: 新增 ${data.new_count}, 更新 ${data.updated_count}</div>`);
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
 
-                if (data.errors && data.errors.length > 0) {
-                    data.errors.slice(0, 5).forEach(e => {
-                        addLog(logBox, `<div class="log-err">❌ ${e}</div>`);
-                    });
-                    if (data.errors.length > 5) {
-                        addLog(logBox, `<div class="log-err">... 还有 ${data.errors.length - 5} 个错误</div>`);
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            handleSyncEvent(data);
+                        } catch (e) {
+                            // 忽略解析错误
+                        }
                     }
                 }
-
-                progressText.textContent = `同步完成: ${data.message}`;
-                showToast('同步完成', 'success');
-                setTimeout(() => location.reload(), 2000);
-            } else {
-                addLog(logBox, `<div class="log-err">❌ 同步失败: ${data.message}</div>`);
-                progressText.textContent = `失败: ${data.message}`;
-                progressBar.style.background = '#f44336';
-                showToast(data.message, 'error');
             }
+
+            // 处理剩余的 buffer
+            if (buffer.startsWith('data: ')) {
+                try {
+                    const data = JSON.parse(buffer.slice(6));
+                    handleSyncEvent(data);
+                } catch (e) {
+                    // 忽略解析错误
+                }
+            }
+
         } catch (e) {
             addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
             progressText.textContent = `请求失败`;
@@ -521,6 +542,56 @@
         } finally {
             btn.disabled = false;
             btn.textContent = '① 快速同步';
+        }
+    }
+
+    function handleSyncEvent(data) {
+        const progressBar = document.getElementById('sync-progress-bar');
+        const progressText = document.getElementById('sync-progress-text');
+        const logBox = document.getElementById('sync-log');
+
+        switch (data.type) {
+            case 'start':
+                addLog(logBox, `<div class="log-info">→ ${data.message}</div>`);
+                break;
+            
+            case 'progress':
+                progressText.textContent = data.message;
+                addLog(logBox, `<div class="log-info">→ ${data.message}</div>`);
+                break;
+            
+            case 'stats':
+                document.getElementById('stat-total').textContent = data.total || 0;
+                document.getElementById('stat-success').textContent = data.success || 0;
+                document.getElementById('stat-api').textContent = data.api_calls || 0;
+                document.getElementById('stat-failed').textContent = data.failed || 0;
+                // 更新进度条
+                if (data.total > 0) {
+                    const progress = ((data.success + data.failed) / data.total) * 100;
+                    progressBar.style.width = progress + '%';
+                }
+                break;
+            
+            case 'log':
+                const logClass = data.level === 'error' ? 'log-err' : data.level === 'ok' ? 'log-ok' : 'log-info';
+                const icon = data.level === 'error' ? '❌' : data.level === 'ok' ? '✅' : '→';
+                addLog(logBox, `<div class="${logClass}">${icon} ${data.message}</div>`);
+                break;
+            
+            case 'complete':
+                progressBar.style.width = '100%';
+                if (data.success) {
+                    addLog(logBox, `<div class="log-ok">✅ ${data.message}</div>`);
+                    progressText.textContent = `同步完成: ${data.message}`;
+                    showToast('同步完成', 'success');
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    addLog(logBox, `<div class="log-err">❌ ${data.message}</div>`);
+                    progressText.textContent = `失败: ${data.message}`;
+                    progressBar.style.background = '#f44336';
+                    showToast(data.message, 'error');
+                }
+                break;
         }
     }
 
