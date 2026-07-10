@@ -141,6 +141,16 @@
         <div>③ 同步账号表：调用 API 获取账号详细信息（昵称、粉丝数等）</div>
         <div>⚡ 一键同步：依次执行三个步骤</div>
     </div>
+
+    <!-- 飞书同步 -->
+    <div style="border-top:1px solid #eee;padding-top:12px;margin-top:12px;">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;">飞书同步</div>
+        <div style="display:flex;gap:8px;">
+            <button class="btn btn-secondary btn-sm" onclick="feishuSync('to')">📤 本地→飞书</button>
+            <button class="btn btn-secondary btn-sm" onclick="feishuSync('from')">📥 飞书→本地</button>
+            <button class="btn btn-secondary btn-sm" onclick="feishuSync('all')">🔄 双向同步</button>
+        </div>
+    </div>
     <!-- 同步进度 -->
     <div id="sync-progress" style="display:none;margin-top:16px;">
         <div class="progress-bar-container">
@@ -1066,6 +1076,30 @@
         }
         if (fetchInfoAbortController) {
             fetchInfoAbortController.abort();
+        }
+    }
+
+    // ========== 飞书同步 ==========
+    async function feishuSync(direction) {
+        showToast('正在同步...');
+        try {
+            let url;
+            if (direction === 'to') {
+                url = '/api/feishu/sync/to-feishu';
+            } else if (direction === 'from') {
+                url = '/api/feishu/sync/from-feishu';
+            } else {
+                url = '/api/feishu/sync';
+            }
+
+            const data = await apiCall(url, 'POST');
+            if (data.success) {
+                showToast(data.message, 'success');
+            } else {
+                showToast(data.message || '同步失败', 'error');
+            }
+        } catch (e) {
+            showToast('同步请求失败: ' + e.message, 'error');
         }
     }
 </script>
