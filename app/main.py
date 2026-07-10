@@ -14,6 +14,8 @@ from .core.feishu import FeishuClient
 from .core.collector import Collector, Account
 from .core.cookie_pool import CookiePool
 from .core.syncer import Syncer
+from .core.syncer_v2 import Syncer as SyncerV2
+from .core.database import Database
 from .core.history import HistoryDB
 from .core.scheduler import TaskScheduler
 from .services.downloader import ServiceManager
@@ -28,6 +30,8 @@ config = Config()
 feishu_client: FeishuClient | None = None
 collector: Collector | None = None
 syncer: Syncer | None = None
+syncer_v2: SyncerV2 | None = None
+database: Database | None = None
 history: HistoryDB | None = None
 services: ServiceManager | None = None
 scheduler: TaskScheduler | None = None
@@ -55,6 +59,13 @@ def get_collector() -> Collector:
     return collector
 
 
+def get_database() -> Database:
+    global database
+    if database is None:
+        database = Database()
+    return database
+
+
 def get_syncer() -> Syncer | None:
     global syncer
     f = get_feishu()
@@ -70,6 +81,20 @@ def get_syncer() -> Syncer | None:
                 data_dir=config.data_dir,
             )
         return syncer
+    return None
+
+
+def get_syncer_v2() -> SyncerV2 | None:
+    global syncer_v2
+    f = get_feishu()
+    if f:
+        if syncer_v2 is None:
+            syncer_v2 = SyncerV2(
+                feishu=f,
+                collector=get_collector(),
+                config=config.feishu,
+            )
+        return syncer_v2
     return None
 
 
@@ -169,6 +194,15 @@ async def page_status(request: Request):
     return templates.TemplateResponse(request, "status.html", context={
         "request": request,
         "page": "status",
+    })
+
+
+@app.get("/database", response_class=HTMLResponse)
+async def page_database(request: Request):
+    """数据库管理页面"""
+    return templates.TemplateResponse(request, "database.html", context={
+        "request": request,
+        "page": "database",
     })
 
 
@@ -693,6 +727,100 @@ async def api_resolve_duplicate(
         else:
             return JSONResponse({"success": False, "message": f"未知操作: {action}"}, status_code=400)
 
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+# --- 数据库管理 ---
+
+@app.get("/api/database/stats")
+async def api_database_stats():
+    """获取数据库统计信息"""
+    db = get_database()
+    return db.get_table_counts()
+
+
+@app.get("/api/database/table/{table_name}")
+async def api_database_table(table_name: str, limit: int = 100, offset: int = 0):
+    """获取表数据"""
+    db = get_database()
+    
+    # 验证表名
+    valid_tables = ["collection_cache", "account_cache", "cookie_cache", "collection_history", "scheduled_tasks"]
+    if table_name not in valid_tables:
+        return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
+    
+    # 获取数据
+    with db._connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM {table_name} ORDER BY rowid DESC LIMIT ? OFFSET ?",
+            (limit, offset)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+@app.delete("/api/database/table/{table_name}/record/{record_id}")
+async def api_database_delete_record(table_name: str, record_id: str):
+    """删除记录"""
+    db = get_database()
+    
+    # 验证表名
+    valid_tables = ["collection_cache", "account_cache", "cookie_cache"]
+    if table_name not in valid_tables:
+        return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
+    
+    try:
+        if table_name == "collection_cache":
+            success = db.delete_collection(record_id)
+        elif table_name == "account_cache":
+            success = db.delete_account(record_id)
+        elif table_name == "cookie_cache":
+            with db._connect() as conn:
+                conn.execute("DELETE FROM cookie_cache WHERE 记录ID = ?", (record_id,))
+                conn.commit()
+                success = True
+        
+        if success:
+            return {"success": True, "message": "删除成功"}
+        return JSONResponse({"success": False, "message": "删除失败"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@app.delete("/api/database/table/{table_name}")
+async def api_database_clear_table(table_name: str):
+    """清空表"""
+    db = get_database()
+    
+    # 验证表名
+    valid_tables = ["collection_cache", "account_cache", "cookie_cache", "collection_history", "scheduled_tasks"]
+    if table_name not in valid_tables:
+        return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
+    
+    try:
+        if table_name == "collection_cache":
+            success = db.clear_collection_cache()
+        elif table_name == "account_cache":
+            success = db.clear_account_cache()
+        elif table_name == "cookie_cache":
+            with db._connect() as conn:
+                conn.execute("DELETE FROM cookie_cache")
+                conn.commit()
+                success = True
+        elif table_name == "collection_history":
+            with db._connect() as conn:
+                conn.execute("DELETE FROM collection_history")
+                conn.commit()
+                success = True
+        elif table_name == "scheduled_tasks":
+            with db._connect() as conn:
+                conn.execute("DELETE FROM scheduled_tasks")
+                conn.commit()
+                success = True
+        
+        if success:
+            return {"success": True, "message": "清空成功"}
+        return JSONResponse({"success": False, "message": "清空失败"}, status_code=400)
     except Exception as e:
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 

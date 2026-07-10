@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block title %}数据库管理 - DoukHub{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>数据库管理</h2>
+    <button class="btn btn-secondary" onclick="refreshStats()">🔄 刷新</button>
+</div>
+
+<!-- 数据库概览 -->
+<div class="card">
+    <h3>📊 数据库概览</h3>
+    <div id="stats-container" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;text-align:center;">
+        <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
+            <div style="font-size:24px;font-weight:bold;color:#e94560;" id="stat-collection">-</div>
+            <div style="font-size:12px;color:#888;">采集表缓存</div>
+        </div>
+        <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
+            <div style="font-size:24px;font-weight:bold;color:#27ae60;" id="stat-account">-</div>
+            <div style="font-size:12px;color:#888;">账号表缓存</div>
+        </div>
+        <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
+            <div style="font-size:24px;font-weight:bold;color:#f39c12;" id="stat-cookie">-</div>
+            <div style="font-size:12px;color:#888;">Cookie缓存</div>
+        </div>
+        <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
+            <div style="font-size:24px;font-weight:bold;color:#3498db;" id="stat-history">-</div>
+            <div style="font-size:12px;color:#888;">采集历史</div>
+        </div>
+        <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
+            <div style="font-size:24px;font-weight:bold;color:#9b59b6;" id="stat-task">-</div>
+            <div style="font-size:12px;color:#888;">定时任务</div>
+        </div>
+    </div>
+</div>
+
+<!-- 表浏览 -->
+<div class="card">
+    <h3>📋 表浏览</h3>
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button class="btn btn-secondary" onclick="showTable('collection_cache')">采集表缓存</button>
+        <button class="btn btn-secondary" onclick="showTable('account_cache')">账号表缓存</button>
+        <button class="btn btn-secondary" onclick="showTable('cookie_cache')">Cookie缓存</button>
+        <button class="btn btn-secondary" onclick="showTable('collection_history')">采集历史</button>
+        <button class="btn btn-secondary" onclick="showTable('scheduled_tasks')">定时任务</button>
+    </div>
+    
+    <div id="table-container" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h4 id="table-title" style="margin:0;"></h4>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-danger btn-sm" onclick="clearTable()">🗑️ 清空表</button>
+                <button class="btn btn-secondary btn-sm" onclick="exportTable()">📥 导出Excel</button>
+            </div>
+        </div>
+        <div id="table-content" style="overflow-x:auto;"></div>
+    </div>
+</div>
+
+<!-- 搜索 -->
+<div class="card">
+    <h3>🔍 搜索</h3>
+    <div style="display:flex;gap:8px;">
+        <select id="search-table" style="padding:8px;border:1px solid #ddd;border-radius:4px;">
+            <option value="collection_cache">采集表缓存</option>
+            <option value="account_cache">账号表缓存</option>
+            <option value="cookie_cache">Cookie缓存</option>
+            <option value="collection_history">采集历史</option>
+            <option value="scheduled_tasks">定时任务</option>
+        </select>
+        <input type="text" id="search-keyword" placeholder="搜索关键词..." style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;">
+        <button class="btn btn-primary" onclick="searchTable()">搜索</button>
+    </div>
+    <div id="search-results" style="margin-top:16px;display:none;"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentTable = '';
+    
+    // 页面加载时获取统计
+    document.addEventListener('DOMContentLoaded', () => {
+        refreshStats();
+    });
+    
+    async function refreshStats() {
+        try {
+            const data = await apiCall('/api/database/stats', 'GET');
+            document.getElementById('stat-collection').textContent = data.collection_cache || 0;
+            document.getElementById('stat-account').textContent = data.account_cache || 0;
+            document.getElementById('stat-cookie').textContent = data.cookie_cache || 0;
+            document.getElementById('stat-history').textContent = data.collection_history || 0;
+            document.getElementById('stat-task').textContent = data.scheduled_tasks || 0;
+        } catch (e) {
+            showToast('获取统计失败: ' + e.message, 'error');
+        }
+    }
+    
+    async function showTable(tableName) {
+        currentTable = tableName;
+        const tableNames = {
+            'collection_cache': '采集表缓存',
+            'account_cache': '账号表缓存',
+            'cookie_cache': 'Cookie缓存',
+            'collection_history': '采集历史',
+            'scheduled_tasks': '定时任务'
+        };
+        
+        document.getElementById('table-title').textContent = tableNames[tableName];
+        document.getElementById('table-container').style.display = 'block';
+        
+        try {
+            const data = await apiCall(`/api/database/table/${tableName}`, 'GET');
+            renderTable(data);
+        } catch (e) {
+            showToast('获取表数据失败: ' + e.message, 'error');
+        }
+    }
+    
+    function renderTable(data) {
+        if (!data || data.length === 0) {
+            document.getElementById('table-content').innerHTML = '<div style="text-align:center;color:#888;padding:20px;">暂无数据</div>';
+            return;
+        }
+        
+        const columns = Object.keys(data[0]);
+        let html = '<table style="width:100%;border-collapse:collapse;">';
+        
+        // 表头
+        html += '<thead><tr>';
+        columns.forEach(col => {
+            html += `<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;">${col}</th>`;
+        });
+        html += '<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;">操作</th>';
+        html += '</tr></thead>';
+        
+        // 数据行
+        html += '<tbody>';
+        data.forEach(row => {
+            html += '<tr>';
+            columns.forEach(col => {
+                let value = row[col];
+                if (value === null || value === undefined) value = '-';
+                if (typeof value === 'object') value = JSON.stringify(value);
+                if (String(value).length > 50) value = String(value).substring(0, 50) + '...';
+                html += `<td style="padding:8px;border:1px solid #ddd;font-size:12px;">${value}</td>`;
+            });
+            
+            // 操作列
+            const recordId = row['记录ID'] || row['ID'] || '';
+            if (recordId && currentTable !== 'collection_history' && currentTable !== 'scheduled_tasks') {
+                html += `<td style="padding:8px;border:1px solid #ddd;"><button class="btn btn-danger btn-sm" onclick="deleteRecord('${currentTable}', '${recordId}')">删除</button></td>`;
+            } else {
+                html += '<td style="padding:8px;border:1px solid #ddd;">-</td>';
+            }
+            
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+        
+        document.getElementById('table-content').innerHTML = html;
+    }
+    
+    async function deleteRecord(tableName, recordId) {
+        if (!confirm(`确定要删除记录 ${recordId} 吗？`)) return;
+        
+        try {
+            const data = await apiCall(`/api/database/table/${tableName}/record/${recordId}`, 'DELETE');
+            if (data.success) {
+                showToast('删除成功', 'success');
+                showTable(tableName);
+                refreshStats();
+            } else {
+                showToast(data.message || '删除失败', 'error');
+            }
+        } catch (e) {
+            showToast('删除失败: ' + e.message, 'error');
+        }
+    }
+    
+    async function clearTable() {
+        if (!confirm(`确定要清空 ${currentTable} 表吗？此操作不可恢复！`)) return;
+        
+        try {
+            const data = await apiCall(`/api/database/table/${currentTable}`, 'DELETE');
+            if (data.success) {
+                showToast('清空成功', 'success');
+                showTable(currentTable);
+                refreshStats();
+            } else {
+                showToast(data.message || '清空失败', 'error');
+            }
+        } catch (e) {
+            showToast('清空失败: ' + e.message, 'error');
+        }
+    }
+    
+    function exportTable() {
+        showToast('导出功能开发中...', 'error');
+    }
+    
+    async function searchTable() {
+        const tableName = document.getElementById('search-table').value;
+        const keyword = document.getElementById('search-keyword').value;
+        
+        if (!keyword) {
+            showToast('请输入搜索关键词', 'error');
+            return;
+        }
+        
+        try {
+            const data = await apiCall(`/api/database/table/${tableName}?search=${encodeURIComponent(keyword)}`, 'GET');
+            document.getElementById('search-results').style.display = 'block';
+            document.getElementById('search-results').innerHTML = '<h4>搜索结果</h4>';
+            renderSearchResults(data);
+        } catch (e) {
+            showToast('搜索失败: ' + e.message, 'error');
+        }
+    }
+    
+    function renderSearchResults(data) {
+        if (!data || data.length === 0) {
+            document.getElementById('search-results').innerHTML += '<div style="text-align:center;color:#888;padding:20px;">未找到匹配的记录</div>';
+            return;
+        }
+        
+        renderTable(data);
+        document.getElementById('search-results').innerHTML += document.getElementById('table-content').outerHTML;
+    }
+</script>
+{% endblock %}
