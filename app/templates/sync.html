@@ -130,7 +130,9 @@
     <div class="card-content">
     <div style="display:flex;gap:8px;margin-bottom:12px;">
         <button class="btn btn-primary" onclick="startSync()" id="sync-btn">① 快速同步</button>
+        <button class="btn btn-danger" onclick="stopSync()" id="stop-sync-btn" style="display:none;">⏹ 停止同步</button>
         <button class="btn btn-secondary" onclick="fetchAccountInfo()" id="fetch-info-btn">② 获取账号信息</button>
+        <button class="btn btn-danger" onclick="stopFetchInfo()" id="stop-fetch-btn" style="display:none;">⏹ 停止获取</button>
     </div>
     <div style="font-size:12px;color:#888;margin-bottom:12px;">
         <div>① 快速同步：解析短链接，写入账号表（快，不获取详细信息）</div>
@@ -458,11 +460,14 @@
 
     // ========== 同步 ==========
     let currentEventSource = null;
+    let syncAbortController = null;
     
     async function startSync() {
         const btn = document.getElementById('sync-btn');
+        const stopBtn = document.getElementById('stop-sync-btn');
         btn.disabled = true;
         btn.textContent = '同步中...';
+        stopBtn.style.display = 'inline-block';
 
         const progressDiv = document.getElementById('sync-progress');
         const progressBar = document.getElementById('sync-progress-bar');
@@ -481,14 +486,15 @@
         progressText.textContent = '连接飞书...';
         addLog(logBox, '<div class="log-info">→ 正在连接飞书...</div>');
 
-        // 关闭之前的 EventSource
-        if (currentEventSource) {
-            currentEventSource.close();
-        }
+        // 创建 AbortController 用于取消请求
+        syncAbortController = new AbortController();
 
         // 使用 fetch + POST 启动 SSE
         try {
-            const response = await fetch('/api/sync', { method: 'POST' });
+            const response = await fetch('/api/sync', { 
+                method: 'POST',
+                signal: syncAbortController.signal
+            });
             
             if (!response.ok) {
                 const error = await response.json();
@@ -498,6 +504,7 @@
                 showToast(error.message, 'error');
                 btn.disabled = false;
                 btn.textContent = '① 快速同步';
+                stopBtn.style.display = 'none';
                 return;
             }
 
@@ -536,12 +543,26 @@
             }
 
         } catch (e) {
-            addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
-            progressText.textContent = `请求失败`;
-            showToast('同步请求失败', 'error');
+            if (e.name === 'AbortError') {
+                addLog(logBox, `<div class="log-info">→ 同步已停止</div>`);
+                progressText.textContent = `同步已停止`;
+                showToast('同步已停止', 'error');
+            } else {
+                addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
+                progressText.textContent = `请求失败`;
+                showToast('同步请求失败', 'error');
+            }
         } finally {
             btn.disabled = false;
             btn.textContent = '① 快速同步';
+            stopBtn.style.display = 'none';
+            syncAbortController = null;
+        }
+    }
+
+    function stopSync() {
+        if (syncAbortController) {
+            syncAbortController.abort();
         }
     }
 
@@ -595,10 +616,15 @@
         }
     }
 
+    // ========== 获取账号信息 ==========
+    let fetchInfoAbortController = null;
+
     async function fetchAccountInfo() {
         const btn = document.getElementById('fetch-info-btn');
+        const stopBtn = document.getElementById('stop-fetch-btn');
         btn.disabled = true;
         btn.textContent = '获取中...';
+        stopBtn.style.display = 'inline-block';
 
         const progressDiv = document.getElementById('sync-progress');
         const progressBar = document.getElementById('sync-progress-bar');
@@ -618,8 +644,29 @@
         progressText.textContent = '正在获取账号信息...';
         addLog(logBox, '<div class="log-info">→ 开始获取账号详细信息...</div>');
 
+        // 创建 AbortController
+        fetchInfoAbortController = new AbortController();
+
         try {
-            const data = await apiCall('/api/sync/fetch-info', 'POST');
+            // 使用 fetch 替代 apiCall，支持取消
+            const response = await fetch('/api/sync/fetch-info', {
+                method: 'POST',
+                signal: fetchInfoAbortController.signal
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                addLog(logBox, `<div class="log-err">❌ ${error.message}</div>`);
+                progressText.textContent = `失败: ${error.message}`;
+                progressBar.style.background = '#f44336';
+                showToast(error.message, 'error');
+                btn.disabled = false;
+                btn.textContent = '② 获取账号信息';
+                stopBtn.style.display = 'none';
+                return;
+            }
+
+            const data = await response.json();
 
             progressBar.style.width = '100%';
 
@@ -651,12 +698,26 @@
                 showToast(data.message, 'error');
             }
         } catch (e) {
-            addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
-            progressText.textContent = `请求失败`;
-            showToast('获取请求失败', 'error');
+            if (e.name === 'AbortError') {
+                addLog(logBox, `<div class="log-info">→ 获取已停止</div>`);
+                progressText.textContent = `获取已停止`;
+                showToast('获取已停止', 'error');
+            } else {
+                addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
+                progressText.textContent = `请求失败`;
+                showToast('获取请求失败', 'error');
+            }
         } finally {
             btn.disabled = false;
             btn.textContent = '② 获取账号信息';
+            stopBtn.style.display = 'none';
+            fetchInfoAbortController = null;
+        }
+    }
+
+    function stopFetchInfo() {
+        if (fetchInfoAbortController) {
+            fetchInfoAbortController.abort();
         }
     }
 </script>
