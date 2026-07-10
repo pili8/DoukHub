@@ -224,6 +224,8 @@ class Syncer:
                 link = entry["link"]
                 rating = entry.get("rating", 3)
                 record_id = entry["record_id"]
+                # 检查采集表是否已有 sec_user_id
+                existing_sec_user_id = entry.get("sec_user_id", "")
 
                 logger.info(f"处理 [{i+1}/{len(entries)}]: {link}")
 
@@ -235,19 +237,25 @@ class Syncer:
                     # 平台识别（纯正则）
                     platform = entry.get("platform", "") or detect_platform(link)
 
-                    # 通过 TTD API 解析短链接 → 获取完整 URL
-                    cookie = active_cookies[0] if active_cookies else ""
-                    resolved_url = await self.collector.resolve_short_url(link, platform)
-                    result.api_calls += 1  # 记录 API 调用
-                    logger.info(f"  短链接解析: {resolved_url}")
+                    # 如果采集表已有 sec_user_id，跳过短链接解析
+                    if existing_sec_user_id:
+                        sec_user_id = existing_sec_user_id
+                        resolved_url = link
+                        logger.info(f"  使用采集表已有 sec_user_id: {sec_user_id}（跳过 API 调用）")
+                    else:
+                        # 通过 TTD API 解析短链接 → 获取完整 URL
+                        cookie = active_cookies[0] if active_cookies else ""
+                        resolved_url = await self.collector.resolve_short_url(link, platform)
+                        result.api_calls += 1  # 记录 API 调用
+                        logger.info(f"  短链接解析: {resolved_url}")
 
-                    # 从完整 URL 中提取 sec_user_id（纯正则）
-                    sec_user_id = extract_sec_user_id(resolved_url, platform)
+                        # 从完整 URL 中提取 sec_user_id（纯正则）
+                        sec_user_id = extract_sec_user_id(resolved_url, platform)
 
-                    if not sec_user_id:
-                        self._update_collection_status(record_id, "失败", "无法解析短链接")
-                        result.errors.append(f"{link}: 无法解析")
-                        continue
+                        if not sec_user_id:
+                            self._update_collection_status(record_id, "失败", "无法解析短链接")
+                            result.errors.append(f"{link}: 无法解析")
+                            continue
 
                     # 检查是否已有账号
                     existing_account = existing_accounts.get(sec_user_id)
@@ -280,7 +288,7 @@ class Syncer:
                         existing_accounts[sec_user_id] = account
                         logger.info(f"  新增账号: {account.name or sec_user_id}")
 
-                    # 更新采集表状态
+                    # 更新采集表状态（包含 sec_user_id）
                     self._update_collection_status(record_id, "已同步", "", sec_user_id)
 
                 except Exception as e:
