@@ -1060,13 +1060,56 @@ except CookieExpiredError:
 
 ## 更新日志
 
-### 2026-07-10
+### 2026-07-10（初始版本）
 
 - 初始文档创建
 - 记录核心流程设计讨论
 - 记录数据表设计决策
 - 记录技术方案决策（复选框 + 错误字段、SSE、停止按钮）
 - 列出待讨论问题
+
+### 2026-07-10（功能实现）
+
+**新增模块：**
+- `app/core/database.py` - SQLite 数据库管理（5张表，中文字段名）
+- `app/core/syncer_v2.py` - 新同步器（使用数据库，去重合并逻辑）
+- `app/core/feishu_sync.py` - 飞书双向同步器
+- `app/templates/database.html` - 数据库管理界面
+
+**新增 API 端点：**
+- 数据库管理：`GET /api/database/stats`、`GET /api/database/table/{table}`、`DELETE` 操作
+- 新同步器 v2：`POST /api/sync/v2/import`、`POST /api/sync/v2/update-collection`（SSE）、`POST /api/sync/v2/sync-account`（SSE）、`POST /api/sync/v2/all`
+- 飞书同步：`POST /api/feishu/sync`、`POST /api/feishu/sync/to-feishu`、`POST /api/feishu/sync/from-feishu`
+- 采集 v2：`POST /api/collect/v2/account`（SSE 实时进度）
+
+**功能实现：**
+- ✅ SQLite 数据库（5张表，中文字段名，完整 CRUD）
+- ✅ 数据库管理界面（查看、删除、清空、搜索）
+- ✅ 三步同步流程（导入→更新采集表→同步账号表）
+- ✅ SSE 实时进度（所有耗时操作）
+- ✅ 停止按钮（AbortController）
+- ✅ 去重和合并（等级取高的，标签合并去重，大小写不敏感）
+- ✅ 飞书双向同步（本地↔飞书）
+- ✅ 账号作品采集（SSE实时进度，记录历史）
+- ✅ 定时任务（使用新数据库存储）
+- ✅ Cookie 轮换（自动切换失效Cookie）
+- ✅ 标签映射（可配置，大小写不敏感）
+
+**页面结构：**
+```
+侧边栏：
+├── 📊 状态     - 服务状态、连通性检测
+├── 🔄 同步     - 三步同步 + 飞书同步
+├── 📥 采集     - 整号采集 + 单品采集 + 定时任务
+├── 📋 记录     - 采集历史
+├── 💾 数据库   - 数据库管理
+└── ⚙️ 设置     - 飞书配置、标签映射
+```
+
+**测试结果：**
+- 79 个单元测试全部通过
+- 完整流程测试通过
+- 所有页面和 API 端点正常
 
 ---
 
