@@ -207,9 +207,6 @@
         const form = new FormData(e.target);
         const ratings = form.getAll('rating');
         const minRating = ratings.length ? Math.min(...ratings.map(Number)) : 3;
-        const body = new FormData();
-        body.append('account_names', form.get('account_names') || '');
-        body.append('rating_min', minRating);
 
         showProgress();
         updateStep('step-prepare', 'active', '🔄', '准备采集...');
@@ -220,20 +217,77 @@
 
         try {
             updateStep('step-collecting', 'active', '🔄', '正在采集...');
-            const data = await apiCall('/api/collect/account', 'POST', body);
             
-            if (data.success) {
-                updateStep('step-prepare', 'done', '✅', '准备完成');
-                updateStep('step-collecting', 'done', '✅', `采集完成: ${data.results?.length || 0} 个账号`);
-                updateStep('step-complete', 'done', '✅', '全部完成');
-                
-                // 显示统计
-                showCollectStats(data);
-                showToast('采集完成', 'success');
-            } else {
-                updateStep('step-collecting', 'error', '❌', data.message);
-                showToast(data.message, 'error');
+            // 使用新 v2 API（SSE 实时进度）
+            const response = await fetch('/api/collect/v2/account', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    account_names: form.get('account_names') || '',
+                    rating_min: minRating,
+                }),
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                updateStep('step-collecting', 'error', '❌', error.message);
+                showToast(error.message, 'error');
+                return;
             }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let totalWorks = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            
+                            switch (data.type) {
+                                case 'progress':
+                                    updateStep('step-collecting', 'active', '🔄', data.message);
+                                    break;
+                                case 'stats':
+                                    document.getElementById('stat-accounts').textContent = data.total || 0;
+                                    document.getElementById('stat-works').textContent = totalWorks;
+                                    document.getElementById('progress-stats').style.display = 'block';
+                                    break;
+                                case 'log':
+                                    const logClass = data.level === 'error' ? 'error' : data.level === 'ok' ? 'done' : 'active';
+                                    if (data.level === 'ok') {
+                                        const match = data.message.match(/(\d+) 个作品/);
+                                        if (match) totalWorks += parseInt(match[1]);
+                                    }
+                                    break;
+                                case 'complete':
+                                    if (data.success) {
+                                        updateStep('step-prepare', 'done', '✅', '准备完成');
+                                        updateStep('step-collecting', 'done', '✅', data.message);
+                                        updateStep('step-complete', 'done', '✅', '全部完成');
+                                        document.getElementById('stat-accounts').textContent = data.total || 0;
+                                        document.getElementById('stat-works').textContent = totalWorks;
+                                        showToast('采集完成', 'success');
+                                    } else {
+                                        updateStep('step-collecting', 'error', '❌', data.message);
+                                        showToast(data.message, 'error');
+                                    }
+                                    break;
+                            }
+                        } catch (e) {}
+                    }
+                }
+            }
+
         } catch (e) {
             updateStep('step-collecting', 'error', '❌', `请求失败: ${e.message}`);
             showToast('采集请求失败', 'error');
