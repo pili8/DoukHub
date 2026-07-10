@@ -52,6 +52,19 @@
 .log-box .log-ok { color: #4caf50; }
 .log-box .log-err { color: #f44336; }
 .log-box .log-info { color: #64b5f6; }
+.collapse-icon {
+    font-size: 12px;
+    transition: transform 0.2s;
+}
+.card-content {
+    transition: max-height 0.3s ease-out, opacity 0.2s ease-out;
+    max-height: 2000px;
+    overflow: hidden;
+}
+.card-content.collapsed {
+    max-height: 0;
+    opacity: 0;
+}
 </style>
 
 <div class="page-header">
@@ -60,7 +73,11 @@
 
 <!-- 1. 服务状态 -->
 <div class="card">
-    <h3>服务状态</h3>
+    <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
+        服务状态
+        <span class="collapse-icon">▼</span>
+    </h3>
+    <div class="card-content">
     <div class="service-grid">
         {% for svc in services %}
         <div style="display:flex;align-items:center;gap:12px;padding:12px;background:#f8f9fa;border-radius:6px;">
@@ -77,11 +94,16 @@
         </div>
         {% endfor %}
     </div>
+    </div>
 </div>
 
 <!-- 2. 数据导入 -->
 <div class="card">
-    <h3>📥 数据导入 <span style="font-size:13px;color:#888;font-weight:normal;">→ 采集表</span></h3>
+    <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
+        📥 数据导入 <span style="font-size:13px;color:#888;font-weight:normal;">→ 采集表</span>
+        <span class="collapse-icon">▼</span>
+    </h3>
+    <div class="card-content">
     <div class="form-group">
         <label>粘贴数据或拖拽文件（支持多种格式）</label>
         <textarea id="import-text" rows="8" placeholder="格式1: 个2@iMLuCKjq&#10;格式2: {&quot;地址&quot;:&quot;xxx&quot;,&quot;等级&quot;:&quot;个2，图&quot;,&quot;用户&quot;:&quot;xxx&quot;} | ..." style="font-family:monospace;font-size:13px;" ondrop="handleDrop(event)" ondragover="event.preventDefault()" ondragenter="this.style.borderColor='#e94560'" ondragleave="this.style.borderColor=''"></textarea>
@@ -122,11 +144,16 @@
             <tbody id="preview-body"></tbody>
         </table>
     </div>
+    </div>
 </div>
 
 <!-- 3. 同步 -->
 <div class="card">
-    <h3>🔄 同步 <span style="font-size:13px;color:#888;font-weight:normal;">采集表 → 解析 → 账号表</span></h3>
+    <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
+        🔄 同步 <span style="font-size:13px;color:#888;font-weight:normal;">采集表 → 解析 → 账号表</span>
+        <span class="collapse-icon">▼</span>
+    </h3>
+    <div class="card-content">
     <button class="btn btn-primary" onclick="startSync()" id="sync-btn">开始同步</button>
     <!-- 同步进度 -->
     <div id="sync-progress" style="display:none;margin-top:16px;">
@@ -157,11 +184,16 @@
         </div>
         <div class="log-box" id="sync-log" style="margin-top:12px;display:none;"></div>
     </div>
+    </div>
 </div>
 
 <!-- 4. 账号列表 -->
 <div class="card">
-    <h3>👤 账号列表 <span style="font-size:13px;color:#888;font-weight:normal;">（{{ accounts|length }} 个）</span></h3>
+    <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
+        👤 账号列表 <span style="font-size:13px;color:#888;font-weight:normal;">（{{ accounts|length }} 个）</span>
+        <span class="collapse-icon">▼</span>
+    </h3>
+    <div class="card-content">
     <table>
         <thead>
             <tr>
@@ -193,11 +225,20 @@
     {% if not accounts %}
     <div class="empty-state">暂无账号，请先导入数据并同步</div>
     {% endif %}
+    </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+    // 折叠/展开卡片
+    function toggleCard(header) {
+        const content = header.nextElementSibling;
+        const icon = header.querySelector('.collapse-icon');
+        content.classList.toggle('collapsed');
+        icon.textContent = content.classList.contains('collapsed') ? '▶' : '▼';
+    }
+
     // 标签映射（从配置加载）
     let TAG_MAP = {};
 
