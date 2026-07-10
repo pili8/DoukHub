@@ -53,34 +53,6 @@
     display: flex;
     gap: 8px;
 }
-.cmd-box {
-    background: #1a1a2e;
-    color: #ccc;
-    padding: 12px 16px;
-    border-radius: 6px;
-    font-family: monospace;
-    font-size: 13px;
-    margin-top: 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.cmd-box code {
-    flex: 1;
-    user-select: all;
-}
-.copy-btn {
-    background: rgba(255,255,255,0.1);
-    border: none;
-    color: #ccc;
-    padding: 4px 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-}
-.copy-btn:hover {
-    background: rgba(255,255,255,0.2);
-}
 </style>
 
 <div class="page-header">
@@ -110,10 +82,6 @@
         <div class="status-info">
             <div class="status-name">TikTokDownloader</div>
             <div class="status-message" id="ttd-message">检测中...</div>
-            <div class="cmd-box">
-                <code id="ttd-cmd">cd {{ ttd_path }} && source ../venv/bin/activate && python main.py</code>
-                <button class="copy-btn" onclick="copyCmd('ttd-cmd')">📋 复制</button>
-            </div>
         </div>
         <div class="status-actions">
             <button class="btn btn-success btn-sm" onclick="controlService('TikTokDownloader', 'start')">启动</button>
@@ -128,47 +96,11 @@
         <div class="status-info">
             <div class="status-name">XHS-Downloader</div>
             <div class="status-message" id="xhs-message">检测中...</div>
-            <div class="cmd-box">
-                <code id="xhs-cmd">cd {{ xhs_path }} && source ../venv/bin/activate && python main.py API</code>
-                <button class="copy-btn" onclick="copyCmd('xhs-cmd')">📋 复制</button>
-            </div>
         </div>
         <div class="status-actions">
             <button class="btn btn-success btn-sm" onclick="controlService('XHS-Downloader', 'start')">启动</button>
             <button class="btn btn-danger btn-sm" onclick="controlService('XHS-Downloader', 'stop')">停止</button>
             <button class="btn btn-secondary btn-sm" onclick="testXHS()">测试连接</button>
-        </div>
-    </div>
-</div>
-
-<!-- 快捷命令 -->
-<div class="card">
-    <h3>⚡ 快捷命令</h3>
-    <p style="color:#888;font-size:13px;margin-bottom:12px;">复制以下命令到终端，可单独启动内核服务</p>
-    
-    <div style="margin-bottom:16px;">
-        <div style="font-weight:600;margin-bottom:8px;">TikTokDownloader（端口 {{ ttd_port }}）</div>
-        <div class="cmd-box">
-            <code>cd {{ ttd_path }} && source ../venv/bin/activate && python main.py</code>
-            <button class="copy-btn" onclick="copyCmd(this.previousElementSibling)">📋 复制</button>
-        </div>
-        <div style="font-size:12px;color:#888;margin-top:4px;">启动后选择 "7. Web API 模式" 进入 API 服务</div>
-    </div>
-    
-    <div style="margin-bottom:16px;">
-        <div style="font-weight:600;margin-bottom:8px;">XHS-Downloader（端口 {{ xhs_port }}）</div>
-        <div class="cmd-box">
-            <code>cd {{ xhs_path }} && source ../venv/bin/activate && python main.py API</code>
-            <button class="copy-btn" onclick="copyCmd(this.previousElementSibling)">📋 复制</button>
-        </div>
-        <div style="font-size:12px;color:#888;margin-top:4px;">直接启动 API 模式</div>
-    </div>
-    
-    <div>
-        <div style="font-weight:600;margin-bottom:8px;">DoukHub（本服务，端口 2999）</div>
-        <div class="cmd-box">
-            <code>cd {{ doukhub_path }} && source venv/bin/activate && python main.py</code>
-            <button class="copy-btn" onclick="copyCmd(this.previousElementSibling)">📋 复制</button>
         </div>
     </div>
 </div>

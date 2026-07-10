@@ -71,33 +71,7 @@
     <h2>同步</h2>
 </div>
 
-<!-- 1. 服务状态 -->
-<div class="card">
-    <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
-        服务状态
-        <span class="collapse-icon">▼</span>
-    </h3>
-    <div class="card-content">
-    <div class="service-grid">
-        {% for svc in services %}
-        <div style="display:flex;align-items:center;gap:12px;padding:12px;background:#f8f9fa;border-radius:6px;">
-            <span class="status-dot {{ 'status-running' if svc.running else 'status-stopped' }}"></span>
-            <div style="flex:1;">
-                <div style="font-weight:600;">{{ svc.name }}</div>
-                <div style="font-size:12px;color:#888;">{{ svc.url }}</div>
-            </div>
-            {% if svc.running %}
-            <button class="btn btn-danger btn-sm" onclick="controlService('{{ svc.name }}', 'stop')">停止</button>
-            {% else %}
-            <button class="btn btn-success btn-sm" onclick="controlService('{{ svc.name }}', 'start')">启动</button>
-            {% endif %}
-        </div>
-        {% endfor %}
-    </div>
-    </div>
-</div>
-
-<!-- 2. 数据导入 -->
+<!-- 1. 数据导入 -->
 <div class="card">
     <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
         📥 数据导入 <span style="font-size:13px;color:#888;font-weight:normal;">→ 采集表</span>

@@ -168,11 +168,6 @@ async def page_status(request: Request):
     """状态页面 - 服务状态和连通性检测"""
     return templates.TemplateResponse(request, "status.html", context={
         "request": request,
-        "ttd_path": config.ttd_path,
-        "xhs_path": config.xhs_path,
-        "doukhub_path": str(BASE_DIR.parent),
-        "ttd_port": config.ttd_port,
-        "xhs_port": config.xhs_port,
         "page": "status",
     })
 
