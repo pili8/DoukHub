@@ -163,6 +163,20 @@ async def page_sync(request: Request):
     })
 
 
+@app.get("/status", response_class=HTMLResponse)
+async def page_status(request: Request):
+    """状态页面 - 服务状态和连通性检测"""
+    return templates.TemplateResponse(request, "status.html", context={
+        "request": request,
+        "ttd_path": config.ttd_path,
+        "xhs_path": config.xhs_path,
+        "doukhub_path": str(BASE_DIR.parent),
+        "ttd_port": config.ttd_port,
+        "xhs_port": config.xhs_port,
+        "page": "status",
+    })
+
+
 @app.get("/collect", response_class=HTMLResponse)
 async def page_collect(request: Request):
     s = get_syncer()
@@ -281,6 +295,103 @@ async def api_services_versions():
 async def api_services_status():
     """获取所有 Downloader 服务状态"""
     return {"services": get_services().status_all()}
+
+
+# --- 状态检测 ---
+
+@app.get("/api/status")
+async def api_status():
+    """获取系统整体状态"""
+    svc = get_services()
+    feishu = get_feishu()
+    collector = get_collector()
+    
+    # 检测飞书连通性
+    feishu_status = {"connected": False, "message": "未配置"}
+    if feishu:
+        try:
+            result = feishu.test_connection()
+            feishu_status = {
+                "connected": result.get("success", False),
+                "message": result.get("message", ""),
+            }
+        except Exception as e:
+            feishu_status = {"connected": False, "message": str(e)}
+    
+    # 检测 TTD 连通性
+    ttd_status = {"connected": False, "message": "未启动"}
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{collector.ttd_url}/")
+            if resp.status_code in (200, 307, 404):
+                ttd_status = {"connected": True, "message": "运行中"}
+    except Exception as e:
+        ttd_status = {"connected": False, "message": str(e)}
+    
+    # 检测 XHS 连通性
+    xhs_status = {"connected": False, "message": "未启动"}
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{collector.xhs_url}/")
+            if resp.status_code in (200, 307, 404):
+                xhs_status = {"connected": True, "message": "运行中"}
+    except Exception as e:
+        xhs_status = {"connected": False, "message": str(e)}
+    
+    return {
+        "feishu": feishu_status,
+        "ttd": ttd_status,
+        "xhs": xhs_status,
+        "services": svc.status_all(),
+    }
+
+
+@app.post("/api/status/test/feishu")
+async def api_test_feishu_status():
+    """测试飞书 API 连通性"""
+    feishu = get_feishu()
+    if not feishu:
+        return {"success": False, "message": "飞书未配置"}
+    try:
+        result = feishu.test_connection()
+        return {
+            "success": result.get("success", False),
+            "message": result.get("message", ""),
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@app.post("/api/status/test/ttd")
+async def api_test_ttd_status():
+    """测试 TTD 连通性"""
+    collector = get_collector()
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{collector.ttd_url}/docs")
+            if resp.status_code == 200:
+                return {"success": True, "message": "TTD API 可用"}
+            return {"success": False, "message": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@app.post("/api/status/test/xhs")
+async def api_test_xhs_status():
+    """测试 XHS 连通性"""
+    collector = get_collector()
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{collector.xhs_url}/")
+            if resp.status_code in (200, 307, 404):
+                return {"success": True, "message": "XHS API 可用"}
+            return {"success": False, "message": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 
 # --- 飞书同步 ---

@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+{% block title %}状态 - DoukHub{% endblock %}
+{% block content %}
+<style>
+.status-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    transition: all 0.2s;
+}
+.status-card:hover {
+    background: #e9ecef;
+}
+.status-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    flex-shrink: 0;
+}
+.status-icon.connected {
+    background: #d4edda;
+    color: #28a745;
+}
+.status-icon.disconnected {
+    background: #f8d7da;
+    color: #dc3545;
+}
+.status-icon.unknown {
+    background: #fff3cd;
+    color: #ffc107;
+}
+.status-info {
+    flex: 1;
+}
+.status-name {
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 4px;
+}
+.status-message {
+    font-size: 13px;
+    color: #666;
+}
+.status-actions {
+    display: flex;
+    gap: 8px;
+}
+.cmd-box {
+    background: #1a1a2e;
+    color: #ccc;
+    padding: 12px 16px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 13px;
+    margin-top: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.cmd-box code {
+    flex: 1;
+    user-select: all;
+}
+.copy-btn {
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #ccc;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+.copy-btn:hover {
+    background: rgba(255,255,255,0.2);
+}
+</style>
+
+<div class="page-header">
+    <h2>状态</h2>
+    <button class="btn btn-secondary" onclick="refreshStatus()">🔄 刷新状态</button>
+</div>
+
+<!-- 服务状态 -->
+<div class="card">
+    <h3>🔌 服务状态</h3>
+    
+    <!-- 飞书 API -->
+    <div class="status-card" id="feishu-card">
+        <div class="status-icon unknown" id="feishu-icon">⏳</div>
+        <div class="status-info">
+            <div class="status-name">飞书 API</div>
+            <div class="status-message" id="feishu-message">检测中...</div>
+        </div>
+        <div class="status-actions">
+            <button class="btn btn-secondary btn-sm" onclick="testFeishu()">测试连接</button>
+        </div>
+    </div>
+    
+    <!-- TikTokDownloader -->
+    <div class="status-card" id="ttd-card">
+        <div class="status-icon unknown" id="ttd-icon">⏳</div>
+        <div class="status-info">
+            <div class="status-name">TikTokDownloader</div>
+            <div class="status-message" id="ttd-message">检测中...</div>
+            <div class="cmd-box">
+                <code id="ttd-cmd">cd {{ ttd_path }} && source ../venv/bin/activate && python main.py</code>
+                <button class="copy-btn" onclick="copyCmd('ttd-cmd')">📋 复制</button>
+            </div>
+        </div>
+        <div class="status-actions">
+            <button class="btn btn-success btn-sm" onclick="controlService('TikTokDownloader', 'start')">启动</button>
+            <button class="btn btn-danger btn-sm" onclick="controlService('TikTokDownloader', 'stop')">停止</button>
+            <button class="btn btn-secondary btn-sm" onclick="testTTD()">测试连接</button>
+        </div>
+    </div>
+    
+    <!-- XHS-Downloader -->
+    <div class="status-card" id="xhs-card">
+        <div class="status-icon unknown" id="xhs-icon">⏳</div>
+        <div class="status-info">
+            <div class="status-name">XHS-Downloader</div>
+            <div class="status-message" id="xhs-message">检测中...</div>
+            <div class="cmd-box">
+                <code id="xhs-cmd">cd {{ xhs_path }} && source ../venv/bin/activate && python main.py API</code>
+                <button class="copy-btn" onclick="copyCmd('xhs-cmd')">📋 复制</button>
+            </div>
+        </div>
+        <div class="status-actions">
+            <button class="btn btn-success btn-sm" onclick="controlService('XHS-Downloader', 'start')">启动</button>
+            <button class="btn btn-danger btn-sm" onclick="controlService('XHS-Downloader', 'stop')">停止</button>
+            <button class="btn btn-secondary btn-sm" onclick="testXHS()">测试连接</button>
+        </div>
+    </div>
+</div>
+
+<!-- 快捷命令 -->
+<div class="card">
+    <h3>⚡ 快捷命令</h3>
+    <p style="color:#888;font-size:13px;margin-bottom:12px;">复制以下命令到终端，可单独启动内核服务</p>
+    
+    <div style="margin-bottom:16px;">
+        <div style="font-weight:600;margin-bottom:8px;">TikTokDownloader（端口 {{ ttd_port }}）</div>
+        <div class="cmd-box">
+            <code>cd {{ ttd_path }} && source ../venv/bin/activate && python main.py</code>
+            <button class="copy-btn" onclick="copyCmd(this.previousElementSibling)">📋 复制</button>
+        </div>
+        <div style="font-size:12px;color:#888;margin-top:4px;">启动后选择 "7. Web API 模式" 进入 API 服务</div>
+    </div>
+    
+    <div style="margin-bottom:16px;">
+        <div style="font-weight:600;margin-bottom:8px;">XHS-Downloader（端口 {{ xhs_port }}）</div>
+        <div class="cmd-box">
+            <code>cd {{ xhs_path }} && source ../venv/bin/activate && python main.py API</code>
+            <button class="copy-btn" onclick="copyCmd(this.previousElementSibling)">📋 复制</button>
+        </div>
+        <div style="font-size:12px;color:#888;margin-top:4px;">直接启动 API 模式</div>
+    </div>
+    
+    <div>
+        <div style="font-weight:600;margin-bottom:8px;">DoukHub（本服务，端口 2999）</div>
+        <div class="cmd-box">
+            <code>cd {{ doukhub_path }} && source venv/bin/activate && python main.py</code>
+            <button class="copy-btn" onclick="copyCmd(this.previousElementSibling)">📋 复制</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // 页面加载时自动检测状态
+    document.addEventListener('DOMContentLoaded', () => {
+        refreshStatus();
+    });
+    
+    async function refreshStatus() {
+        try {
+            const data = await apiCall('/api/status', 'GET');
+            updateStatusCard('feishu', data.feishu);
+            updateStatusCard('ttd', data.ttd);
+            updateStatusCard('xhs', data.xhs);
+        } catch (e) {
+            console.error('获取状态失败:', e);
+        }
+    }
+    
+    function updateStatusCard(name, status) {
+        const icon = document.getElementById(`${name}-icon`);
+        const message = document.getElementById(`${name}-message`);
+        
+        if (status.connected) {
+            icon.className = 'status-icon connected';
+            icon.textContent = '✅';
+            message.textContent = status.message;
+        } else {
+            icon.className = 'status-icon disconnected';
+            icon.textContent = '❌';
+            message.textContent = status.message;
+        }
+    }
+    
+    async function testFeishu() {
+        const message = document.getElementById('feishu-message');
+        message.textContent = '测试中...';
+        try {
+            const data = await apiCall('/api/status/test/feishu', 'POST');
+            message.textContent = data.message;
+            updateStatusCard('feishu', {connected: data.success, message: data.message});
+        } catch (e) {
+            message.textContent = '测试失败: ' + e.message;
+        }
+    }
+    
+    async function testTTD() {
+        const message = document.getElementById('ttd-message');
+        message.textContent = '测试中...';
+        try {
+            const data = await apiCall('/api/status/test/ttd', 'POST');
+            message.textContent = data.message;
+            updateStatusCard('ttd', {connected: data.success, message: data.message});
+        } catch (e) {
+            message.textContent = '测试失败: ' + e.message;
+        }
+    }
+    
+    async function testXHS() {
+        const message = document.getElementById('xhs-message');
+        message.textContent = '测试中...';
+        try {
+            const data = await apiCall('/api/status/test/xhs', 'POST');
+            message.textContent = data.message;
+            updateStatusCard('xhs', {connected: data.success, message: data.message});
+        } catch (e) {
+            message.textContent = '测试失败: ' + e.message;
+        }
+    }
+    
+    async function controlService(name, action) {
+        const data = await apiCall(`/api/services/${name}/${action}`, 'POST');
+        showToast(data.message, data.success ? 'success' : 'error');
+        if (data.success) {
+            setTimeout(() => refreshStatus(), 2000);
+        }
+    }
+    
+    function copyCmd(element) {
+        const text = element.textContent || element.innerText;
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('已复制到剪贴板', 'success');
+        }).catch(() => {
+            showToast('复制失败', 'error');
+        });
+    }
+</script>
+{% endblock %}
