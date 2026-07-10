@@ -109,9 +109,9 @@ class Collector:
     async def _collect_ttd(self, account: Account, cookie: str) -> Any:
         """调用 TikTokDownloader API 采集抖音/TikTok 账号"""
         if account.platform == "抖音":
-            endpoint = f"{self.ttd_url}/api/douyin/account"
+            endpoint = f"{self.ttd_url}/douyin/account"
         else:
-            endpoint = f"{self.ttd_url}/api/tiktok/account"
+            endpoint = f"{self.ttd_url}/tiktok/account"
 
         payload = {
             "sec_user_id": account.sec_user_id,
@@ -163,7 +163,7 @@ class Collector:
         )
         try:
             if platform in ("抖音", "TikTok"):
-                endpoint = f"{self.ttd_url}/api/douyin/detail"
+                endpoint = f"{self.ttd_url}/douyin/detail"
                 # 从链接中提取 detail_id
                 match = re.search(r"\b(\d{19})\b", link)
                 if not match:
@@ -230,9 +230,9 @@ class Collector:
     async def resolve_short_url(self, url: str, platform: str = "抖音", proxy: str = "") -> str:
         """调用 TTD API 解析短链接"""
         if platform == "抖音":
-            endpoint = f"{self.ttd_url}/api/douyin/short_url"
+            endpoint = f"{self.ttd_url}/douyin/share"
         elif platform == "TikTok":
-            endpoint = f"{self.ttd_url}/api/tiktok/short_url"
+            endpoint = f"{self.ttd_url}/tiktok/share"
         else:
             return ""
 
@@ -255,9 +255,9 @@ class Collector:
 
         try:
             if platform == "抖音":
-                endpoint = f"{self.ttd_url}/api/douyin/account"
+                endpoint = f"{self.ttd_url}/douyin/account"
             elif platform == "TikTok":
-                endpoint = f"{self.ttd_url}/api/tiktok/account"
+                endpoint = f"{self.ttd_url}/tiktok/account"
             else:
                 return {}
 
