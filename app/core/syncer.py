@@ -32,6 +32,7 @@ ACCOUNT_FIELD_MAP = {
     "签名": "signature",
     "头像": "avatar",
     "同步时间": "synced_at",
+    "已获取信息": "info_fetched",
 }
 
 # 采集表字段名
@@ -250,39 +251,52 @@ class Syncer:
                         result.errors.append(f"{link}: 无法解析")
                         continue
 
-                    # 通过 TTD API 获取账号详情
-                    info = await self.collector.get_account_info(sec_user_id, platform, cookie)
-                    result.api_calls += 1  # 记录 API 调用
-                    logger.info(f"  账号信息: {info.get('nickname', '')} ({info.get('follower_count', 0)} 粉丝)")
+                    # 检查是否已有账号信息
+                    existing_account = existing_accounts.get(sec_user_id)
+                    info_fetched = existing_account.info_fetched if existing_account else False
 
-                    # 构建 Account
-                    account = Account(
-                        name=entry.get("name", "") or info.get("nickname", ""),
-                        platform=platform,
-                        link=resolved_url or link,
-                        rating=rating,
-                        tags=entry.get("tags", []),
-                        note=entry.get("note", ""),
-                        sec_user_id=sec_user_id,
-                        nickname=info.get("nickname", ""),
-                        follower_count=info.get("follower_count", 0),
-                        aweme_count=info.get("aweme_count", 0),
-                        signature=info.get("signature", ""),
-                        avatar=info.get("avatar", ""),
-                        synced_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        enabled=True,
-                    )
-
-                    # 写入或更新
-                    if sec_user_id in existing_accounts:
+                    # 如果已获取信息，跳过 API 调用
+                    if info_fetched:
+                        logger.info(f"  跳过账号信息获取（已缓存）")
+                        account = existing_account
+                        account.link = resolved_url or link
+                        account.synced_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         result.updated_accounts += 1
-                        logger.info(f"  更新账号: {account.name}")
                     else:
-                        result.new_accounts += 1
-                        existing_accounts[sec_user_id] = account
-                        logger.info(f"  新增账号: {account.name}")
-                        result.new_accounts += 1
-                        existing_accounts[sec_user_id] = account
+                        # 通过 TTD API 获取账号详情
+                        info = await self.collector.get_account_info(sec_user_id, platform, cookie)
+                        result.api_calls += 1  # 记录 API 调用
+                        logger.info(f"  账号信息: {info.get('nickname', '')} ({info.get('follower_count', 0)} 粉丝)")
+
+                        # 构建 Account
+                        account = Account(
+                            name=entry.get("name", "") or info.get("nickname", ""),
+                            platform=platform,
+                            link=resolved_url or link,
+                            rating=rating,
+                            tags=entry.get("tags", []),
+                            note=entry.get("note", ""),
+                            sec_user_id=sec_user_id,
+                            nickname=info.get("nickname", ""),
+                            follower_count=info.get("follower_count", 0),
+                            aweme_count=info.get("aweme_count", 0),
+                            signature=info.get("signature", ""),
+                            avatar=info.get("avatar", ""),
+                            synced_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            enabled=True,
+                            info_fetched=True,
+                        )
+
+                        if sec_user_id in existing_accounts:
+                            result.updated_accounts += 1
+                            logger.info(f"  更新账号: {account.name}")
+                        else:
+                            result.new_accounts += 1
+                            existing_accounts[sec_user_id] = account
+                            logger.info(f"  新增账号: {account.name}")
+
+                    # 更新本地缓存
+                    existing_accounts[sec_user_id] = account
 
                     # 更新采集表状态
                     self._update_collection_status(record_id, "已同步", "", sec_user_id)

@@ -240,6 +240,7 @@ class FeishuClient:
                 ("签名", 1, None),
                 ("头像", 15, None),
                 ("同步时间", 5, None),
+                ("已获取信息", 7, None),     # 复选框：是否已获取账号基本信息
             ]
 
     def ensure_fields(self, app_token: str, table_id: str, table_type: str = "account") -> dict:

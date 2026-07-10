@@ -31,6 +31,7 @@ class Account:
     signature: str = ""
     avatar: str = ""
     synced_at: str = ""
+    info_fetched: bool = False    # 是否已获取账号基本信息
 
 
 @dataclass
@@ -251,7 +252,7 @@ class Collector:
             return ""
 
     async def get_account_info(self, sec_user_id: str, platform: str = "抖音", cookie: str = "") -> dict:
-        """通过 sec_user_id 获取账号详情"""
+        """通过 sec_user_id 获取账号详情（使用 count=1 优化性能）"""
         if not sec_user_id:
             return {}
 
@@ -267,6 +268,7 @@ class Collector:
                 "sec_user_id": sec_user_id,
                 "source": True,
                 "pages": 1,
+                "count": 1,  # 优化：只获取 1 个作品，减少数据量
             }
             if cookie:
                 payload["cookie"] = cookie
