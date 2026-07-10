@@ -616,6 +616,256 @@ async def api_sync_fetch_info():
         )
 
 
+# ========== 新同步器 API（使用数据库） ==========
+
+@app.post("/api/sync/v2/import")
+async def api_sync_v2_import(request: Request):
+    """步骤1：导入采集表（使用新同步器）"""
+    s = get_syncer_v2()
+    if not s:
+        return JSONResponse(
+            {"success": False, "message": "飞书未配置"},
+            status_code=400,
+        )
+    
+    try:
+        data = await request.json()
+        text = data.get("text", "")
+        
+        result = s.import_to_collection(text)
+        return {
+            "success": result.failed == 0,
+            "message": f"导入完成: 成功 {result.success} 条，失败 {result.failed} 条，跳过 {result.skipped} 条",
+            **result.to_dict()
+        }
+    except Exception as e:
+        logger.error(f"导入失败: {e}")
+        return JSONResponse(
+            {"success": False, "message": f"导入异常: {str(e)}"},
+            status_code=500,
+        )
+
+
+@app.post("/api/sync/v2/update-collection")
+async def api_sync_v2_update_collection():
+    """步骤2：更新采集表（获取 sec_user_id）- SSE 实时进度"""
+    s = get_syncer_v2()
+    if not s:
+        return JSONResponse(
+            {"success": False, "message": "飞书未配置"},
+            status_code=400,
+        )
+    
+    import json
+    
+    async def update_stream():
+        try:
+            yield f"data: {json.dumps({'type': 'start', 'message': '开始更新采集表'})}\n\n"
+            
+            # 获取所有未获取 sec_user_id 的记录
+            collections = s.db.get_all_collections()
+            to_process = [c for c in collections if not c.get("账号标识")]
+            
+            yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': 0, 'failed': 0})}\n\n"
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'需要处理 {len(to_process)} 条记录'})}\n\n"
+            
+            success = 0
+            failed = 0
+            errors = []
+            
+            for i, collection in enumerate(to_process):
+                yield f"data: {json.dumps({'type': 'progress', 'message': f'处理 [{i+1}/{len(to_process)}]: {collection["分享码"]}'})}\n\n"
+                
+                try:
+                    share = collection["分享码"]
+                    platform = collection.get("平台", "抖音")
+                    
+                    # 调用 TTD API 解析短链接
+                    resolved_url = await s.collector.resolve_short_url(share, platform)
+                    sec_user_id = s._extract_sec_user_id(resolved_url, platform)
+                    
+                    if not sec_user_id:
+                        failed += 1
+                        errors.append(f"{share}: 无法提取 sec_user_id")
+                        s.db.update_collection(collection["记录ID"], {
+                            "同步错误": "无法提取 sec_user_id",
+                        })
+                        yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {share}: 无法提取 sec_user_id'})}\n\n"
+                        continue
+                    
+                    # 检查是否已存在
+                    existing = s.db.get_collection_by_sec_user_id(sec_user_id)
+                    if existing and existing["记录ID"] != collection["记录ID"]:
+                        # 去重：等级取高的，标签合并
+                        new_level = s.merge_level(existing.get("等级"), collection.get("等级"))
+                        existing_tags = json.loads(existing.get("标签", "[]")) if existing.get("标签") else []
+                        new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
+                        merged_tags = s.merge_tags(existing_tags, new_tags)
+                        
+                        s.db.update_collection(existing["记录ID"], {
+                            "等级": new_level,
+                            "标签": json.dumps(merged_tags),
+                        })
+                        # 删除重复记录
+                        s.db.delete_collection(collection["记录ID"])
+                        success += 1
+                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ 合并重复记录'})}\n\n"
+                    else:
+                        # 更新 sec_user_id
+                        s.db.update_collection(collection["记录ID"], {
+                            "账号标识": sec_user_id,
+                            "已同步": True,
+                            "同步错误": None,
+                        })
+                        success += 1
+                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ {share}: {sec_user_id}'})}\n\n"
+                    
+                    # 更新统计
+                    yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': success, 'failed': failed})}\n\n"
+                    
+                except Exception as e:
+                    failed += 1
+                    errors.append(f"{collection.get('分享码')}: {str(e)}")
+                    s.db.update_collection(collection["记录ID"], {
+                        "同步错误": str(e),
+                    })
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {collection.get('分享码')}: {e}'})}\n\n"
+            
+            yield f"data: {json.dumps({'type': 'complete', 'success': failed == 0, 'message': f'更新完成: 成功 {success} 条，失败 {failed} 条', 'total': len(to_process), 'success_count': success, 'failed': failed, 'errors': errors[:5]})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"更新采集表失败: {e}")
+            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'更新失败: {str(e)}', 'total': 0, 'success_count': 0, 'failed': 1, 'errors': [str(e)]})}\n\n"
+    
+    return StreamingResponse(update_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/sync/v2/sync-account")
+async def api_sync_v2_sync_account():
+    """步骤3：同步账号表 - SSE 实时进度"""
+    s = get_syncer_v2()
+    if not s:
+        return JSONResponse(
+            {"success": False, "message": "飞书未配置"},
+            status_code=400,
+        )
+    
+    import json
+    
+    async def sync_stream():
+        try:
+            yield f"data: {json.dumps({'type': 'start', 'message': '开始同步账号表'})}\n\n"
+            
+            # 获取所有已同步但账号表未更新的记录
+            collections = s.db.get_all_collections()
+            to_process = [c for c in collections if c.get("已同步") and c.get("账号标识")]
+            
+            yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': 0, 'failed': 0})}\n\n"
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'需要处理 {len(to_process)} 条记录'})}\n\n"
+            
+            success = 0
+            failed = 0
+            errors = []
+            
+            for i, collection in enumerate(to_process):
+                yield f"data: {json.dumps({'type': 'progress', 'message': f'处理 [{i+1}/{len(to_process)}]: {collection["账号标识"]}'})}\n\n"
+                
+                try:
+                    sec_user_id = collection["账号标识"]
+                    platform = collection.get("平台", "抖音")
+                    
+                    # 检查账号表是否已存在
+                    existing_account = s.db.get_account_by_sec_user_id(sec_user_id)
+                    
+                    if existing_account:
+                        # 去重：等级取高的，标签合并
+                        new_level = s.merge_level(existing_account.get("等级"), collection.get("等级"))
+                        existing_tags = json.loads(existing_account.get("标签", "[]")) if existing_account.get("标签") else []
+                        new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
+                        merged_tags = s.merge_tags(existing_tags, new_tags)
+                        
+                        # 更新账号表
+                        s.db.update_account(existing_account["记录ID"], {
+                            "等级": new_level,
+                            "标签": json.dumps(merged_tags),
+                            "已更新": True,
+                        })
+                        success += 1
+                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ 更新账号: {existing_account.get('账号名称')}'})}\n\n"
+                    else:
+                        # 调用 API 获取账号信息
+                        info = await s.collector.get_account_info(sec_user_id, platform)
+                        if not info:
+                            failed += 1
+                            errors.append(f"{sec_user_id}: 无法获取账号信息")
+                            yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {sec_user_id}: 无法获取账号信息'})}\n\n"
+                            continue
+                        
+                        # 创建账号记录
+                        record_id = f"acc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{success}"
+                        s.db.insert_account({
+                            "记录ID": record_id,
+                            "账号名称": info.get("nickname", ""),
+                            "平台": platform,
+                            "链接": f"https://www.douyin.com/user/{sec_user_id}",
+                            "账号标识": sec_user_id,
+                            "等级": collection.get("等级"),
+                            "标签": collection.get("标签"),
+                            "昵称": info.get("nickname", ""),
+                            "粉丝数": info.get("follower_count", 0),
+                            "作品数": info.get("aweme_count", 0),
+                            "签名": info.get("signature", ""),
+                            "头像": info.get("avatar", ""),
+                            "已更新": True,
+                        })
+                        success += 1
+                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ 新增账号: {info.get('nickname')}'})}\n\n"
+                    
+                    # 更新统计
+                    yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': success, 'failed': failed})}\n\n"
+                    
+                except Exception as e:
+                    failed += 1
+                    errors.append(f"{collection.get('账号标识')}: {str(e)}")
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {collection.get('账号标识')}: {e}'})}\n\n"
+            
+            yield f"data: {json.dumps({'type': 'complete', 'success': failed == 0, 'message': f'同步完成: 成功 {success} 条，失败 {failed} 条', 'total': len(to_process), 'success_count': success, 'failed': failed, 'errors': errors[:5]})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"同步账号表失败: {e}")
+            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'同步失败: {str(e)}', 'total': 0, 'success_count': 0, 'failed': 1, 'errors': [str(e)]})}\n\n"
+    
+    return StreamingResponse(sync_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/sync/v2/all")
+async def api_sync_v2_all(request: Request):
+    """一键同步（使用新同步器）"""
+    s = get_syncer_v2()
+    if not s:
+        return JSONResponse(
+            {"success": False, "message": "飞书未配置"},
+            status_code=400,
+        )
+    
+    try:
+        data = await request.json()
+        text = data.get("text", "")
+        
+        results = await s.sync_all(text)
+        return {
+            "success": True,
+            "message": "一键同步完成",
+            **results
+        }
+    except Exception as e:
+        logger.error(f"一键同步失败: {e}")
+        return JSONResponse(
+            {"success": False, "message": f"同步异常: {str(e)}"},
+            status_code=500,
+        )
+
+
 class ImportItem(BaseModel):
     link: str
     rating: int = 3
