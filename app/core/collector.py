@@ -241,11 +241,13 @@ class Collector:
             payload["proxy"] = proxy
 
         try:
-            resp = await self._client.post(endpoint, json=payload)
+            # 使用较短的超时时间（30秒）
+            resp = await self._client.post(endpoint, json=payload, timeout=30)
             resp.raise_for_status()
             data = resp.json()
             return data.get("url", "")
-        except Exception:
+        except Exception as e:
+            logger.warning(f"短链接解析失败: {url} - {e}")
             return ""
 
     async def get_account_info(self, sec_user_id: str, platform: str = "抖音", cookie: str = "") -> dict:
@@ -269,7 +271,7 @@ class Collector:
             if cookie:
                 payload["cookie"] = cookie
 
-            resp = await self._client.post(endpoint, json=payload)
+            resp = await self._client.post(endpoint, json=payload, timeout=30)
             resp.raise_for_status()
             data = resp.json()
             if data.get("data"):

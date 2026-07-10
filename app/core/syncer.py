@@ -1,5 +1,6 @@
 """飞书同步引擎 — 读取采集表 → 解析短链接 → 获取账号信息 → 写入账号表"""
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,8 @@ import openpyxl
 from .collector import Account, Collector
 from .feishu import FeishuClient
 from .link_resolver import detect_platform, extract_sec_user_id, extract_url_from_text
+
+logger = logging.getLogger("doukhub.syncer")
 
 
 # 飞书账号表字段名 → Account 属性名 的映射
@@ -197,8 +200,10 @@ class Syncer:
 
         try:
             # 1. 读取采集表全部记录
+            logger.info("正在连接飞书...")
             records = self.feishu.get_all_records(self.app_token, self.collection_table_id)
             result.total = len(records)
+            logger.info(f"读取采集表完成: {result.total} 条记录")
 
             # 2. 解析记录
             entries = [_parse_collection_record(r) for r in records]
@@ -216,10 +221,12 @@ class Syncer:
                         existing_accounts[acc.sec_user_id] = acc
 
             # 5. 逐条处理
-            for entry in entries:
+            for i, entry in enumerate(entries):
                 link = entry["link"]
                 rating = entry.get("rating", 3)
                 record_id = entry["record_id"]
+
+                logger.info(f"处理 [{i+1}/{len(entries)}]: {link}")
 
                 try:
                     # 补全短链接前缀（如果只有缩略路径如 m3HL2u1R1YM）
@@ -233,6 +240,7 @@ class Syncer:
                     cookie = active_cookies[0] if active_cookies else ""
                     resolved_url = await self.collector.resolve_short_url(link, platform)
                     result.api_calls += 1  # 记录 API 调用
+                    logger.info(f"  短链接解析: {resolved_url}")
 
                     # 从完整 URL 中提取 sec_user_id（纯正则）
                     sec_user_id = extract_sec_user_id(resolved_url, platform)
@@ -245,6 +253,7 @@ class Syncer:
                     # 通过 TTD API 获取账号详情
                     info = await self.collector.get_account_info(sec_user_id, platform, cookie)
                     result.api_calls += 1  # 记录 API 调用
+                    logger.info(f"  账号信息: {info.get('nickname', '')} ({info.get('follower_count', 0)} 粉丝)")
 
                     # 构建 Account
                     account = Account(
@@ -267,7 +276,11 @@ class Syncer:
                     # 写入或更新
                     if sec_user_id in existing_accounts:
                         result.updated_accounts += 1
+                        logger.info(f"  更新账号: {account.name}")
                     else:
+                        result.new_accounts += 1
+                        existing_accounts[sec_user_id] = account
+                        logger.info(f"  新增账号: {account.name}")
                         result.new_accounts += 1
                         existing_accounts[sec_user_id] = account
 
@@ -279,18 +292,22 @@ class Syncer:
                     result.errors.append(f"{link}: {e}")
 
             # 6. 保存本地账号缓存
+            logger.info("保存本地账号缓存...")
             self._save_local_xlsx(list(existing_accounts.values()))
 
             # 7. 写入飞书账号表
             if self.account_table_id:
+                logger.info("写入飞书账号表...")
                 self._sync_to_feishu_account_table(list(existing_accounts.values()), result)
 
             result.success = True
             result.message = result.summary
+            logger.info(f"同步完成: {result.summary}")
 
         except Exception as e:
             result.success = False
             result.message = f"同步失败: {e}"
+            logger.error(f"同步失败: {e}")
 
         return result
 

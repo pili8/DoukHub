@@ -303,17 +303,25 @@ async def api_sync():
             )
         except Exception:
             pass
-    result = await s.sync()
-    return {
-        "success": result.success,
-        "message": result.message,
-        "total": result.total,
-        "new_count": result.new_accounts,
-        "updated_count": result.updated_accounts,
-        "api_calls": result.api_calls,
-        "error_count": len(result.errors),
-        "errors": result.errors,
-    }
+    
+    try:
+        result = await s.sync()
+        return {
+            "success": result.success,
+            "message": result.message,
+            "total": result.total,
+            "new_count": result.new_accounts,
+            "updated_count": result.updated_accounts,
+            "api_calls": result.api_calls,
+            "error_count": len(result.errors),
+            "errors": result.errors,
+        }
+    except Exception as e:
+        logger.error(f"同步失败: {e}")
+        return JSONResponse(
+            {"success": False, "message": f"同步异常: {str(e)}"},
+            status_code=500,
+        )
 
 
 class ImportItem(BaseModel):
