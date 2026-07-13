@@ -169,6 +169,7 @@
     let sortOrder = 'desc'; // asc / desc
     let schemaFields = [];  // 当前表字段定义（含类型）
     let pendingImportFile = null; // 导入预览暂存的文件
+    let currentTotal = 0;   // 当前表（含搜索/筛选）的总条数
 
     document.addEventListener('DOMContentLoaded', () => {
         refreshStats();
@@ -235,6 +236,7 @@
     function renderTable(data) {
         const records = data.records || [];
         const total = data.total || 0;
+        currentTotal = total;  // 供导出按钮提示用
 
         // 表头：表名 · 共 N 条 （搜索时加搜索词标注）
         const kwSuffix = currentKeyword ? ` · 搜索"${currentKeyword}"` : '';
@@ -415,21 +417,57 @@
         }
     }
 
-    function exportCsv() {
+    async function exportCsv(ev) {
         if (!currentTable) {
             showToast('请先选择一张表', 'error');
             return;
         }
+        const btn = ev ? ev.target.closest('button') : null;
+        const originalText = btn ? btn.innerHTML : '📥 导出';
+        const scope = currentKeyword ? `（搜索"${currentKeyword}"）` : '';
+        const countInfo = currentTotal > 0 ? `共 ${currentTotal} 条` : '全部数据';
+
+        if (!confirm(`确定导出 ${TABLE_NAMES[currentTable] || currentTable} ${scope}？\n${countInfo}，将下载为 CSV 文件。`)) return;
+
         let url = `/api/database/table/${currentTable}/export`;
         if (currentKeyword) url += `?search=${encodeURIComponent(currentKeyword)}`;
-        showToast('正在导出，请稍候...', 'info');
-        // 触发下载
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = '';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+
+        if (btn) { btn.disabled = true; btn.innerHTML = '⏳ 导出中...'; }
+
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) {
+                let msg = `HTTP ${resp.status}`;
+                try { const e = await resp.json(); msg = e.message || msg; } catch (_) {}
+                throw new Error(msg);
+            }
+
+            const blob = await resp.blob();
+            // 从 Content-Disposition 解析文件名
+            const cd = resp.headers.get('Content-Disposition') || '';
+            const m = cd.match(/filename="?([^"]+)"?/);
+            const filename = m ? m[1] : `${currentTable}.csv`;
+
+            // 触发下载
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+
+            // 友好提示：文件大小
+            const size = blob.size;
+            const sizeText = size > 1024 * 1024 ? `${(size/1024/1024).toFixed(2)} MB`
+                            : size > 1024 ? `${(size/1024).toFixed(1)} KB`
+                            : `${size} B`;
+            showToast(`✅ 已导出 ${countInfo} · ${sizeText}`, 'success');
+        } catch (e) {
+            showToast('导出失败: ' + e.message, 'error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+        }
     }
 
     function importCsv() {
