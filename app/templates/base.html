@@ -49,6 +49,11 @@
             color: #fff;
             padding: 20px 0;
             flex-shrink: 0;
+            position: sticky;
+            top: 0;
+            align-self: flex-start;
+            height: 100vh;
+            overflow-y: auto;
         }
         .sidebar h1 { font-size: 20px; padding: 0 20px 20px; border-bottom: 1px solid #333; margin-bottom: 10px; }
         .sidebar a { display: block; padding: 12px 20px; color: #ccc; text-decoration: none; transition: all 0.2s; }
@@ -124,7 +129,11 @@
 
             .layout { display: flex; }
             .sidebar {
-                position: static;
+                position: sticky;
+                top: 0;
+                align-self: flex-start;
+                height: 100vh;
+                overflow-y: auto;
                 width: 140px;
                 transform: none;
                 padding: 12px 0;

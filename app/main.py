@@ -1412,10 +1412,7 @@ async def api_database_delete_record(table_name: str, record_id: str):
         elif table_name == "account_cache":
             success = db.delete_account(record_id)
         elif table_name == "cookie_cache":
-            with db._connect() as conn:
-                conn.execute("DELETE FROM cookie_cache WHERE 记录ID = ?", (record_id,))
-                conn.commit()
-                success = True
+            success = db.delete_cookie(record_id)
         
         if success:
             return {"success": True, "message": "删除成功"}

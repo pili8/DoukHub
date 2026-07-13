@@ -161,6 +161,24 @@ class FeishuClient:
         resp.raise_for_status()
         return resp.json()
 
+    def batch_delete_records(
+        self,
+        app_token: str,
+        table_id: str,
+        records: list[str],
+    ) -> dict:
+        """批量删除多维表格记录
+        records: ["record_id1", "record_id2", ...]
+        一次最多 500 条
+        """
+        resp = self._client.post(
+            f"{FEISHU_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/records/batch_delete",
+            headers=self._headers(),
+            json={"records": records},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def close(self):
         self._client.close()
 

@@ -35,7 +35,9 @@ class Database:
                     粉丝数 INTEGER,
                     作品数 INTEGER,
                     创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+                    同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    is_deleted BOOLEAN DEFAULT 0,
+                    deleted_at DATETIME
                 )
             """)
 
@@ -59,7 +61,9 @@ class Database:
                     启用 BOOLEAN DEFAULT 1,
                     采集类型 TEXT DEFAULT '发布',
                     创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+                    同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    is_deleted BOOLEAN DEFAULT 0,
+                    deleted_at DATETIME
                 )
             """)
 
@@ -74,7 +78,9 @@ class Database:
                     备注 TEXT,
                     验证时间 DATETIME,
                     创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+                    同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    is_deleted BOOLEAN DEFAULT 0,
+                    deleted_at DATETIME
                 )
             """)
 
@@ -160,6 +166,17 @@ class Database:
                 ("采集类型", "TEXT DEFAULT '发布'"),
             ],
         }
+        # 软删除字段（墓碑）：三张同步表都加上
+        for _tbl in ("collection_cache", "account_cache", "cookie_cache"):
+            add_columns.setdefault(_tbl, []).extend([
+                ("is_deleted", "BOOLEAN DEFAULT 0"),
+                ("deleted_at", "DATETIME"),
+            ])
+        # 同步标记：记录是否已确认存在于飞书（区分"本地新建未推送"和"飞书已删除"）
+        for _tbl in ("collection_cache", "account_cache", "cookie_cache"):
+            add_columns.setdefault(_tbl, []).append(
+                ("synced", "BOOLEAN DEFAULT 0"),
+            )
         for table, renames in rename_map.items():
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
             for old, new in renames:
@@ -173,6 +190,9 @@ class Database:
             for col, ddl in additions:
                 if col not in cols:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+                    # synced 字段首次添加时，把现有记录全部标记为已同步
+                    if col == "synced":
+                        conn.execute(f"UPDATE {table} SET synced = 1")
 
     def _connect(self) -> sqlite3.Connection:
         """创建数据库连接"""
@@ -185,7 +205,7 @@ class Database:
     def get_all_collections(self) -> list[dict]:
         """获取所有采集表记录"""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM collection_cache ORDER BY 创建时间 DESC").fetchall()
+            rows = conn.execute("SELECT * FROM collection_cache WHERE is_deleted = 0 ORDER BY 创建时间 DESC").fetchall()
             return [dict(row) for row in rows]
 
     def get_collection_by_share(self, share: str) -> Optional[dict]:
@@ -228,7 +248,10 @@ class Database:
     def delete_collection(self, record_id: str) -> bool:
         """删除采集表记录"""
         with self._connect() as conn:
-            conn.execute("DELETE FROM collection_cache WHERE 记录ID = ?", (record_id,))
+            conn.execute(
+                "UPDATE collection_cache SET is_deleted = 1, deleted_at = ? WHERE 记录ID = ?",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id),
+            )
             conn.commit()
             return True
 
@@ -244,7 +267,7 @@ class Database:
     def get_all_accounts(self) -> list[dict]:
         """获取所有账号表记录"""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM account_cache ORDER BY 创建时间 DESC").fetchall()
+            rows = conn.execute("SELECT * FROM account_cache WHERE is_deleted = 0 ORDER BY 创建时间 DESC").fetchall()
             return [dict(row) for row in rows]
 
     def get_account_by_sec_user_id(self, sec_user_id: str) -> Optional[dict]:
@@ -281,7 +304,10 @@ class Database:
     def delete_account(self, record_id: str) -> bool:
         """删除账号表记录"""
         with self._connect() as conn:
-            conn.execute("DELETE FROM account_cache WHERE 记录ID = ?", (record_id,))
+            conn.execute(
+                "UPDATE account_cache SET is_deleted = 1, deleted_at = ? WHERE 记录ID = ?",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id),
+            )
             conn.commit()
             return True
 
@@ -297,7 +323,7 @@ class Database:
     def get_all_cookies(self) -> list[dict]:
         """获取所有 Cookie 记录"""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM cookie_cache ORDER BY 创建时间 DESC").fetchall()
+            rows = conn.execute("SELECT * FROM cookie_cache WHERE is_deleted = 0 ORDER BY 创建时间 DESC").fetchall()
             return [dict(row) for row in rows]
 
     def get_enabled_cookies(self) -> list[dict]:
@@ -338,7 +364,10 @@ class Database:
     def delete_cookie(self, record_id: str) -> bool:
         """删除 Cookie 记录"""
         with self._connect() as conn:
-            conn.execute("DELETE FROM cookie_cache WHERE 记录ID = ?", (record_id,))
+            conn.execute(
+                "UPDATE cookie_cache SET is_deleted = 1, deleted_at = ? WHERE 记录ID = ?",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id),
+            )
             conn.commit()
             return True
 
@@ -398,6 +427,52 @@ class Database:
         """删除定时任务"""
         with self._connect() as conn:
             conn.execute("DELETE FROM scheduled_tasks WHERE ID = ?", (task_id,))
+            conn.commit()
+            return True
+
+    # ========== 软删除辅助（删除同步专用） ==========
+
+    _SYNC_TABLES = {"collection_cache", "account_cache", "cookie_cache"}
+
+    def get_deleted_ids(self, table: str) -> list[str]:
+        """获取墓碑记录（is_deleted=1）的 record_id 列表"""
+        if table not in self._SYNC_TABLES:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(f"SELECT 记录ID FROM {table} WHERE is_deleted = 1").fetchall()
+            return [row["记录ID"] for row in rows]
+
+    def get_active_ids(self, table: str) -> list[str]:
+        """获取正常记录（is_deleted=0）的 record_id 列表"""
+        if table not in self._SYNC_TABLES:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(f"SELECT 记录ID FROM {table} WHERE is_deleted = 0").fetchall()
+            return [row["记录ID"] for row in rows]
+
+    def get_synced_active_ids(self, table: str) -> list[str]:
+        """获取已同步且未删除的 record_id 列表（删除检测专用）"""
+        if table not in self._SYNC_TABLES:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(f"SELECT 记录ID FROM {table} WHERE is_deleted = 0 AND synced = 1").fetchall()
+            return [row["记录ID"] for row in rows]
+
+    def hard_delete(self, table: str, record_id: str) -> bool:
+        """硬删除（真删），用于飞书→本地方向清理孤儿记录"""
+        if table not in self._SYNC_TABLES:
+            return False
+        with self._connect() as conn:
+            conn.execute(f"DELETE FROM {table} WHERE 记录ID = ?", (record_id,))
+            conn.commit()
+            return True
+
+    def purge_tombstone(self, table: str, record_id: str) -> bool:
+        """清除已同步删除的墓碑"""
+        if table not in self._SYNC_TABLES:
+            return False
+        with self._connect() as conn:
+            conn.execute(f"DELETE FROM {table} WHERE 记录ID = ? AND is_deleted = 1", (record_id,))
             conn.commit()
             return True
 

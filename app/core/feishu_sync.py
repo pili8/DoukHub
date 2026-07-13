@@ -15,6 +15,13 @@ logger = logging.getLogger("doukhub.feishu_sync")
 class FeishuSyncer:
     """飞书双向同步器"""
 
+    # 飞书表 → 本地数据库表 的映射（用于删除同步）
+    _TABLE_MAP = {
+        "collection": "collection_cache",
+        "account": "account_cache",
+        "cookie": "cookie_cache",
+    }
+
     def __init__(self, feishu: FeishuClient, config: dict):
         self.feishu = feishu
         self.config = config
@@ -264,7 +271,7 @@ class FeishuSyncer:
                 if rid and rid in feishu_index:
                     if incremental:
                         fs_time = self._safe_int(feishu_index[rid].get("fields", {}).get("\u540c\u6b65\u65f6\u95f4", 0))
-                        local_time = self._parse_local_time(local.get("\u66f4\u65b0\u65f6\u95f4", ""))
+                        local_time = self._parse_local_time(local.get("\u540c\u6b65\u65f6\u95f4", ""))
                         if fs_time and local_time and fs_time >= local_time - 5000:
                             result["skipped_uptodate"] += 1
                             continue
@@ -274,7 +281,7 @@ class FeishuSyncer:
                         sync_ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
                         if sync_ts and db_update_fn:
                             try:
-                                db_update_fn(rid, {"\u66f4\u65b0\u65f6\u95f4": datetime.fromtimestamp(sync_ts / 1000).strftime("%Y-%m-%d %H:%M:%S")})
+                                db_update_fn(rid, {"\u540c\u6b65\u65f6\u95f4": datetime.fromtimestamp(sync_ts / 1000).strftime("%Y-%m-%d %H:%M:%S")})
                             except Exception:
                                 pass
                 else:
@@ -292,12 +299,14 @@ class FeishuSyncer:
                         for j, rec in enumerate(recs):
                             if j < len(bl):
                                 nid, oid = rec.get("record_id", ""), bl[j].get("\u8bb0\u5f55ID", "")
-                                if nid and oid and nid != oid and db_update_fn:
+                                if nid and oid and db_update_fn:
                                     try:
-                                        db_update_fn(oid, {"\u8bb0\u5f55ID": nid})
+                                        update_data = {"synced": True}
+                                        if nid != oid:
+                                            update_data["\u8bb0\u5f55ID"] = nid
+                                        db_update_fn(oid, update_data)
                                     except Exception:
                                         pass
-                    else:
                         result["failed"] += len(batch)
                         result["errors"].append("create: " + resp.get("msg", ""))
                 except Exception as e:
@@ -335,6 +344,7 @@ class FeishuSyncer:
                     result["skipped_invalid"] += 1
                     continue
                 local_data["\u8bb0\u5f55ID"] = rid
+                local_data["synced"] = True
                 existing = get_by_id_fn(rid)
                 if existing:
                     try:
@@ -372,16 +382,17 @@ class FeishuSyncer:
                 existing = db_get_by_id(rid)
                 if existing:
                     fs_time = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
-                    local_time = self._parse_local_time(existing.get("\u66f4\u65b0\u65f6\u95f4", ""))
+                    local_time = self._parse_local_time(existing.get("\u540c\u6b65\u65f6\u95f4", ""))
                     if local_time and (not fs_time or fs_time <= local_time + 5000):
                         result["skipped_uptodate"] += 1
                         continue
                     try:
                         local_data = convert_fn(record)
                         if local_data:
+                            local_data["synced"] = True
                             ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
                             if ts:
-                                local_data["\u66f4\u65b0\u65f6\u95f4"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                                local_data["\u540c\u6b65\u65f6\u95f4"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
                             db_update_fn(rid, local_data)
                             result["updated"] += 1
                         else:
@@ -395,9 +406,10 @@ class FeishuSyncer:
                     result["skipped_invalid"] += 1
                     continue
                 local_data["\u8bb0\u5f55ID"] = rid
+                local_data["synced"] = True
                 ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
                 if ts:
-                    local_data["\u66f4\u65b0\u65f6\u95f4"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                    local_data["\u540c\u6b65\u65f6\u95f4"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
                 try:
                     db_insert_fn(local_data)
                     result["created"] += 1
@@ -413,13 +425,22 @@ class FeishuSyncer:
     # ========== 全盘同步（3表 x 2方向） ==========
 
     def sync_collection_to_feishu(self):
-        return self._batch_to_feishu(self.collection_table_id, self.db.get_all_collections(), self._build_collection_fields, self.db.update_collection)
+        result = self._sync_deletions_from_feishu(self.collection_table_id, "collection_cache")
+        result.update(self._batch_to_feishu(self.collection_table_id, self.db.get_all_collections(), self._build_collection_fields, self.db.update_collection))
+        result.update(self._sync_deletions_to_feishu(self.collection_table_id, "collection_cache"))
+        return result
 
     def sync_account_to_feishu(self):
-        return self._batch_to_feishu(self.account_table_id, self.db.get_all_accounts(), self._build_account_fields, self.db.update_account)
+        result = self._sync_deletions_from_feishu(self.account_table_id, "account_cache")
+        result.update(self._batch_to_feishu(self.account_table_id, self.db.get_all_accounts(), self._build_account_fields, self.db.update_account))
+        result.update(self._sync_deletions_to_feishu(self.account_table_id, "account_cache"))
+        return result
 
     def sync_cookie_to_feishu(self):
-        return self._batch_to_feishu(self.cookie_table_id, self.db.get_all_cookies(), self._build_cookie_fields, self.db.update_cookie)
+        result = self._sync_deletions_from_feishu(self.cookie_table_id, "cookie_cache")
+        result.update(self._batch_to_feishu(self.cookie_table_id, self.db.get_all_cookies(), self._build_cookie_fields, self.db.update_cookie))
+        result.update(self._sync_deletions_to_feishu(self.cookie_table_id, "cookie_cache"))
+        return result
 
     def sync_collection_from_feishu(self):
         return self._from_feishu_full(self.collection_table_id, self._feishu_record_to_local_collection, self.db.update_collection, self.db.insert_collection, self.db.get_collection_by_id)
@@ -430,16 +451,79 @@ class FeishuSyncer:
     def sync_cookie_from_feishu(self):
         return self._from_feishu_full(self.cookie_table_id, self._feishu_record_to_local_cookie, self.db.update_cookie, self.db.insert_cookie, self.db.get_cookie_by_id)
 
+    # ========== 删除同步 ==========
+
+    def _sync_deletions_to_feishu(self, table_id: str, db_table: str) -> dict:
+        """本地墓碑 → 删飞书：把本地标了删除的记录从飞书表中删掉"""
+        result = {"deleted": 0, "skipped": 0, "failed": 0, "errors": []}
+        if not table_id:
+            return result
+        try:
+            tombstone_ids = self.db.get_deleted_ids(db_table)
+            if not tombstone_ids:
+                return result
+            feishu_records = self.feishu.get_all_records(self.app_token, table_id)
+            feishu_ids = {r["record_id"] for r in feishu_records}
+            to_delete = [rid for rid in tombstone_ids if rid in feishu_ids]
+            if not to_delete:
+                # 飞书侧已经没有这些记录了，直接清墓碑
+                for rid in tombstone_ids:
+                    self.db.purge_tombstone(db_table, rid)
+                return result
+            for i in range(0, len(to_delete), 500):
+                batch = to_delete[i:i + 500]
+                resp = self.feishu.batch_delete_records(self.app_token, table_id, batch)
+                if resp.get("code") == 0:
+                    result["deleted"] += len(batch)
+                    for rid in batch:
+                        self.db.purge_tombstone(db_table, rid)
+                else:
+                    result["failed"] += len(batch)
+                    result["errors"].append("delete: " + resp.get("msg", ""))
+        except Exception as e:
+            result["errors"].append(str(e))
+        return result
+
+    def _sync_deletions_from_feishu(self, table_id: str, db_table: str) -> dict:
+        """飞书删除 → 删本地：飞书有、本地没有的记录说明飞书那边删了"""
+        result = {"deleted": 0, "skipped": 0, "failed": 0, "errors": []}
+        if not table_id:
+            return result
+        try:
+            feishu_records = self.feishu.get_all_records(self.app_token, table_id)
+            # 保险：飞书返回空可能是 API 异常，跳过删除避免误清空
+            if not feishu_records:
+                result["skipped"] = 1
+                return result
+            feishu_ids = {r["record_id"] for r in feishu_records}
+            local_ids = self.db.get_synced_active_ids(db_table)
+            orphan_ids = [rid for rid in local_ids if rid not in feishu_ids]
+            for rid in orphan_ids:
+                self.db.hard_delete(db_table, rid)
+                result["deleted"] += 1
+        except Exception as e:
+            result["errors"].append(str(e))
+        return result
+
     # ========== 增量同步（6步拆分） ==========
 
     def _incremental_collection_to_feishu(self):
-        return self._batch_to_feishu(self.collection_table_id, self.db.get_all_collections(), self._build_collection_fields, self.db.update_collection, incremental=True)
+        result = self._sync_deletions_from_feishu(self.collection_table_id, "collection_cache")
+        result.update(self._batch_to_feishu(self.collection_table_id, self.db.get_all_collections(), self._build_collection_fields, self.db.update_collection, incremental=True))
+        result.update(self._sync_deletions_to_feishu(self.collection_table_id, "collection_cache"))
+        return result
 
     def _incremental_account_to_feishu(self):
-        return self._batch_to_feishu(self.account_table_id, self.db.get_all_accounts(), self._build_account_fields, self.db.update_account, incremental=True)
+        result = self._sync_deletions_from_feishu(self.account_table_id, "account_cache")
+        result.update(self._batch_to_feishu(self.account_table_id, self.db.get_all_accounts(), self._build_account_fields, self.db.update_account, incremental=True))
+        result.update(self._sync_deletions_to_feishu(self.account_table_id, "account_cache"))
+        return result
 
     def _incremental_cookie_to_feishu(self):
-        return self._batch_to_feishu(self.cookie_table_id, self.db.get_all_cookies(), self._build_cookie_fields, self.db.update_cookie, incremental=True)
+        result = self._sync_deletions_from_feishu(self.cookie_table_id, "cookie_cache")
+        result.update(self._batch_to_feishu(self.cookie_table_id, self.db.get_all_cookies(), self._build_cookie_fields, self.db.update_cookie, incremental=True))
+        result.update(self._sync_deletions_to_feishu(self.cookie_table_id, "cookie_cache"))
+        return result
 
     def _incremental_collection_from_feishu(self):
         return self._from_feishu_incremental(self.collection_table_id, self.db.get_collection_by_id, self._feishu_record_to_local_collection, self.db.update_collection, self.db.insert_collection)
