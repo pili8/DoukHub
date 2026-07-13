@@ -1,26 +1,26 @@
 {% extends "base.html" %}
-{% block title %}数据库管理 - DoukHub{% endblock %}
+{% block title %}数据管理 - DoukHub{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>数据库管理</h2>
+    <h2>数据管理</h2>
     <button class="btn btn-secondary" onclick="refreshStats()">🔄 刷新</button>
 </div>
 
-<!-- 数据库概览 -->
+<!-- 数据概览 -->
 <div class="card">
-    <h3>📊 数据库概览</h3>
+    <h3>📊 数据概览</h3>
     <div id="stats-container" class="db-stats-grid">
         <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
             <div style="font-size:24px;font-weight:bold;color:#e94560;" id="stat-collection">-</div>
-            <div style="font-size:12px;color:#888;">采集表缓存</div>
+            <div style="font-size:12px;color:#888;">采集表</div>
         </div>
         <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
             <div style="font-size:24px;font-weight:bold;color:#27ae60;" id="stat-account">-</div>
-            <div style="font-size:12px;color:#888;">账号表缓存</div>
+            <div style="font-size:12px;color:#888;">账号表</div>
         </div>
         <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
             <div style="font-size:24px;font-weight:bold;color:#f39c12;" id="stat-cookie">-</div>
-            <div style="font-size:12px;color:#888;">Cookie缓存</div>
+            <div style="font-size:12px;color:#888;">Cookie表</div>
         </div>
         <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
             <div style="font-size:24px;font-weight:bold;color:#3498db;" id="stat-history">-</div>
@@ -48,7 +48,7 @@
 
     <!-- 增量同步 -->
     <div style="margin-bottom:12px;">
-        <p style="font-size:13px;color:#888;margin-bottom:8px;">日常增量同步：双向仅同步新增记录，跳过已有记录，速度快</p>
+        <p style="font-size:13px;color:#888;margin-bottom:8px;">日常增量同步：双向仅同步新增和变更记录，已最新的自动跳过</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-primary" onclick="feishuSyncSSE('/api/feishu/sync/incremental', '双向增量同步')" id="btn-incremental">⚡ 日常增量同步</button>
         </div>
@@ -62,26 +62,44 @@
     <div id="feishu-sync-result" style="margin-top:12px;display:none;"></div>
 </div>
 
-<!-- 表浏览 --><!-- 表浏览 -->
+<!-- 搜索 -->
+<div class="card">
+    <h3>🔍 搜索</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <select id="search-table" style="padding:8px;border:1px solid #ddd;border-radius:4px;">
+            <option value="collection_cache">采集表</option>
+            <option value="account_cache">账号表</option>
+            <option value="cookie_cache">Cookie表</option>
+            <option value="collection_history">采集历史</option>
+            <option value="scheduled_tasks">定时任务</option>
+        </select>
+        <input type="text" id="search-keyword" placeholder="搜索关键词..." style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;min-width:160px;" onkeydown="if(event.key==='Enter')doSearch()">
+        <button class="btn btn-primary" onclick="doSearch()">搜索</button>
+        <button class="btn btn-secondary" onclick="clearSearch()" id="btn-clear-search" style="display:none;">清除</button>
+    </div>
+</div>
+
+<!-- 表浏览 -->
 <div class="card">
     <h3>📋 表浏览</h3>
     <div class="table-scroll" style="margin-bottom:16px;"><div style="display:flex;gap:8px;min-width:max-content;">
-        <button class="btn btn-secondary" onclick="showTable('collection_cache')">采集表缓存</button>
-        <button class="btn btn-secondary" onclick="showTable('account_cache')">账号表缓存</button>
-        <button class="btn btn-secondary" onclick="showTable('cookie_cache')">Cookie缓存</button>
+        <button class="btn btn-secondary" onclick="showTable('collection_cache')">采集表</button>
+        <button class="btn btn-secondary" onclick="showTable('account_cache')">账号表</button>
+        <button class="btn btn-secondary" onclick="showTable('cookie_cache')">Cookie表</button>
         <button class="btn btn-secondary" onclick="showTable('collection_history')">采集历史</button>
         <button class="btn btn-secondary" onclick="showTable('scheduled_tasks')">定时任务</button>
-    </div>
-    
+    </div></div>
+
     <div id="table-container" style="display:none;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <h4 id="table-title" style="margin:0;"></h4>
-            <div style="display:flex;gap:8px;">
-                <button class="btn btn-secondary btn-sm" onclick="exportTable()">📥 导出Excel</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;">
+            <h4 id="table-title" style="margin:0;">-</h4>
+            <div style="display:flex;gap:8px;align-items:center;">
                 <button class="btn btn-primary btn-sm" onclick="validateCookies()" id="btn-validate-cookie" style="display:none;">🔍 验证Cookie</button>
+                <button onclick="exportTable()" title="导出当前结果为 Excel" style="background:none;border:1px solid #ddd;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:14px;color:#888;">📥</button>
             </div>
         </div>
         <div id="table-content" style="overflow-x:auto;"></div>
+        <div id="pagination" style="margin-top:12px;"></div>
         <div id="cookie-validate-result" style="display:none;margin-top:16px;padding:16px;background:#fafafa;border-radius:8px;border:1px solid #eee;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                 <h4 style="margin:0;">Cookie 验证结果</h4>
@@ -93,23 +111,6 @@
             <div id="cookie-validate-log" style="max-height:300px;overflow-y:auto;font-size:13px;font-family:monospace;"></div>
         </div>
     </div>
-</div>
-
-<!-- 搜索 -->
-<div class="card">
-    <h3>🔍 搜索</h3>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <select id="search-table" style="padding:8px;border:1px solid #ddd;border-radius:4px;">
-            <option value="collection_cache">采集表缓存</option>
-            <option value="account_cache">账号表缓存</option>
-            <option value="cookie_cache">Cookie缓存</option>
-            <option value="collection_history">采集历史</option>
-            <option value="scheduled_tasks">定时任务</option>
-        </select>
-        <input type="text" id="search-keyword" placeholder="搜索关键词..." style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;">
-        <button class="btn btn-primary" onclick="searchTable()">搜索</button>
-    </div>
-    <div id="search-results" style="margin-top:16px;display:none;"></div>
 </div>
 {% endblock %}
 
@@ -139,13 +140,23 @@
 
 {% block scripts %}
 <script>
+    const TABLE_NAMES = {
+        'collection_cache': '采集表',
+        'account_cache': '账号表',
+        'cookie_cache': 'Cookie表',
+        'collection_history': '采集历史',
+        'scheduled_tasks': '定时任务'
+    };
+    const PAGE_SIZE = 100;
+
     let currentTable = '';
-    
-    // 页面加载时获取统计
+    let currentKeyword = '';
+    let currentPage = 1;
+
     document.addEventListener('DOMContentLoaded', () => {
         refreshStats();
     });
-    
+
     async function refreshStats() {
         try {
             const data = await apiCall('/api/database/stats', 'GET');
@@ -158,48 +169,64 @@
             showToast('获取统计失败: ' + e.message, 'error');
         }
     }
-    
-    async function showTable(tableName) {
+
+    async function showTable(tableName, page = 1, keyword = '') {
         currentTable = tableName;
-        const tableNames = {
-            'collection_cache': '采集表缓存',
-            'account_cache': '账号表缓存',
-            'cookie_cache': 'Cookie缓存',
-            'collection_history': '采集历史',
-            'scheduled_tasks': '定时任务'
-        };
-        
-        document.getElementById('table-title').textContent = tableNames[tableName];
+        currentPage = page;
+        currentKeyword = keyword;
+
         document.getElementById('table-container').style.display = 'block';
         const validateBtn = document.getElementById('btn-validate-cookie');
         if (validateBtn) validateBtn.style.display = tableName === 'cookie_cache' ? '' : 'none';
-        
+
+        document.getElementById('table-title').textContent = TABLE_NAMES[tableName] + ' · 加载中...';
+        document.getElementById('table-content').innerHTML = '<div style="text-align:center;color:#888;padding:20px;">加载中...</div>';
+        document.getElementById('pagination').innerHTML = '';
+
+        const offset = (page - 1) * PAGE_SIZE;
+        let url = `/api/database/table/${tableName}?limit=${PAGE_SIZE}&offset=${offset}`;
+        if (keyword) url += `&search=${encodeURIComponent(keyword)}`;
+
         try {
-            const data = await apiCall(`/api/database/table/${tableName}`, 'GET');
+            const data = await apiCall(url, 'GET');
             renderTable(data);
         } catch (e) {
             showToast('获取表数据失败: ' + e.message, 'error');
         }
     }
-    
+
     function renderTable(data) {
-        if (!data || data.length === 0) {
+        const records = data.records || [];
+        const total = data.total || 0;
+
+        // 表头：表名 · 共 N 条 （搜索时加搜索词标注）
+        const kwSuffix = currentKeyword ? ` · 搜索"${currentKeyword}"` : '';
+        document.getElementById('table-title').textContent = `${TABLE_NAMES[currentTable]}${kwSuffix} · 共 ${total} 条`;
+
+        if (!records.length) {
             document.getElementById('table-content').innerHTML = '<div style="text-align:center;color:#888;padding:20px;">暂无数据</div>';
+            document.getElementById('pagination').innerHTML = '';
             return;
         }
 
-        const columns = Object.keys(data[0]);
-        let html = '<table style="width:100%;border-collapse:collapse;">';
+        // 列顺序：记录ID移到末尾
+        let columns = Object.keys(records[0]);
+        const idIdx = columns.indexOf('记录ID');
+        if (idIdx >= 0) {
+            columns.splice(idIdx, 1);
+            columns.push('记录ID');
+        }
 
+        // 表格
+        let html = '<table style="width:100%;border-collapse:collapse;">';
         html += '<thead><tr>';
         columns.forEach(col => {
-            html += '<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;">' + col + '</th>';
+            html += `<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;white-space:nowrap;">${col}</th>`;
         });
         html += '<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;">操作</th>';
-        html += '</tr></thead>';
+        html += '</tr></thead><tbody>';
 
-        html += '<tbody>';
-        data.forEach(row => {
+        records.forEach(row => {
             html += '<tr>';
             columns.forEach(col => {
                 let value = row[col];
@@ -208,37 +235,100 @@
                 else if (typeof value === 'string' && value.trim().startsWith('[') && value.trim().endsWith(']')) {
                     try {
                         const parsed = JSON.parse(value);
-                        if (Array.isArray(parsed)) {
-                            value = parsed.join(', ');
-                        }
+                        if (Array.isArray(parsed)) value = parsed.join(', ');
                     } catch(e) {}
                 }
                 if (String(value).length > 80) { value = String(value).substring(0, 80) + '...'; }
-                html += '<td style="padding:8px;border:1px solid #ddd;font-size:12px;">' + value + '</td>';
+                html += `<td style="padding:8px;border:1px solid #ddd;font-size:12px;white-space:nowrap;">${value}</td>`;
             });
 
             const recordId = row['记录ID'] || row['ID'] || '';
             if (recordId && currentTable !== 'collection_history' && currentTable !== 'scheduled_tasks') {
-                html += '<td style="padding:8px;border:1px solid #ddd;"><button class="btn btn-danger btn-sm" onclick="deleteRecord(\'' + currentTable + '\', \'' + recordId + '\')">删除</button></td>';
+                html += `<td style="padding:8px;border:1px solid #ddd;"><button class="btn btn-danger btn-sm" onclick="deleteRecord('${currentTable}', '${recordId}')">删除</button></td>`;
             } else {
                 html += '<td style="padding:8px;border:1px solid #ddd;">-</td>';
             }
-
             html += '</tr>';
         });
         html += '</tbody></table>';
 
         document.getElementById('table-content').innerHTML = html;
+        renderPagination(total, data.limit || PAGE_SIZE, data.offset || 0);
     }
-    
+
+    function renderPagination(total, limit, offset) {
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        const curPage = Math.floor(offset / limit) + 1;
+        const pgDiv = document.getElementById('pagination');
+        if (totalPages <= 1) {
+            pgDiv.innerHTML = `<div style="text-align:center;color:#888;font-size:12px;">共 ${total} 条</div>`;
+            return;
+        }
+
+        let html = '<div style="display:flex;justify-content:center;align-items:center;gap:6px;flex-wrap:wrap;">';
+        if (curPage > 1) {
+            html += `<button class="btn btn-secondary btn-sm" onclick="gotoPage(${curPage - 1})">上一页</button>`;
+        }
+
+        let start = Math.max(1, curPage - 2);
+        let end = Math.min(totalPages, start + 4);
+        start = Math.max(1, end - 4);
+
+        if (start > 1) {
+            html += `<button class="btn btn-secondary btn-sm" onclick="gotoPage(1)">1</button>`;
+            if (start > 2) html += '<span style="padding:0 4px;color:#888;">...</span>';
+        }
+        for (let i = start; i <= end; i++) {
+            if (i === curPage) {
+                html += `<button class="btn btn-primary btn-sm">${i}</button>`;
+            } else {
+                html += `<button class="btn btn-secondary btn-sm" onclick="gotoPage(${i})">${i}</button>`;
+            }
+        }
+        if (end < totalPages) {
+            if (end < totalPages - 1) html += '<span style="padding:0 4px;color:#888;">...</span>';
+            html += `<button class="btn btn-secondary btn-sm" onclick="gotoPage(${totalPages})">${totalPages}</button>`;
+        }
+
+        if (curPage < totalPages) {
+            html += `<button class="btn btn-secondary btn-sm" onclick="gotoPage(${curPage + 1})">下一页</button>`;
+        }
+        html += `<span style="color:#888;font-size:12px;margin-left:8px;">第 ${curPage}/${totalPages} 页 · 共 ${total} 条</span>`;
+        html += '</div>';
+        pgDiv.innerHTML = html;
+    }
+
+    function gotoPage(page) {
+        showTable(currentTable, page, currentKeyword);
+    }
+
+    function doSearch() {
+        const tableName = document.getElementById('search-table').value;
+        const keyword = document.getElementById('search-keyword').value.trim();
+        if (!keyword) {
+            showToast('请输入搜索关键词', 'error');
+            return;
+        }
+        document.getElementById('btn-clear-search').style.display = '';
+        showTable(tableName, 1, keyword);
+        document.getElementById('table-container').scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+
+    function clearSearch() {
+        document.getElementById('search-keyword').value = '';
+        document.getElementById('btn-clear-search').style.display = 'none';
+        if (currentTable && currentKeyword) {
+            showTable(currentTable, 1, '');
+        }
+    }
+
     async function deleteRecord(tableName, recordId) {
         if (!confirm(`确定要删除记录 ${recordId} 吗？`)) return;
-        
         try {
             const data = await apiCall(`/api/database/table/${tableName}/record/${recordId}`, 'DELETE');
             if (data.success) {
                 showToast('删除成功', 'success');
-                showTable(tableName);
+                showTable(tableName, currentPage, currentKeyword);
                 refreshStats();
             } else {
                 showToast(data.message || '删除失败', 'error');
@@ -247,8 +337,7 @@
             showToast('删除失败: ' + e.message, 'error');
         }
     }
-    
-    
+
     function exportTable() {
         if (!currentTable || !document.getElementById('table-content').innerHTML) {
             showToast('请先选择一张表', 'error');
@@ -270,40 +359,11 @@
         link.href = URL.createObjectURL(blob);
         link.download = currentTable + '.csv';
         link.click();
-        showToast('导出成功', 'success');
-    }
-    
-    async function searchTable() {
-        const tableName = document.getElementById('search-table').value;
-        const keyword = document.getElementById('search-keyword').value;
-        
-        if (!keyword) {
-            showToast('请输入搜索关键词', 'error');
-            return;
-        }
-        
-        try {
-            const data = await apiCall(`/api/database/table/${tableName}?search=${encodeURIComponent(keyword)}`, 'GET');
-            document.getElementById('search-results').style.display = 'block';
-            document.getElementById('search-results').innerHTML = '<h4>搜索结果</h4>';
-            renderSearchResults(data);
-        } catch (e) {
-            showToast('搜索失败: ' + e.message, 'error');
-        }
-    }
-    
-    function renderSearchResults(data) {
-        if (!data || data.length === 0) {
-            document.getElementById('search-results').innerHTML += '<div style="text-align:center;color:#888;padding:20px;">未找到匹配的记录</div>';
-            return;
-        }
-        
-        renderTable(data);
-        document.getElementById('search-results').innerHTML += document.getElementById('table-content').outerHTML;
+        showToast('已导出当前页 ' + (rows.length - 1) + ' 条', 'success');
     }
 
     async function feishuSyncSSE(url, title) {
-        if (!confirm('\u786e\u5b9a\u8981\u6267\u884c' + title + '\u5417\uff1f')) return;
+        if (!confirm('确定要执行' + title + '吗？')) return;
         const btns = document.querySelectorAll('[onclick*="feishuSyncSSE"]');
         btns.forEach(b => b.disabled = true);
         const status = document.getElementById('feishu-sync-status');
@@ -311,7 +371,7 @@
         const progressDiv = document.getElementById('feishu-sync-progress');
         const barDiv = document.getElementById('feishu-sync-bar');
         const logDiv = document.getElementById('feishu-sync-log');
-        status.textContent = '\u6b63\u5728' + title + '...';
+        status.textContent = '正在' + title + '...';
         status.style.color = '#3498db';
         result.style.display = 'none';
         progressDiv.style.display = 'block';
@@ -366,11 +426,12 @@
                             let html = '';
                             for (const [label, vals] of Object.entries(data.results)) {
                                 let parts = [];
-                                if (vals.created) parts.push('\u65b0\u589e ' + vals.created);
-                                if (vals.updated) parts.push('\u66f4\u65b0 ' + vals.updated);
-                                if (vals.skipped) parts.push('\u8df3\u8fc7 ' + vals.skipped);
-                                if (vals.failed) parts.push('\u5931\u8d25 ' + vals.failed);
-                                html += '<div>' + label + ': ' + (parts.join(', ') || '\u65e0\u53d8\u5316') + '</div>';
+                                if (vals.created) parts.push('新增 ' + vals.created);
+                                if (vals.updated) parts.push('更新 ' + vals.updated);
+                                if (vals.uptodate) parts.push('已最新 ' + vals.uptodate);
+                                if (vals.invalid) parts.push('无效 ' + vals.invalid);
+                                if (vals.failed) parts.push('失败 ' + vals.failed);
+                                html += '<div>' + label + ': ' + (parts.join(', ') || '无变化') + '</div>';
                             }
                             if (html) { result.innerHTML = html; result.style.display = 'block'; }
                         }
@@ -379,14 +440,15 @@
                 }
             }
         } catch (e) {
-            status.textContent = '\u540c\u6b65\u5931\u8d25: ' + e.message;
+            status.textContent = '同步失败: ' + e.message;
             status.style.color = '#e74c3c';
             barDiv.style.background = '#e74c3c';
-            addLog('\u8bf7\u6c42\u5931\u8d25: ' + e.message, 'error');
+            addLog('请求失败: ' + e.message, 'error');
         } finally {
             btns.forEach(b => b.disabled = false);
         }
     }
+
     async function validateCookies() {
         const btn = document.getElementById('btn-validate-cookie');
         const resultDiv = document.getElementById('cookie-validate-result');
@@ -445,7 +507,7 @@
                         statsDiv.textContent = data.message;
                         addLog(data.message, data.success ? 'ok' : 'error');
                         refreshStats();
-                        showTable('cookie_cache');
+                        showTable('cookie_cache', currentPage, currentKeyword);
                     }
                 }
             }

@@ -1131,22 +1131,32 @@ async def api_database_stats():
 
 
 @app.get("/api/database/table/{table_name}")
-async def api_database_table(table_name: str, limit: int = 100, offset: int = 0):
-    """获取表数据"""
+async def api_database_table(table_name: str, limit: int = 100, offset: int = 0, search: str = ""):
+    """获取表数据，支持分页和搜索。返回 {records, total, limit, offset}"""
     db = get_database()
-    
+
     # 验证表名
     valid_tables = ["collection_cache", "account_cache", "cookie_cache", "collection_history", "scheduled_tasks"]
     if table_name not in valid_tables:
         return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
-    
-    # 获取数据
+
     with db._connect() as conn:
-        rows = conn.execute(
-            f"SELECT * FROM {table_name} ORDER BY rowid DESC LIMIT ? OFFSET ?",
-            (limit, offset)
-        ).fetchall()
-        return [dict(row) for row in rows]
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
+        if search:
+            where = " OR ".join([f"CAST(\"{c}\" AS TEXT) LIKE ?" for c in cols])
+            like = f"%{search}%"
+            total = conn.execute(f"SELECT COUNT(*) FROM {table_name} WHERE {where}", [like] * len(cols)).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT * FROM {table_name} WHERE {where} ORDER BY rowid DESC LIMIT ? OFFSET ?",
+                [like] * len(cols) + [limit, offset]
+            ).fetchall()
+        else:
+            total = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            rows = conn.execute(
+                f"SELECT * FROM {table_name} ORDER BY rowid DESC LIMIT ? OFFSET ?",
+                (limit, offset)
+            ).fetchall()
+        return {"records": [dict(row) for row in rows], "total": total, "limit": limit, "offset": offset}
 
 
 @app.delete("/api/database/table/{table_name}/record/{record_id}")
@@ -1336,18 +1346,20 @@ def _run_feishu_sync_sse(fs, steps):
                     r = await asyncio.to_thread(fn)
                     created = r.get("created", 0)
                     updated = r.get("updated", 0)
-                    skipped = r.get("skipped", 0)
+                    uptodate = r.get("skipped_uptodate", 0)
+                    invalid = r.get("skipped_invalid", 0)
                     failed = r.get("failed", 0)
                     all_errors.extend(r.get("errors", []))
-                    results[label] = {"created": created, "updated": updated, "skipped": skipped, "failed": failed}
+                    results[label] = {"created": created, "updated": updated, "uptodate": uptodate, "invalid": invalid, "failed": failed}
                     if failed > 0:
-                        msg = f"⚠️ {label}: 新增 {created}, 更新 {updated}, 跳过 {skipped}, 失败 {failed}"
+                        msg = f"⚠️ {label}: 新增 {created}, 更新 {updated}, 已最新 {uptodate}, 无效 {invalid}, 失败 {failed}"
                         yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': msg})}\n\n"
                     else:
                         parts = []
                         if created: parts.append(f"新增 {created}")
                         if updated: parts.append(f"更新 {updated}")
-                        if skipped: parts.append(f"跳过 {skipped}")
+                        if uptodate: parts.append(f"已最新 {uptodate}")
+                        if invalid: parts.append(f"无效 {invalid}")
                         msg = f"✅ {label}: " + (", ".join(parts) if parts else "无变化")
                         yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': msg})}\n\n"
                     yield f"data: {json.dumps({'type': 'stats', 'step': i+1, 'total': total})}\n\n"

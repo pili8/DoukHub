@@ -221,7 +221,9 @@ class FeishuSyncer:
     # ========== 批量 -> 飞书 ==========
 
     def _batch_to_feishu(self, table_id, local_records, build_fn, db_update_fn, incremental=False, batch_size=500):
-        result = {"created": 0, "updated": 0, "skipped": 0, "failed": 0, "errors": []}
+        # skipped_uptodate: 飞书已是最新的（增量同步正常情况）
+        # skipped_invalid: 本地数据缺记录ID或无法构造字段（异常）
+        result = {"created": 0, "updated": 0, "skipped_uptodate": 0, "skipped_invalid": 0, "failed": 0, "errors": []}
         if not table_id:
             return result
         try:
@@ -230,12 +232,15 @@ class FeishuSyncer:
             to_create, to_update, create_locals = [], [], []
             for local in local_records:
                 rid = local.get("\u8bb0\u5f55ID", "")
+                if not rid:
+                    result["skipped_invalid"] += 1
+                    continue
                 if rid and rid in feishu_index:
                     if incremental:
                         fs_time = self._safe_int(feishu_index[rid].get("fields", {}).get("\u540c\u6b65\u65f6\u95f4", 0))
                         local_time = self._parse_local_time(local.get("\u66f4\u65b0\u65f6\u95f4", ""))
                         if fs_time and local_time and fs_time >= local_time - 5000:
-                            result["skipped"] += 1
+                            result["skipped_uptodate"] += 1
                             continue
                     fields = build_fn(local)
                     if fields:
@@ -325,7 +330,9 @@ class FeishuSyncer:
     # ========== 飞书 -> 本地（增量） ==========
 
     def _from_feishu_incremental(self, table_id, db_get_by_id, convert_fn, db_update_fn, db_insert_fn):
-        result = {"created": 0, "updated": 0, "skipped": 0, "failed": 0, "errors": []}
+        # skipped_uptodate: 本地已是最新的
+        # skipped_invalid: 飞书数据无法转换或本地插入失败（数据问题）
+        result = {"created": 0, "updated": 0, "skipped_uptodate": 0, "skipped_invalid": 0, "failed": 0, "errors": []}
         if not table_id:
             return result
         try:
@@ -337,7 +344,7 @@ class FeishuSyncer:
                     fs_time = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
                     local_time = self._parse_local_time(existing.get("\u66f4\u65b0\u65f6\u95f4", ""))
                     if local_time and (not fs_time or fs_time <= local_time + 5000):
-                        result["skipped"] += 1
+                        result["skipped_uptodate"] += 1
                         continue
                     try:
                         local_data = convert_fn(record)
@@ -348,14 +355,14 @@ class FeishuSyncer:
                             db_update_fn(rid, local_data)
                             result["updated"] += 1
                         else:
-                            result["skipped"] += 1
+                            result["skipped_invalid"] += 1
                     except Exception as e:
                         result["failed"] += 1
                         result["errors"].append(f"{rid}: {e}")
                     continue
                 local_data = convert_fn(record)
                 if not local_data:
-                    result["skipped"] += 1
+                    result["skipped_invalid"] += 1
                     continue
                 local_data["\u8bb0\u5f55ID"] = rid
                 ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
@@ -364,7 +371,7 @@ class FeishuSyncer:
                 if db_insert_fn(local_data):
                     result["created"] += 1
                 else:
-                    result["skipped"] += 1
+                    result["skipped_invalid"] += 1
         except Exception as e:
             result["errors"].append(str(e))
         return result
