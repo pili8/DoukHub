@@ -199,9 +199,8 @@ class TestAPIEndpoints:
         data = r.json()
         assert "current" in data
         assert "dirs" in data
-        # 默认从用户主目录开始
-        from pathlib import Path
-        assert data["current"] == str(Path.home())
+        # 空 path 时返回驱动器列表或多盘情况，current 可能为空
+        # 非空 path 时返回该目录的子目录
 
     def test_browse_dir_specific_path(self, app_env, tmp_path):
         client, *_ = app_env

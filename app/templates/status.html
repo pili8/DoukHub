@@ -37,6 +37,10 @@
     background: #fff3cd;
     color: #ffc107;
 }
+.status-icon.missing {
+    background: #f0f0f0;
+    color: #999;
+}
 .status-info {
     flex: 1;
 }
@@ -53,20 +57,58 @@
     display: flex;
     gap: 8px;
 }
+.kernel-warn {
+    background: #fff3cd;
+    border: 1px solid #ffe08a;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+.kernel-warn h3 {
+    color: #856404;
+    margin-bottom: 8px;
+}
 </style>
 
 <div class="page-header">
     <h2>状态</h2>
-    <button class="btn btn-secondary" onclick="refreshStatus()">🔄 刷新状态</button>
+    <button class="btn btn-secondary" onclick="refreshStatus()">刷新状态</button>
 </div>
 
-<!-- 服务状态 -->
+<!-- 内核检测 -->
 <div class="card">
-    <h3>🔌 服务状态</h3>
-    
+    <h3>内核检测</h3>
+    <div id="kernel-section">
+        <div id="kernel-ttd" class="status-card">
+            <div class="status-icon missing" id="kernel-ttd-icon">?</div>
+            <div class="status-info">
+                <div class="status-name">TikTokDownloader 内核</div>
+                <div class="status-message" id="kernel-ttd-msg">检测中...</div>
+            </div>
+            <div class="status-actions">
+                <button class="btn btn-primary btn-sm" id="kernel-ttd-btn" onclick="installKernel('TikTokDownloader')">从 GitHub 下载</button>
+            </div>
+        </div>
+        <div id="kernel-xhs" class="status-card">
+            <div class="status-icon missing" id="kernel-xhs-icon">?</div>
+            <div class="status-info">
+                <div class="status-name">XHS-Downloader 内核</div>
+                <div class="status-message" id="kernel-xhs-msg">检测中...</div>
+            </div>
+            <div class="status-actions">
+                <button class="btn btn-primary btn-sm" id="kernel-xhs-btn" onclick="installKernel('XHS-Downloader')">从 GitHub 下载</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 内核检测 -->
+<div class="card">
+    <h3>内核检测</h3>
+
     <!-- 飞书 API -->
     <div class="status-card" id="feishu-card">
-        <div class="status-icon unknown" id="feishu-icon">⏳</div>
+        <div class="status-icon unknown" id="feishu-icon">?</div>
         <div class="status-info">
             <div class="status-name">飞书 API</div>
             <div class="status-message" id="feishu-message">检测中...</div>
@@ -75,10 +117,10 @@
             <button class="btn btn-secondary btn-sm" onclick="testFeishu()">测试连接</button>
         </div>
     </div>
-    
+
     <!-- TikTokDownloader -->
     <div class="status-card" id="ttd-card">
-        <div class="status-icon unknown" id="ttd-icon">⏳</div>
+        <div class="status-icon unknown" id="ttd-icon">?</div>
         <div class="status-info">
             <div class="status-name">TikTokDownloader</div>
             <div class="status-message" id="ttd-message">检测中...</div>
@@ -89,10 +131,10 @@
             <button class="btn btn-secondary btn-sm" onclick="testTTD()">测试连接</button>
         </div>
     </div>
-    
+
     <!-- XHS-Downloader -->
     <div class="status-card" id="xhs-card">
-        <div class="status-icon unknown" id="xhs-icon">⏳</div>
+        <div class="status-icon unknown" id="xhs-icon">?</div>
         <div class="status-info">
             <div class="status-name">XHS-Downloader</div>
             <div class="status-message" id="xhs-message">检测中...</div>
@@ -108,37 +150,92 @@
 
 {% block scripts %}
 <script>
-    // 页面加载时自动检测状态
     document.addEventListener('DOMContentLoaded', () => {
         refreshStatus();
     });
-    
+
     async function refreshStatus() {
         try {
             const data = await apiCall('/api/status', 'GET');
             updateStatusCard('feishu', data.feishu);
             updateStatusCard('ttd', data.ttd);
             updateStatusCard('xhs', data.xhs);
+            if (data.kernels) {
+                updateKernelCard('ttd', data.kernels.ttd);
+                updateKernelCard('xhs', data.kernels.xhs);
+            }
         } catch (e) {
             console.error('获取状态失败:', e);
         }
     }
-    
+
     function updateStatusCard(name, status) {
+        if (!status) return;
         const icon = document.getElementById(`${name}-icon`);
         const message = document.getElementById(`${name}-message`);
-        
+        if (!icon || !message) return;
+
         if (status.connected) {
             icon.className = 'status-icon connected';
-            icon.textContent = '✅';
+            icon.textContent = '\u2713';
             message.textContent = status.message;
         } else {
             icon.className = 'status-icon disconnected';
-            icon.textContent = '❌';
+            icon.textContent = '\u2717';
             message.textContent = status.message;
         }
     }
-    
+
+    function updateKernelCard(name, kernel) {
+        const icon = document.getElementById(`kernel-${name}-icon`);
+        const msg = document.getElementById(`kernel-${name}-msg`);
+        const btn = document.getElementById(`kernel-${name}-btn`);
+        if (!icon || !msg) return;
+
+        if (kernel.installed) {
+            icon.className = 'status-icon connected';
+            icon.textContent = '\u2713';
+            msg.textContent = '已安装: ' + kernel.path;
+            if (btn) btn.style.display = 'none';
+        } else {
+            icon.className = 'status-icon missing';
+            icon.textContent = '!';
+            msg.textContent = '未安装 - 请点击右侧按钮从 GitHub 下载';
+            if (btn) btn.style.display = '';
+        }
+    }
+
+    async function installKernel(name) {
+        const btn = document.getElementById(`kernel-${name.toLowerCase().replace('-','')}-btn`);
+        const msgEl = document.getElementById(`kernel-${name.toLowerCase().replace('Downloader','')}-msg`);
+        // Use the kernel prefix ttd or xhs
+        const prefix = name.startsWith('TikTok') ? 'ttd' : 'xhs';
+        const msg = document.getElementById(`kernel-${prefix}-msg`);
+        const btnEl = document.getElementById(`kernel-${prefix}-btn`);
+
+        if (!confirm(`确定从 GitHub 下载 ${name} 内核源码吗？\n（需要已安装 git）`)) return;
+
+        if (btnEl) { btnEl.disabled = true; btnEl.textContent = '下载中...'; }
+        if (msg) msg.textContent = '正在从 GitHub 克隆源码，请耐心等待...';
+        showToast('正在下载内核源码...', 'info');
+
+        try {
+            const data = await apiCall(`/api/kernels/${name}/install`, 'POST');
+            if (data.success) {
+                showToast(data.message, 'success');
+                setTimeout(() => refreshStatus(), 1000);
+            } else {
+                showToast(data.message, 'error');
+                if (msg) msg.textContent = data.message;
+            }
+        } catch (e) {
+            showToast('下载失败: ' + e.message, 'error');
+            if (msg) msg.textContent = '下载失败: ' + e.message;
+        } finally {
+            if (btnEl) { btnEl.disabled = false; btnEl.textContent = '从 GitHub 下载'; }
+        }
+    }
+
     async function testFeishu() {
         const message = document.getElementById('feishu-message');
         message.textContent = '测试中...';
@@ -150,7 +247,7 @@
             message.textContent = '测试失败: ' + e.message;
         }
     }
-    
+
     async function testTTD() {
         const message = document.getElementById('ttd-message');
         message.textContent = '测试中...';
@@ -162,7 +259,7 @@
             message.textContent = '测试失败: ' + e.message;
         }
     }
-    
+
     async function testXHS() {
         const message = document.getElementById('xhs-message');
         message.textContent = '测试中...';
@@ -174,22 +271,13 @@
             message.textContent = '测试失败: ' + e.message;
         }
     }
-    
+
     async function controlService(name, action) {
         const data = await apiCall(`/api/services/${name}/${action}`, 'POST');
         showToast(data.message, data.success ? 'success' : 'error');
         if (data.success) {
             setTimeout(() => refreshStatus(), 2000);
         }
-    }
-    
-    function copyCmd(element) {
-        const text = element.textContent || element.innerText;
-        navigator.clipboard.writeText(text).then(() => {
-            showToast('已复制到剪贴板', 'success');
-        }).catch(() => {
-            showToast('复制失败', 'error');
-        });
     }
 </script>
 {% endblock %}

@@ -6,7 +6,7 @@
 </div>
 
 <div class="card">
-    <table>
+    <div class="table-scroll"><table>
         <thead>
             <tr>
                 <th>ID</th>
@@ -37,7 +37,7 @@
             </tr>
             {% endfor %}
         </tbody>
-    </table>
+    </table></div>
     {% if not records %}
     <div class="empty-state">暂无采集记录</div>
     {% endif %}

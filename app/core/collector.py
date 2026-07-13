@@ -5,9 +5,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+import logging
+
 import httpx
 
 from .cookie_pool import CookiePool
+
+_logger = logging.getLogger("doukhub.collector")
 
 
 @dataclass
@@ -237,6 +241,13 @@ class Collector:
         else:
             return ""
 
+        # 补全短链接前缀（TTD API 需要完整 URL）
+        if url and not url.startswith("http"):
+            if platform == "抖音":
+                url = f"https://v.douyin.com/{url}/"
+            elif platform == "TikTok":
+                url = f"https://vm.tiktok.com/{url}"
+
         payload = {"text": url}
         if proxy:
             payload["proxy"] = proxy
@@ -248,7 +259,7 @@ class Collector:
             data = resp.json()
             return data.get("url", "")
         except Exception as e:
-            logger.warning(f"短链接解析失败: {url} - {e}")
+            _logger.warning(f"短链接解析失败: {url} - {e}")
             return ""
 
     async def get_account_info(self, sec_user_id: str, platform: str = "抖音", cookie: str = "") -> dict:
@@ -273,7 +284,7 @@ class Collector:
             if cookie:
                 payload["cookie"] = cookie
 
-            resp = await self._client.post(endpoint, json=payload, timeout=30)
+            resp = await self._client.post(endpoint, json=payload, timeout=15)
             resp.raise_for_status()
             data = resp.json()
             if data.get("data"):
@@ -295,6 +306,74 @@ class Collector:
 
         except Exception:
             return {"sec_user_id": sec_user_id}
+
+    async def validate_cookie(self, cookie: str, platform: str = "抖音") -> dict:
+        """验证 Cookie 是否有效，返回详细状态。
+
+        返回值:
+            {"status": "valid", "message": "...", "nickname": "..."}
+            {"status": "invalid", "message": "..."}
+            {"status": "ttd_error", "message": "..."}
+        """
+        if not cookie or not cookie.strip():
+            return {"status": "invalid", "message": "Cookie 为空"}
+
+        test_sec = "MS4wLjABAAAAzDqoM18FSDjaF9sNew0tqW6SfduLomZWPPhOrBkDm3IzPjbBWhw31ec8O6wfn1ps"
+
+        if platform == "抖音":
+            endpoint = f"{self.ttd_url}/douyin/account"
+        elif platform == "TikTok":
+            endpoint = f"{self.ttd_url}/tiktok/account"
+        else:
+            return {"status": "invalid", "message": f"不支持的平台: {platform}"}
+
+        try:
+            import httpx as _httpx
+            payload = {
+                "sec_user_id": test_sec,
+                "source": True,
+                "pages": 1,
+                "count": 1,
+                "cookie": cookie,
+            }
+            resp = await self._client.post(endpoint, json=payload, timeout=20)
+
+            content_type = resp.headers.get("content-type", "")
+            if "application/json" not in content_type:
+                return {"status": "ttd_error", "message": f"TTD 返回非 JSON (HTTP {resp.status_code})，服务可能异常"}
+
+            if resp.status_code != 200:
+                return {"status": "ttd_error", "message": f"TTD 返回 HTTP {resp.status_code}"}
+
+            data = resp.json()
+            api_code = data.get("code")
+            api_msg = data.get("message", "")
+
+            d = data.get("data")
+            if not d:
+                if api_code and api_code != 0:
+                    return {"status": "ttd_error", "message": f"TTD: {api_msg} (code={api_code})"}
+                return {"status": "invalid", "message": "Cookie 可能已过期"}
+
+            if isinstance(d, list) and d:
+                author = d[0].get("author", {})
+                nickname = author.get("nickname", "")
+                followers = author.get("follower_count", 0)
+                return {
+                    "status": "valid",
+                    "message": f"有效 ({nickname}, {followers}粉丝)" if nickname else "有效",
+                    "nickname": nickname,
+                    "follower_count": followers,
+                }
+
+            return {"status": "invalid", "message": "数据格式异常"}
+
+        except _httpx.ConnectError:
+            return {"status": "ttd_error", "message": "TTD 服务未启动"}
+        except _httpx.ReadTimeout:
+            return {"status": "ttd_error", "message": "TTD 响应超时"}
+        except Exception as e:
+            return {"status": "ttd_error", "message": f"异常: {str(e)}"}
 
     def detect_platform(self, link: str) -> str:
         """根据链接自动识别平台"""

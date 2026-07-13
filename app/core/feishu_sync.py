@@ -1,32 +1,14 @@
-"""飞书双向同步 - 本地数据库 ↔ 飞书表"""
+# -*- coding: utf-8 -*-
+"""飞书双向同步 - 本地数据库 <-> 飞书表"""
 import json
 import logging
-from typing import Optional
+import time as _time
 from datetime import datetime
 
 from .database import Database
 from .feishu import FeishuClient
 
 logger = logging.getLogger("doukhub.feishu_sync")
-
-
-class FeishuSyncResult:
-    """飞书同步结果"""
-    def __init__(self):
-        self.collection_to_feishu = {"created": 0, "updated": 0, "failed": 0}
-        self.collection_from_feishu = {"created": 0, "updated": 0, "failed": 0}
-        self.account_to_feishu = {"created": 0, "updated": 0, "failed": 0}
-        self.account_from_feishu = {"created": 0, "updated": 0, "failed": 0}
-        self.errors = []
-
-    def to_dict(self):
-        return {
-            "collection_to_feishu": self.collection_to_feishu,
-            "collection_from_feishu": self.collection_from_feishu,
-            "account_to_feishu": self.account_to_feishu,
-            "account_from_feishu": self.account_from_feishu,
-            "errors": self.errors[:10],
-        }
 
 
 class FeishuSyncer:
@@ -36,419 +18,393 @@ class FeishuSyncer:
         self.feishu = feishu
         self.config = config
         self.db = Database()
-
-        # 飞书表 ID
         self.collection_table_id = config.get("collection_table_id", "")
         self.account_table_id = config.get("account_table_id", "")
         self.cookie_table_id = config.get("cookie_table_id", "")
         self.app_token = config.get("app_token", "")
 
-    # ========== 本地 → 飞书 ==========
+    # ========== 辅助方法 ==========
 
-    def sync_collection_to_feishu(self) -> dict:
-        """同步采集表缓存到飞书"""
-        result = {"created": 0, "updated": 0, "failed": 0, "errors": []}
-
-        if not self.collection_table_id:
-            result["errors"].append("未配置采集表 Table ID")
-            return result
-
-        try:
-            # 获取本地采集表缓存
-            local_records = self.db.get_all_collections()
-
-            # 获取飞书采集表记录
-            feishu_records = self.feishu.get_all_records(
-                self.app_token,
-                self.collection_table_id
+    @staticmethod
+    def _parse_text_value(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, list):
+            return "".join(
+                s.get("text", str(s)) if isinstance(s, dict) else str(s)
+                for s in value
             )
+        return str(value)
 
-            # 建立飞书记录索引（基于记录ID）
-            feishu_index = {r["record_id"]: r for r in feishu_records}
-
-            for local in local_records:
-                record_id = local.get("记录ID")
-
-                if record_id and record_id in feishu_index:
-                    # 更新已有记录
-                    try:
-                        fields = self._build_collection_fields(local)
-                        self.feishu.update_record(
-                            self.app_token,
-                            self.collection_table_id,
-                            record_id,
-                            fields
-                        )
-                        result["updated"] += 1
-                    except Exception as e:
-                        result["failed"] += 1
-                        result["errors"].append(f"更新 {record_id} 失败: {e}")
-                else:
-                    # 创建新记录
-                    try:
-                        fields = self._build_collection_fields(local)
-                        response = self.feishu.create_record(
-                            self.app_token,
-                            self.collection_table_id,
-                            fields
-                        )
-                        new_record_id = response.get("record", {}).get("record_id")
-                        if new_record_id:
-                            # 更新本地记录ID
-                            self.db.update_collection(local["记录ID"], {
-                                "记录ID": new_record_id
-                            })
-                        result["created"] += 1
-                    except Exception as e:
-                        result["failed"] += 1
-                        result["errors"].append(f"创建记录失败: {e}")
-
-        except Exception as e:
-            result["errors"].append(f"同步采集表失败: {e}")
-
-        return result
-
-    def sync_account_to_feishu(self) -> dict:
-        """同步账号表缓存到飞书"""
-        result = {"created": 0, "updated": 0, "failed": 0, "errors": []}
-
-        if not self.account_table_id:
-            result["errors"].append("未配置账号表 Table ID")
-            return result
-
+    @staticmethod
+    def _parse_local_time(time_val) -> int:
+        if not time_val:
+            return 0
         try:
-            # 获取本地账号表缓存
-            local_records = self.db.get_all_accounts()
+            if isinstance(time_val, (int, float)):
+                return int(time_val)
+            dt = datetime.strptime(str(time_val), "%Y-%m-%d %H:%M:%S")
+            return int(dt.timestamp() * 1000)
+        except Exception:
+            return 0
 
-            # 获取飞书账号表记录
-            feishu_records = self.feishu.get_all_records(
-                self.app_token,
-                self.account_table_id
-            )
+    def _safe_int(self, value, default=0) -> int:
+        try:
+            return int(value) if value else default
+        except (TypeError, ValueError):
+            return default
 
-            # 建立飞书记录索引（基于记录ID）
-            feishu_index = {r["record_id"]: r for r in feishu_records}
+    def _feishu_to_db_synced(self, value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value in ("\u5df2\u540c\u6b65", "true", "True", "1")
+        return False
 
-            for local in local_records:
-                record_id = local.get("记录ID")
+    def _db_to_feishu_synced(self, value):
+        return "\u5df2\u540c\u6b65" if value else "\u5f85\u540c\u6b65"
 
-                if record_id and record_id in feishu_index:
-                    # 更新已有记录
-                    try:
-                        fields = self._build_account_fields(local)
-                        self.feishu.update_record(
-                            self.app_token,
-                            self.account_table_id,
-                            record_id,
-                            fields
-                        )
-                        result["updated"] += 1
-                    except Exception as e:
-                        result["failed"] += 1
-                        result["errors"].append(f"更新 {record_id} 失败: {e}")
-                else:
-                    # 创建新记录
-                    try:
-                        fields = self._build_account_fields(local)
-                        response = self.feishu.create_record(
-                            self.app_token,
-                            self.account_table_id,
-                            fields
-                        )
-                        new_record_id = response.get("record", {}).get("record_id")
-                        if new_record_id:
-                            # 更新本地记录ID
-                            self.db.update_account(local["记录ID"], {
-                                "记录ID": new_record_id
-                            })
-                        result["created"] += 1
-                    except Exception as e:
-                        result["failed"] += 1
-                        result["errors"].append(f"创建记录失败: {e}")
-
-        except Exception as e:
-            result["errors"].append(f"同步账号表失败: {e}")
-
-        return result
+    # ========== 字段构建 ==========
 
     def _build_collection_fields(self, record: dict) -> dict:
-        """构建采集表飞书字段"""
         fields = {
-            "分享码": record.get("分享码", ""),
-            "平台": record.get("平台", ""),
-            "等级": record.get("等级", 3),
-            "已同步": bool(record.get("已同步", False)),
+            "Share": record.get("\u5206\u4eab\u7801", ""),
+            "\u5e73\u53f0": record.get("\u5e73\u53f0", ""),
+            "\u7b49\u7ea7": record.get("\u7b49\u7ea7", 3),
+            "\u540c\u6b65\u72b6\u6001": self._db_to_feishu_synced(record.get("\u5df2\u540c\u6b65", False)),
         }
-
-        # 标签（JSON数组 → 飞书多选）
-        tags = record.get("标签")
+        tags = record.get("\u6807\u7b7e")
         if tags:
             try:
                 if isinstance(tags, str):
                     tags = json.loads(tags)
-                fields["标签"] = tags
-            except:
+                fields["\u6807\u7b7e"] = tags
+            except Exception:
                 pass
-
-        # 账号标识
-        if record.get("账号标识"):
-            fields["账号标识"] = record["账号标识"]
-
-        # 同步错误
-        if record.get("同步错误"):
-            fields["同步错误"] = record["同步错误"]
-
-        # 备注
-        if record.get("备注"):
-            fields["备注"] = record["备注"]
-
-        # 次要字段
-        if record.get("昵称"):
-            fields["昵称"] = record["昵称"]
-        if record.get("粉丝数"):
-            fields["粉丝数"] = record["粉丝数"]
-        if record.get("作品数"):
-            fields["作品数"] = record["作品数"]
-
+        if record.get("\u8d26\u53f7\u6807\u8bc6"):
+            fields["sec_user_id"] = record["\u8d26\u53f7\u6807\u8bc6"]
+        if record.get("\u540c\u6b65\u9519\u8bef"):
+            fields["\u5907\u6ce8"] = record["\u540c\u6b65\u9519\u8bef"]
+        elif record.get("\u5907\u6ce8"):
+            fields["\u5907\u6ce8"] = record["\u5907\u6ce8"]
+        if record.get("\u6635\u79f0"):
+            fields["\u6635\u79f0"] = record["\u6635\u79f0"]
+        if record.get("\u7c89\u4e1d\u6570") is not None:
+            fields["\u7c89\u4e1d\u6570"] = record["\u7c89\u4e1d\u6570"]
+        if record.get("\u4f5c\u54c1\u6570") is not None:
+            fields["\u4f5c\u54c1\u6570"] = record["\u4f5c\u54c1\u6570"]
+        if record.get("\u8d26\u53f7\u540d\u79f0"):
+            fields["\u8d26\u53f7\u540d\u79f0"] = record["\u8d26\u53f7\u540d\u79f0"]
+        fields["\u540c\u6b65\u65f6\u95f4"] = int(_time.time() * 1000)
         return fields
 
     def _build_account_fields(self, record: dict) -> dict:
-        """构建账号表飞书字段"""
         fields = {
-            "账号名称": record.get("账号名称", ""),
-            "平台": record.get("平台", ""),
-            "链接": record.get("链接", ""),
-            "账号标识": record.get("账号标识", ""),
-            "等级": record.get("等级", 3),
-            "已更新": bool(record.get("已更新", False)),
+            "\u8d26\u53f7\u540d\u79f0": record.get("\u8d26\u53f7\u540d\u79f0", ""),
+            "\u5e73\u53f0": record.get("\u5e73\u53f0", ""),
+            "sec_user_id": record.get("\u8d26\u53f7\u6807\u8bc6", ""),
+            "\u7b49\u7ea7": record.get("\u7b49\u7ea7", 3),
+            "\u5df2\u83b7\u53d6\u4fe1\u606f": bool(record.get("\u5df2\u66f4\u65b0", False)),
         }
-
-        # 标签（JSON数组 → 飞书多选）
-        tags = record.get("标签")
+        if record.get("\u94fe\u63a5"):
+            fields["\u94fe\u63a5"] = record["\u94fe\u63a5"]
+        tags = record.get("\u6807\u7b7e")
         if tags:
             try:
                 if isinstance(tags, str):
                     tags = json.loads(tags)
-                fields["标签"] = tags
-            except:
+                fields["\u6807\u7b7e"] = tags
+            except Exception:
                 pass
-
-        # 详细信息
-        if record.get("昵称"):
-            fields["昵称"] = record["昵称"]
-        if record.get("粉丝数"):
-            fields["粉丝数"] = record["粉丝数"]
-        if record.get("作品数"):
-            fields["作品数"] = record["作品数"]
-        if record.get("签名"):
-            fields["签名"] = record["签名"]
-        if record.get("头像"):
-            fields["头像"] = record["头像"]
-
-        # 更新错误
-        if record.get("更新错误"):
-            fields["更新错误"] = record["更新错误"]
-
+        if record.get("\u6635\u79f0"):
+            fields["\u6635\u79f0"] = record["\u6635\u79f0"]
+        if record.get("\u7c89\u4e1d\u6570") is not None:
+            fields["\u7c89\u4e1d\u6570"] = record["\u7c89\u4e1d\u6570"]
+        if record.get("\u4f5c\u54c1\u6570") is not None:
+            fields["\u4f5c\u54c1\u6570"] = record["\u4f5c\u54c1\u6570"]
+        if record.get("\u7b7e\u540d"):
+            fields["\u7b7e\u540d"] = record["\u7b7e\u540d"]
+        if record.get("\u5934\u50cf"):
+            fields["\u5934\u50cf"] = record["\u5934\u50cf"]
+        if record.get("\u66f4\u65b0\u9519\u8bef"):
+            fields["\u5907\u6ce8"] = record["\u66f4\u65b0\u9519\u8bef"]
+        fields["\u540c\u6b65\u65f6\u95f4"] = int(_time.time() * 1000)
         return fields
 
-    # ========== 飞书 → 本地 ==========
+    def _build_cookie_fields(self, cookie: dict) -> dict:
+        fields = {}
+        cookie_value = cookie.get("Cookie", "")
+        if cookie_value:
+            fields["Cookie"] = cookie_value
+        platform = cookie.get("\u5e73\u53f0", "")
+        if platform:
+            fields["\u5e73\u53f0"] = platform
+        status = cookie.get("\u72b6\u6001", "")
+        if status:
+            fields["\u72b6\u6001"] = status
+        enabled = cookie.get("\u542f\u7528")
+        if enabled is not None:
+            fields["\u542f\u7528"] = bool(enabled)
+        remark = cookie.get("\u5907\u6ce8", "")
+        if remark:
+            fields["\u5907\u6ce8"] = remark
+        verify_time = cookie.get("\u9a8c\u8bc1\u65f6\u95f4", "")
+        if verify_time:
+            try:
+                ts = int(datetime.strptime(str(verify_time), "%Y-%m-%d %H:%M:%S").timestamp() * 1000)
+                fields["\u6700\u540e\u9a8c\u8bc1\u65f6\u95f4"] = ts
+            except Exception:
+                pass
+        fields["\u540c\u6b65\u65f6\u95f4"] = int(_time.time() * 1000)
+        return fields
 
-    def sync_collection_from_feishu(self) -> dict:
-        """从飞书同步采集表到本地"""
-        result = {"created": 0, "updated": 0, "failed": 0, "errors": []}
+    # ========== 飞书记录转本地 ==========
 
-        if not self.collection_table_id:
-            result["errors"].append("未配置采集表 Table ID")
+    def _feishu_record_to_local_collection(self, record):
+        fields = record.get("fields", {})
+        share = self._parse_text_value(fields.get("Share", ""))
+        if not share.strip():
+            return None
+        data = {
+            "\u5206\u4eab\u7801": share,
+            "\u5e73\u53f0": self._parse_text_value(fields.get("\u5e73\u53f0", "")),
+            "\u7b49\u7ea7": self._safe_int(fields.get("\u7b49\u7ea7", 3), 3),
+            "\u5df2\u540c\u6b65": self._feishu_to_db_synced(fields.get("\u540c\u6b65\u72b6\u6001")),
+        }
+        if fields.get("sec_user_id"):
+            data["\u8d26\u53f7\u6807\u8bc6"] = fields["sec_user_id"]
+        tags = fields.get("\u6807\u7b7e")
+        if tags:
+            data["\u6807\u7b7e"] = json.dumps(tags if isinstance(tags, list) else [str(tags)])
+        for k, fk in [("\u6635\u79f0", "\u6635\u79f0"), ("\u7c89\u4e1d\u6570", "\u7c89\u4e1d\u6570"), ("\u4f5c\u54c1\u6570", "\u4f5c\u54c1\u6570")]:
+            v = fields.get(fk)
+            if v is not None:
+                data[k] = self._safe_int(v) if k in ("\u7c89\u4e1d\u6570", "\u4f5c\u54c1\u6570") else self._parse_text_value(v)
+        return data
+
+    def _feishu_record_to_local_account(self, record):
+        fields = record.get("fields", {})
+        sec = self._parse_text_value(fields.get("sec_user_id", ""))
+        if not sec.strip():
+            return None
+        data = {
+            "\u8d26\u53f7\u6807\u8bc6": sec,
+            "\u8d26\u53f7\u540d\u79f0": self._parse_text_value(fields.get("\u8d26\u53f7\u540d\u79f0", "")),
+            "\u5e73\u53f0": self._parse_text_value(fields.get("\u5e73\u53f0", "")),
+            "\u7b49\u7ea7": self._safe_int(fields.get("\u7b49\u7ea7", 3), 3),
+        }
+        tags = fields.get("\u6807\u7b7e")
+        if tags:
+            data["\u6807\u7b7e"] = json.dumps(tags if isinstance(tags, list) else [str(tags)])
+        for k, fk in [("\u6635\u79f0", "\u6635\u79f0"), ("\u7c89\u4e1d\u6570", "\u7c89\u4e1d\u6570"), ("\u4f5c\u54c1\u6570", "\u4f5c\u54c1\u6570"), ("\u7b7e\u540d", "\u7b7e\u540d")]:
+            v = fields.get(fk)
+            if v is not None:
+                data[k] = self._safe_int(v) if k in ("\u7c89\u4e1d\u6570", "\u4f5c\u54c1\u6570") else self._parse_text_value(v)
+        return data
+
+    def _feishu_record_to_local_cookie(self, record):
+        fields = record.get("fields", {})
+        cookie_value = self._parse_text_value(fields.get("Cookie", ""))
+        if not cookie_value.strip():
+            return None
+        return {
+            "Cookie": cookie_value,
+            "\u5e73\u53f0": self._parse_text_value(fields.get("\u5e73\u53f0", "")),
+            "\u72b6\u6001": self._parse_text_value(fields.get("\u72b6\u6001", "")) or "\u6b63\u5e38",
+            "\u5907\u6ce8": self._parse_text_value(fields.get("\u5907\u6ce8", "")),
+        }
+
+    # ========== 批量 -> 飞书 ==========
+
+    def _batch_to_feishu(self, table_id, local_records, build_fn, db_update_fn, incremental=False, batch_size=500):
+        result = {"created": 0, "updated": 0, "skipped": 0, "failed": 0, "errors": []}
+        if not table_id:
             return result
-
         try:
-            # 获取飞书采集表记录
-            feishu_records = self.feishu.get_all_records(
-                self.app_token,
-                self.collection_table_id
-            )
-
-            for record in feishu_records:
-                record_id = record.get("record_id")
-                fields = record.get("fields", {})
-
-                # 解析字段
-                local_data = {
-                    "记录ID": record_id,
-                    "分享码": fields.get("分享码", ""),
-                    "平台": fields.get("平台", ""),
-                    "等级": fields.get("等级", 3),
-                    "已同步": fields.get("已同步", False),
-                    "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                }
-
-                # 标签（飞书多选 → JSON数组）
-                tags = fields.get("标签")
-                if tags:
-                    if isinstance(tags, list):
-                        local_data["标签"] = json.dumps(tags)
+            feishu_records = self.feishu.get_all_records(self.app_token, table_id)
+            feishu_index = {r["record_id"]: r for r in feishu_records}
+            to_create, to_update, create_locals = [], [], []
+            for local in local_records:
+                rid = local.get("\u8bb0\u5f55ID", "")
+                if rid and rid in feishu_index:
+                    if incremental:
+                        fs_time = self._safe_int(feishu_index[rid].get("fields", {}).get("\u540c\u6b65\u65f6\u95f4", 0))
+                        local_time = self._parse_local_time(local.get("\u66f4\u65b0\u65f6\u95f4", ""))
+                        if fs_time and local_time and fs_time >= local_time - 5000:
+                            result["skipped"] += 1
+                            continue
+                    fields = build_fn(local)
+                    if fields:
+                        to_update.append({"record_id": rid, "fields": fields})
+                        sync_ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
+                        if sync_ts and db_update_fn:
+                            try:
+                                db_update_fn(rid, {"\u66f4\u65b0\u65f6\u95f4": datetime.fromtimestamp(sync_ts / 1000).strftime("%Y-%m-%d %H:%M:%S")})
+                            except Exception:
+                                pass
+                else:
+                    fields = build_fn(local)
+                    if fields:
+                        to_create.append({"fields": fields})
+                        create_locals.append(local)
+            for i in range(0, len(to_create), batch_size):
+                batch, bl = to_create[i:i+batch_size], create_locals[i:i+batch_size]
+                try:
+                    resp = self.feishu.batch_create_records(self.app_token, table_id, batch)
+                    if resp.get("code") == 0:
+                        result["created"] += len(batch)
+                        recs = resp.get("data", {}).get("records", [])
+                        for j, rec in enumerate(recs):
+                            if j < len(bl):
+                                nid, oid = rec.get("record_id", ""), bl[j].get("\u8bb0\u5f55ID", "")
+                                if nid and oid and nid != oid and db_update_fn:
+                                    try:
+                                        db_update_fn(oid, {"\u8bb0\u5f55ID": nid})
+                                    except Exception:
+                                        pass
                     else:
-                        local_data["标签"] = json.dumps([str(tags)])
+                        result["failed"] += len(batch)
+                        result["errors"].append("create: " + resp.get("msg", ""))
+                except Exception as e:
+                    result["failed"] += len(batch)
+                    result["errors"].append("create err: " + str(e))
+            for i in range(0, len(to_update), batch_size):
+                batch = to_update[i:i+batch_size]
+                try:
+                    resp = self.feishu.batch_update_records(self.app_token, table_id, batch)
+                    if resp.get("code") == 0:
+                        result["updated"] += len(batch)
+                    else:
+                        result["failed"] += len(batch)
+                        result["errors"].append("update: " + resp.get("msg", ""))
+                except Exception as e:
+                    result["failed"] += len(batch)
+                    result["errors"].append("update err: " + str(e))
+        except Exception as e:
+            result["errors"].append(str(e))
+        return result
 
-                # 可选字段
-                if fields.get("账号标识"):
-                    local_data["账号标识"] = fields["账号标识"]
-                if fields.get("同步错误"):
-                    local_data["同步错误"] = fields["同步错误"]
-                if fields.get("备注"):
-                    local_data["备注"] = fields["备注"]
-                if fields.get("昵称"):
-                    local_data["昵称"] = fields["昵称"]
-                if fields.get("粉丝数") is not None:
-                    local_data["粉丝数"] = fields["粉丝数"]
-                if fields.get("作品数") is not None:
-                    local_data["作品数"] = fields["作品数"]
+    # ========== 飞书 -> 本地（全盘） ==========
 
-                # 检查本地是否已有
-                existing = self.db.get_collection_by_id(record_id)
+    def _from_feishu_full(self, table_id, convert_fn, db_update_fn, db_insert_fn, get_by_id_fn):
+        result = {"created": 0, "updated": 0, "failed": 0, "errors": []}
+        if not table_id:
+            return result
+        try:
+            for record in self.feishu.get_all_records(self.app_token, table_id):
+                rid = record.get("record_id", "")
+                local_data = convert_fn(record)
+                if not local_data:
+                    continue
+                local_data["\u8bb0\u5f55ID"] = rid
+                existing = get_by_id_fn(rid)
                 if existing:
-                    # 更新
                     try:
-                        self.db.update_collection(record_id, local_data)
+                        db_update_fn(rid, local_data)
                         result["updated"] += 1
                     except Exception as e:
                         result["failed"] += 1
-                        result["errors"].append(f"更新 {record_id} 失败: {e}")
+                        result["errors"].append(f"{rid}: {e}")
                 else:
-                    # 创建
                     try:
-                        local_data["创建时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        self.db.insert_collection(local_data)
-                        result["created"] += 1
+                        if db_insert_fn(local_data):
+                            result["created"] += 1
+                        else:
+                            result["failed"] += 1
                     except Exception as e:
                         result["failed"] += 1
-                        result["errors"].append(f"创建记录失败: {e}")
-
+                        result["errors"].append(f"{rid}: {e}")
         except Exception as e:
-            result["errors"].append(f"从飞书同步采集表失败: {e}")
-
+            result["errors"].append(str(e))
         return result
 
-    def sync_account_from_feishu(self) -> dict:
-        """从飞书同步账号表到本地"""
-        result = {"created": 0, "updated": 0, "failed": 0, "errors": []}
+    # ========== 飞书 -> 本地（增量） ==========
 
-        if not self.account_table_id:
-            result["errors"].append("未配置账号表 Table ID")
+    def _from_feishu_incremental(self, table_id, db_get_by_id, convert_fn, db_update_fn, db_insert_fn):
+        result = {"created": 0, "updated": 0, "skipped": 0, "failed": 0, "errors": []}
+        if not table_id:
             return result
-
         try:
-            # 获取飞书账号表记录
-            feishu_records = self.feishu.get_all_records(
-                self.app_token,
-                self.account_table_id
-            )
-
-            for record in feishu_records:
-                record_id = record.get("record_id")
+            for record in self.feishu.get_all_records(self.app_token, table_id):
+                rid = record.get("record_id", "")
                 fields = record.get("fields", {})
-
-                # 解析字段
-                local_data = {
-                    "记录ID": record_id,
-                    "账号名称": fields.get("账号名称", ""),
-                    "平台": fields.get("平台", ""),
-                    "链接": fields.get("链接", ""),
-                    "账号标识": fields.get("账号标识", ""),
-                    "等级": fields.get("等级", 3),
-                    "已更新": fields.get("已更新", False),
-                    "更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                }
-
-                # 标签（飞书多选 → JSON数组）
-                tags = fields.get("标签")
-                if tags:
-                    if isinstance(tags, list):
-                        local_data["标签"] = json.dumps(tags)
-                    else:
-                        local_data["标签"] = json.dumps([str(tags)])
-
-                # 可选字段
-                if fields.get("昵称"):
-                    local_data["昵称"] = fields["昵称"]
-                if fields.get("粉丝数") is not None:
-                    local_data["粉丝数"] = fields["粉丝数"]
-                if fields.get("作品数") is not None:
-                    local_data["作品数"] = fields["作品数"]
-                if fields.get("签名"):
-                    local_data["签名"] = fields["签名"]
-                if fields.get("头像"):
-                    local_data["头像"] = fields["头像"]
-                if fields.get("更新错误"):
-                    local_data["更新错误"] = fields["更新错误"]
-
-                # 检查本地是否已有
-                existing = self.db.get_account_by_id(record_id)
+                existing = db_get_by_id(rid)
                 if existing:
-                    # 更新
+                    fs_time = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
+                    local_time = self._parse_local_time(existing.get("\u66f4\u65b0\u65f6\u95f4", ""))
+                    if local_time and (not fs_time or fs_time <= local_time + 5000):
+                        result["skipped"] += 1
+                        continue
                     try:
-                        self.db.update_account(record_id, local_data)
-                        result["updated"] += 1
+                        local_data = convert_fn(record)
+                        if local_data:
+                            ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
+                            if ts:
+                                local_data["\u66f4\u65b0\u65f6\u95f4"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                            db_update_fn(rid, local_data)
+                            result["updated"] += 1
+                        else:
+                            result["skipped"] += 1
                     except Exception as e:
                         result["failed"] += 1
-                        result["errors"].append(f"更新 {record_id} 失败: {e}")
+                        result["errors"].append(f"{rid}: {e}")
+                    continue
+                local_data = convert_fn(record)
+                if not local_data:
+                    result["skipped"] += 1
+                    continue
+                local_data["\u8bb0\u5f55ID"] = rid
+                ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
+                if ts:
+                    local_data["\u66f4\u65b0\u65f6\u95f4"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                if db_insert_fn(local_data):
+                    result["created"] += 1
                 else:
-                    # 创建
-                    try:
-                        local_data["创建时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        self.db.insert_account(local_data)
-                        result["created"] += 1
-                    except Exception as e:
-                        result["failed"] += 1
-                        result["errors"].append(f"创建记录失败: {e}")
-
+                    result["skipped"] += 1
         except Exception as e:
-            result["errors"].append(f"从飞书同步账号表失败: {e}")
-
+            result["errors"].append(str(e))
         return result
 
-    # ========== 双向同步 ==========
+    # ========== 全盘同步（3表 x 2方向） ==========
 
-    def sync_all(self) -> FeishuSyncResult:
-        """执行完整的双向同步"""
-        result = FeishuSyncResult()
+    def sync_collection_to_feishu(self):
+        return self._batch_to_feishu(self.collection_table_id, self.db.get_all_collections(), self._build_collection_fields, self.db.update_collection)
 
-        # 本地 → 飞书
-        logger.info("同步采集表: 本地 → 飞书")
-        coll_to = self.sync_collection_to_feishu()
-        result.collection_to_feishu = {
-            "created": coll_to["created"],
-            "updated": coll_to["updated"],
-            "failed": coll_to["failed"],
-        }
-        result.errors.extend(coll_to.get("errors", []))
+    def sync_account_to_feishu(self):
+        return self._batch_to_feishu(self.account_table_id, self.db.get_all_accounts(), self._build_account_fields, self.db.update_account)
 
-        logger.info("同步账号表: 本地 → 飞书")
-        acc_to = self.sync_account_to_feishu()
-        result.account_to_feishu = {
-            "created": acc_to["created"],
-            "updated": acc_to["updated"],
-            "failed": acc_to["failed"],
-        }
-        result.errors.extend(acc_to.get("errors", []))
+    def sync_cookie_to_feishu(self):
+        return self._batch_to_feishu(self.cookie_table_id, self.db.get_all_cookies(), self._build_cookie_fields, self.db.update_cookie)
 
-        # 飞书 → 本地
-        logger.info("同步采集表: 飞书 → 本地")
-        coll_from = self.sync_collection_from_feishu()
-        result.collection_from_feishu = {
-            "created": coll_from["created"],
-            "updated": coll_from["updated"],
-            "failed": coll_from["failed"],
-        }
-        result.errors.extend(coll_from.get("errors", []))
+    def sync_collection_from_feishu(self):
+        return self._from_feishu_full(self.collection_table_id, self._feishu_record_to_local_collection, self.db.update_collection, self.db.insert_collection, self.db.get_collection_by_id)
 
-        logger.info("同步账号表: 飞书 → 本地")
-        acc_from = self.sync_account_from_feishu()
-        result.account_from_feishu = {
-            "created": acc_from["created"],
-            "updated": acc_from["updated"],
-            "failed": acc_from["failed"],
-        }
-        result.errors.extend(acc_from.get("errors", []))
+    def sync_account_from_feishu(self):
+        return self._from_feishu_full(self.account_table_id, self._feishu_record_to_local_account, self.db.update_account, self.db.insert_account, self.db.get_account_by_id)
 
-        return result
+    def sync_cookie_from_feishu(self):
+        return self._from_feishu_full(self.cookie_table_id, self._feishu_record_to_local_cookie, self.db.update_cookie, self.db.insert_cookie, self.db.get_cookie_by_id)
+
+    # ========== 增量同步（6步拆分） ==========
+
+    def _incremental_collection_to_feishu(self):
+        return self._batch_to_feishu(self.collection_table_id, self.db.get_all_collections(), self._build_collection_fields, self.db.update_collection, incremental=True)
+
+    def _incremental_account_to_feishu(self):
+        return self._batch_to_feishu(self.account_table_id, self.db.get_all_accounts(), self._build_account_fields, self.db.update_account, incremental=True)
+
+    def _incremental_cookie_to_feishu(self):
+        return self._batch_to_feishu(self.cookie_table_id, self.db.get_all_cookies(), self._build_cookie_fields, self.db.update_cookie, incremental=True)
+
+    def _incremental_collection_from_feishu(self):
+        return self._from_feishu_incremental(self.collection_table_id, self.db.get_collection_by_id, self._feishu_record_to_local_collection, self.db.update_collection, self.db.insert_collection)
+
+    def _incremental_account_from_feishu(self):
+        return self._from_feishu_incremental(self.account_table_id, self.db.get_account_by_id, self._feishu_record_to_local_account, self.db.update_account, self.db.insert_account)
+
+    def _incremental_cookie_from_feishu(self):
+        return self._from_feishu_incremental(self.cookie_table_id, self.db.get_cookie_by_id, self._feishu_record_to_local_cookie, self.db.update_cookie, self.db.insert_cookie)

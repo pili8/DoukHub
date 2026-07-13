@@ -95,7 +95,10 @@ class FeishuClient:
             json={"fields": fields},
         )
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        if data.get("code") != 0:
+            raise RuntimeError(f"飞书更新失败: {data.get('msg', '未知错误')} (code={data.get('code')})")
+        return data
 
     def create_record(
         self, app_token: str, table_id: str, fields: dict
@@ -107,7 +110,10 @@ class FeishuClient:
             json={"fields": fields},
         )
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        if data.get("code") != 0:
+            raise RuntimeError(f"飞书创建失败: {data.get('msg', '未知错误')} (code={data.get('code')})")
+        return data
 
     def batch_create_records(
         self,

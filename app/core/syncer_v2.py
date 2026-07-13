@@ -8,6 +8,7 @@ import logging
 from .database import Database
 from .collector import Collector
 from .feishu import FeishuClient
+from .feishu_sync import FeishuSyncer
 
 logger = logging.getLogger("doukhub.syncer")
 
@@ -46,6 +47,12 @@ class Syncer:
         self.cookie_table_id = config.get("cookie_table_id", "")
         self.app_token = config.get("app_token", "")
 
+        # 飞书双向同步器（步骤1自动拉取、步骤3自动回写）
+        if feishu and self.app_token:
+            self.feishu_syncer = FeishuSyncer(feishu, config)
+        else:
+            self.feishu_syncer = None
+
     def normalize_share(self, share: str) -> str:
         """标准化分享码"""
         # 去掉前缀
@@ -58,11 +65,13 @@ class Syncer:
         return share.strip()
 
     def merge_tags(self, existing_tags: list, new_tags: list) -> list:
-        """合并标签（去重，大小写不敏感）"""
-        tag_set = set()
+        """合并标签（去重，大小写不敏感，保留原样）"""
+        merged = {}
         for tag in existing_tags + new_tags:
-            tag_set.add(tag.lower())
-        return list(tag_set)
+            key = tag.strip().lower()
+            if key and key not in merged:
+                merged[key] = tag.strip()
+        return list(merged.values())
 
     def merge_level(self, existing_level: int, new_level: int) -> int:
         """合并等级（取高的）"""
@@ -71,25 +80,80 @@ class Syncer:
     # ========== 步骤1：导入采集表 ==========
 
     def import_to_collection(self, text: str) -> SyncResult:
-        """导入文本到采集表"""
+        """导入文本到采集表，支持多种格式"""
         result = SyncResult()
 
-        # 解析文本（这里简化为按行分割，实际应该用正则提取）
         lines = [line.strip() for line in text.split("\n") if line.strip()]
 
         for line in lines:
             result.total += 1
             try:
-                # 这里应该用正则提取 share、等级、标签等
-                # 简化处理：假设格式为 "share 等级 标签"
-                parts = line.split()
-                if len(parts) < 2:
+                share = ""
+                level = 3
+                tags = []
+
+                if line.startswith("{"):
+                    # JSON 格式: {"地址":"xxx","等级":"个2","用户":"name"}
+                    try:
+                        data = json.loads(line.split("|")[0].strip())
+                    except json.JSONDecodeError:
+                        result.skipped += 1
+                        continue
+                    share = data.get("地址", "") or data.get("Share", "")
+                    if not share:
+                        result.skipped += 1
+                        continue
+                    grade = data.get("等级", "") or data.get("等級", "")
+                    parts = re.split(r"[,\uff0c]", grade) if grade else []
+                    for part in parts:
+                        part = part.strip()
+                        num_m = re.search(r"(\d+)$", part)
+                        if num_m:
+                            level = max(1, min(4, int(num_m.group(1))))
+                            tag_p = part[:num_m.start()].strip()
+                            if tag_p:
+                                tags.append(tag_p)
+                        elif part:
+                            tags.append(part)
+                elif "@" in line:
+                    # 简单格式: 标签+等级@分享码，如 "个2@abc123" 或 "个2，图3@abc123"
+                    at_idx = line.rfind("@")
+                    prefix = line[:at_idx].strip()
+                    share = line[at_idx + 1:].strip()
+                    if not share:
+                        result.skipped += 1
+                        continue
+                    parts = re.split(r"[,，]", prefix)
+                    for part in parts:
+                        part = part.strip()
+                        if not part:
+                            continue
+                        num_m = re.search(r"(\d+)$", part)
+                        if num_m:
+                            level = max(1, min(4, int(num_m.group(1))))
+                            tag_p = part[:num_m.start()].strip()
+                            if tag_p:
+                                tags.append(tag_p)
+                        elif part.isdigit():
+                            level = max(1, min(4, int(part)))
+                        else:
+                            tags.append(part)
+                else:
+                    # 兼容旧格式: 分享码 等级 标签（空格分隔）
+                    parts = line.split()
+                    if len(parts) < 1:
+                        result.skipped += 1
+                        continue
+                    share = parts[0]
+                    if len(parts) > 1 and parts[1].isdigit():
+                        level = int(parts[1])
+                    tags = parts[2:] if len(parts) > 2 else []
+
+                if not share:
                     result.skipped += 1
                     continue
 
-                share = self.normalize_share(parts[0])
-                level = int(parts[1]) if parts[1].isdigit() else 3
-                tags = parts[2:] if len(parts) > 2 else []
+                share = self.normalize_share(share)
 
                 # 检查是否已存在
                 existing = self.db.get_collection_by_share(share)
@@ -121,6 +185,17 @@ class Syncer:
                 result.failed += 1
                 result.errors.append(f"{line}: {str(e)}")
 
+        # 自动从飞书拉取新增记录（合并到本地 DB）
+        if self.feishu_syncer and self.feishu_syncer.collection_table_id:
+            try:
+                fs_result = self.feishu_syncer.sync_collection_from_feishu()
+                pulled_created = fs_result.get("created", 0)
+                pulled_updated = fs_result.get("updated", 0)
+                if pulled_created or pulled_updated:
+                    logger.info(f"飞书拉取: 新增 {pulled_created}, 更新 {pulled_updated}")
+            except Exception as e:
+                logger.warning(f"飞书拉取失败（不影响导入）: {e}")
+
         return result
 
     # ========== 步骤2：更新采集表（获取 sec_user_id）==========
@@ -138,7 +213,7 @@ class Syncer:
         for collection in to_process:
             try:
                 share = collection["分享码"]
-                platform = collection.get("平台", "抖音")
+                platform = collection.get("平台") or "抖音"
 
                 # 调用 TTD API 解析短链接
                 resolved_url = await self.collector.resolve_short_url(share, platform)
@@ -188,10 +263,9 @@ class Syncer:
 
     def _extract_sec_user_id(self, url: str, platform: str) -> Optional[str]:
         """从 URL 提取 sec_user_id"""
-        if "douyin.com/user/" in url:
-            match = re.search(r"douyin\.com/user/([A-Za-z0-9_-]+)", url)
-            if match:
-                return match.group(1)
+        match = re.search(r"(?:iesdouyin|douyin)\.com/(?:share/)?user/([A-Za-z0-9_-]+)", url)
+        if match:
+            return match.group(1)
         return None
 
     # ========== 步骤3：同步账号表 ==========
@@ -209,7 +283,7 @@ class Syncer:
         for collection in to_process:
             try:
                 sec_user_id = collection["账号标识"]
-                platform = collection.get("平台", "抖音")
+                platform = collection.get("平台") or "\u6296\u97f3"
 
                 # 检查账号表是否已存在
                 existing_account = self.db.get_account_by_sec_user_id(sec_user_id)
@@ -229,7 +303,9 @@ class Syncer:
                     })
                 else:
                     # 调用 API 获取账号信息
-                    info = await self.collector.get_account_info(sec_user_id, platform)
+                    cookies = self.db.get_enabled_cookies()
+                    cookie = cookies[0].get("Cookie", "") if cookies else ""
+                    info = await self.collector.get_account_info(sec_user_id, platform, cookie)
                     if not info:
                         result.failed += 1
                         result.errors.append(f"{sec_user_id}: 无法获取账号信息")
@@ -258,6 +334,16 @@ class Syncer:
             except Exception as e:
                 result.failed += 1
                 result.errors.append(f"{collection.get('账号标识')}: {str(e)}")
+
+        # 自动回写到飞书账号表
+        if self.feishu_syncer and self.feishu_syncer.account_table_id:
+            try:
+                fs_result = self.feishu_syncer.sync_account_to_feishu()
+                pushed = fs_result.get("created", 0) + fs_result.get("updated", 0)
+                if pushed:
+                    logger.info(f"飞书回写: 新增 {fs_result['created']}, 更新 {fs_result['updated']}")
+            except Exception as e:
+                logger.warning(f"飞书回写失败（不影响同步结果）: {e}")
 
         return result
 

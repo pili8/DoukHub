@@ -60,6 +60,12 @@ class DownloaderService:
                 # TTD 直接启动 Web API 模式（绕过交互式菜单）
                 launcher = self.path / "_doukhub_launcher.py"
                 launcher.write_text(
+                    "# Patch: ?? rich legacy Windows ???????????? OSError\n"
+                    "try:\n"
+                    "    import rich.console as _rc\n"
+                    "    _rc.detect_legacy_windows = lambda: False\n"
+                    "except Exception:\n"
+                    "    pass\n"
                     "import asyncio\n"
                     "import aiosqlite\n"
                     "from src.application import TikTokDownloader\n"
@@ -145,11 +151,19 @@ class DownloaderService:
 
     def update(self) -> dict:
         """通过 git pull 更新源代码"""
+        # 内核未安装
+        if not self.source_exists:
+            return {
+                "name": self.name,
+                "success": False,
+                "message": f"{self.name} 内核未安装，请先下载内核源码",
+            }
         git_dir = self.path / ".git"
         if not git_dir.exists():
             return {
+                "name": self.name,
                 "success": False,
-                "message": f"{self.name} 不是 git 仓库，无法自动更新。请手动下载最新代码替换。",
+                "message": f"{self.name} 不是 git 仓库，无法自动更新",
             }
         try:
             # 先停止服务
@@ -173,7 +187,7 @@ class DownloaderService:
                 req_file = self.path / "requirements.txt"
                 if req_file.exists():
                     subprocess.run(
-                        ["pip", "install", "-r", str(req_file)],
+                        [sys.executable, "-m", "pip", "install", "-r", str(req_file)],
                         capture_output=True,
                         timeout=120,
                     )
@@ -182,16 +196,16 @@ class DownloaderService:
                 if was_running:
                     self.start()
 
-                if "Already up to date" in output or "已经是最新的" in output:
-                    return {"success": True, "message": f"{self.name} 已是最新版本"}
-                return {"success": True, "message": f"{self.name} 更新完成:\n{output.strip()}"}
+                if "Already up to date" in output or "已经是最新" in output:
+                    return {"name": self.name, "success": True, "message": f"{self.name} 已是最新版本"}
+                return {"name": self.name, "success": True, "message": f"{self.name} 更新完成: {output.strip()}"}
             else:
-                return {"success": False, "message": f"{self.name} 更新失败:\n{output.strip()}"}
+                return {"name": self.name, "success": False, "message": f"{self.name} 更新失败: {output.strip()}"}
 
         except subprocess.TimeoutExpired:
-            return {"success": False, "message": f"{self.name} 更新超时"}
+            return {"name": self.name, "success": False, "message": f"{self.name} 更新超时"}
         except Exception as e:
-            return {"success": False, "message": f"{self.name} 更新异常: {e}"}
+            return {"name": self.name, "success": False, "message": f"{self.name} 更新异常: {e}"}
 
     def get_version(self) -> str:
         """获取当前版本信息"""
@@ -217,12 +231,18 @@ class DownloaderService:
         self._client.close()
 
 
+    @property
+    def source_exists(self) -> bool:
+        """检测内核源码是否已下载"""
+        return (self.path / "main.py").exists()
+
+
 class ServiceManager:
     """管理所有 Downloader 服务"""
 
     def __init__(self, ttd_path: str, ttd_port: int, xhs_path: str, xhs_port: int):
-        self.ttd = DownloaderService("TikTokDownloader", ttd_path, ttd_port)
-        self.xhs = DownloaderService("XHS-Downloader", xhs_path, xhs_port)
+        self.ttd = DownloaderService("TikTokDownloader", ttd_path, ttd_port, repo_url="https://github.com/JoeanAmier/TikTokDownloader")
+        self.xhs = DownloaderService("XHS-Downloader", xhs_path, xhs_port, repo_url="https://github.com/JoeanAmier/XHS-Downloader")
 
     @property
     def services(self) -> list[DownloaderService]:
@@ -260,8 +280,10 @@ class ServiceManager:
         """更新指定 Downloader"""
         svc = self.get_service(name)
         if svc:
-            return svc.update()
-        return {"success": False, "message": f"未找到服务: {name}"}
+            result = svc.update()
+            result["name"] = svc.name
+            return result
+        return {"name": name, "success": False, "message": f"未找到服务: {name}"}
 
     def get_versions(self) -> list[dict]:
         """获取所有 Downloader 版本信息"""
@@ -273,3 +295,37 @@ class ServiceManager:
     def close(self):
         for svc in self.services:
             svc.close()
+
+
+    def install(self, name: str) -> dict:
+        """从 GitHub 克隆内核源码"""
+        svc = self.get_service(name)
+        if not svc:
+            return {"success": False, "message": f"未找到服务: {name}"}
+        if svc.source_exists:
+            return {"success": True, "message": f"{svc.name} 已安装"}
+        if not svc.repo_url:
+            return {"success": False, "message": f"{svc.name} 未配置仓库地址"}
+        try:
+            svc.path.parent.mkdir(parents=True, exist_ok=True)
+            result = subprocess.run(
+                ["git", "clone", "--depth", "1", svc.repo_url, str(svc.path)],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            output = result.stdout + result.stderr
+            if result.returncode == 0:
+                req_file = svc.path / "requirements.txt"
+                if req_file.exists():
+                    subprocess.run(
+                        [sys.executable, "-m", "pip", "install", "-r", str(req_file)],
+                        capture_output=True,
+                        timeout=300,
+                    )
+                return {"success": True, "message": f"{svc.name} 下载安装完成"}
+            return {"success": False, "message": f"{svc.name} 下载失败:\n{output.strip()}"}
+        except subprocess.TimeoutExpired:
+            return {"success": False, "message": f"{svc.name} 下载超时"}
+        except Exception as e:
+            return {"success": False, "message": f"{svc.name} 安装异常: {e}"}

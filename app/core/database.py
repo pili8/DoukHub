@@ -163,7 +163,8 @@ class Database:
     def update_collection(self, record_id: str, data: dict) -> bool:
         """更新采集表记录"""
         with self._connect() as conn:
-            data["更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if "更新时间" not in data:
+                data["更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE collection_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
             conn.commit()
@@ -218,7 +219,8 @@ class Database:
     def update_account(self, record_id: str, data: dict) -> bool:
         """更新账号表记录"""
         with self._connect() as conn:
-            data["更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if "更新时间" not in data:
+                data["更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE account_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
             conn.commit()
@@ -267,7 +269,8 @@ class Database:
     def update_cookie(self, record_id: str, data: dict) -> bool:
         """更新 Cookie 记录"""
         with self._connect() as conn:
-            data["更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if "更新时间" not in data:
+                data["更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE cookie_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
             conn.commit()
@@ -276,6 +279,19 @@ class Database:
     def mark_cookie_invalid(self, record_id: str) -> bool:
         """标记 Cookie 为失效"""
         return self.update_cookie(record_id, {"状态": "失效"})
+
+    def get_cookie_by_id(self, record_id: str) -> Optional[dict]:
+        """根据记录ID获取 Cookie 记录"""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM cookie_cache WHERE 记录ID = ?", (record_id,)).fetchone()
+            return dict(row) if row else None
+
+    def delete_cookie(self, record_id: str) -> bool:
+        """删除 Cookie 记录"""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM cookie_cache WHERE 记录ID = ?", (record_id,))
+            conn.commit()
+            return True
 
     # ========== 采集历史操作 ==========
 

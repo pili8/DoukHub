@@ -279,18 +279,6 @@ async def page_duplicates(request: Request):
 
 # ========== API 路由 ==========
 
-@app.get("/api/status")
-async def api_status():
-    svc = get_services()
-    h = get_history()
-    sched = get_scheduler()
-    return {
-        "services": svc.status_all(),
-        "stats": h.get_stats(),
-        "jobs": sched.get_jobs_info(),
-    }
-
-
 # --- 服务管理 ---
 
 @app.post("/api/services/{name}/start")
@@ -343,7 +331,9 @@ async def api_status():
     svc = get_services()
     feishu = get_feishu()
     collector = get_collector()
-    
+    h = get_history()
+    sched = get_scheduler()
+
     # 检测飞书连通性
     feishu_status = {"connected": False, "message": "未配置"}
     if feishu:
@@ -355,34 +345,48 @@ async def api_status():
             }
         except Exception as e:
             feishu_status = {"connected": False, "message": str(e)}
-    
-    # 检测 TTD 连通性
-    ttd_status = {"connected": False, "message": "未启动"}
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{collector.ttd_url}/")
-            if resp.status_code in (200, 307, 404):
-                ttd_status = {"connected": True, "message": "运行中"}
-    except Exception as e:
-        ttd_status = {"connected": False, "message": str(e)}
-    
-    # 检测 XHS 连通性
-    xhs_status = {"connected": False, "message": "未启动"}
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{collector.xhs_url}/")
-            if resp.status_code in (200, 307, 404):
-                xhs_status = {"connected": True, "message": "运行中"}
-    except Exception as e:
-        xhs_status = {"connected": False, "message": str(e)}
-    
+
+    # 检测 TTD 连通性（先检查内核是否安装）
+    ttd_kernel = svc.ttd.source_exists
+    if not ttd_kernel:
+        ttd_status = {"connected": False, "message": "内核未安装"}
+    else:
+        ttd_status = {"connected": False, "message": "未启动"}
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get(f"{collector.ttd_url}/")
+                if resp.status_code in (200, 307, 404):
+                    ttd_status = {"connected": True, "message": "运行中"}
+        except Exception as e:
+            ttd_status = {"connected": False, "message": str(e)}
+
+    # 检测 XHS 连通性（先检查内核是否安装）
+    xhs_kernel = svc.xhs.source_exists
+    if not xhs_kernel:
+        xhs_status = {"connected": False, "message": "内核未安装"}
+    else:
+        xhs_status = {"connected": False, "message": "未启动"}
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get(f"{collector.xhs_url}/")
+                if resp.status_code in (200, 307, 404):
+                    xhs_status = {"connected": True, "message": "运行中"}
+        except Exception as e:
+            xhs_status = {"connected": False, "message": str(e)}
+
     return {
         "feishu": feishu_status,
         "ttd": ttd_status,
         "xhs": xhs_status,
         "services": svc.status_all(),
+        "stats": h.get_stats(),
+        "jobs": sched.get_jobs_info(),
+        "kernels": {
+            "ttd": {"installed": ttd_kernel, "path": str(svc.ttd.path)},
+            "xhs": {"installed": xhs_kernel, "path": str(svc.xhs.path)},
+        },
     }
 
 
@@ -430,6 +434,101 @@ async def api_test_xhs_status():
             return {"success": False, "message": f"HTTP {resp.status_code}"}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+
+
+# --- 内核管理 ---
+
+@app.get("/api/kernels/status")
+async def api_kernels_status():
+    """检测内核源码是否存在"""
+    svc = get_services()
+    return {
+        "kernels": [
+            {
+                "name": s.name,
+                "installed": s.source_exists,
+                "path": str(s.path),
+                "repo_url": s.repo_url,
+            }
+            for s in svc.services
+        ]
+    }
+
+
+@app.post("/api/kernels/{name}/install")
+async def api_kernel_install(name: str):
+    """从 GitHub 下载内核源码"""
+    svc = get_services()
+    s = svc.get_service(name)
+    if not s:
+        return {"success": False, "message": f"未找到内核: {name}"}
+    if s.source_exists:
+        return {"success": True, "message": f"{s.name} 已安装"}
+    result = svc.install(name)
+    return result
+
+# --- Cookie 验证 ---
+
+@app.post("/api/cookies/validate")
+async def api_validate_cookies():
+    """验证所有 Cookie 有效性 - SSE 实时进度"""
+    db = get_database()
+    c = get_collector()
+
+    import json
+
+    async def validate_stream():
+        try:
+            cookies = db.get_all_cookies()
+            total = len(cookies)
+            valid_count = 0
+            invalid_count = 0
+
+            yield f"data: {json.dumps({'type': 'start', 'message': '开始验证', 'total': total})}\n\n"
+
+            if total == 0:
+                yield f"data: {json.dumps({'type': 'complete', 'success': True, 'message': '没有 Cookie 可验证', 'total': 0, 'valid': 0, 'invalid': 0})}\n\n"
+                return
+
+            for i, ck in enumerate(cookies):
+                cookie_str = ck.get("Cookie", "")
+                record_id = ck.get("记录ID", "")
+                label = ck.get("备注", "") or (cookie_str[:24] + "..." if cookie_str else "空Cookie")
+
+                yield f"data: {json.dumps({'type': 'progress', 'message': f'验证 [{i+1}/{total}]: {label}'})}\n\n"
+
+                valid = await c.validate_cookie(cookie_str, ck.get("平台", "抶音"))
+
+                from datetime import datetime
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                db.update_cookie(record_id, {
+                    "状态": "正常" if valid else "失效",
+                    "验证时间": now_str,
+                })
+
+                if valid:
+                    valid_count += 1
+                else:
+                    invalid_count += 1
+
+                level = "ok" if valid else "error"
+                icon = "✅" if valid else "❌"
+                status = "有效" if valid else "已过期"
+                msg = f"{icon} {label}: {status}"
+                yield f"data: {json.dumps({'type': 'log', 'level': level, 'message': msg})}\n\n"
+
+                yield f"data: {json.dumps({'type': 'stats', 'total': total, 'valid': valid_count, 'invalid': invalid_count})}\n\n"
+
+            summary = f"验证完成: {valid_count} 个有效, {invalid_count} 个失效"
+            yield f"data: {json.dumps({'type': 'complete', 'success': True, 'message': summary, 'total': total, 'valid': valid_count, 'invalid': invalid_count})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Cookie 验证失败: {e}")
+            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'验证失败: {str(e)}', 'total': 0, 'valid': 0, 'invalid': 0})}\n\n"
+
+    return StreamingResponse(validate_stream(), media_type="text/event-stream")
 
 
 # --- 飞书同步 ---
@@ -673,11 +772,21 @@ async def api_sync_v2_update_collection():
             
             # 获取所有未获取 sec_user_id 的记录
             collections = s.db.get_all_collections()
-            to_process = [c for c in collections if not c.get("账号标识")]
+            to_process = [c for c in collections if not c.get("账号标识") and str(c.get("分享码", "")).strip()]
             
             yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': 0, 'failed': 0})}\n\n"
             yield f"data: {json.dumps({'type': 'progress', 'message': f'需要处理 {len(to_process)} 条记录'})}\n\n"
-            
+
+            # 加载 Cookie
+            db = get_database()
+            cookies = db.get_enabled_cookies()
+            cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+            if not cookie_list:
+                yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': '⚠️ Cookie 表为空，无法获取账号详情。请在飞书 Cookie 表中添加有效的抖音 Cookie。'})}\n\n"
+                yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': 'Cookie 表为空，获取详情失败', 'total': len(to_process), 'success_count': 0, 'failed': len(to_process)})}\n\n"
+                return
+            yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': f'已加载 {len(cookie_list)} 个 Cookie'})}\n\n"
+
             success = 0
             failed = 0
             errors = []
@@ -687,8 +796,8 @@ async def api_sync_v2_update_collection():
                 
                 try:
                     share = collection["分享码"]
-                    platform = collection.get("平台", "抖音")
-                    
+                    platform = collection.get("平台") or "抖音"
+
                     # 调用 TTD API 解析短链接
                     resolved_url = await s.collector.resolve_short_url(share, platform)
                     sec_user_id = s._extract_sec_user_id(resolved_url, platform)
@@ -771,7 +880,17 @@ async def api_sync_v2_sync_account():
             
             yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': 0, 'failed': 0})}\n\n"
             yield f"data: {json.dumps({'type': 'progress', 'message': f'需要处理 {len(to_process)} 条记录'})}\n\n"
-            
+
+            # 加载 Cookie
+            db = get_database()
+            cookies = db.get_enabled_cookies()
+            cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+            if not cookie_list:
+                yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': 'Cookie 表为空，无法获取账号详情。请在飞书 Cookie 表中添加有效的抖音 Cookie。'})}\n\n"
+                yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': 'Cookie 表为空，获取详情失败', 'total': len(to_process), 'success_count': 0, 'failed': len(to_process)})}\n\n"
+                return
+            yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': f'已加载 {len(cookie_list)} 个 Cookie'})}\n\n"
+
             success = 0
             failed = 0
             errors = []
@@ -781,7 +900,7 @@ async def api_sync_v2_sync_account():
                 
                 try:
                     sec_user_id = collection["账号标识"]
-                    platform = collection.get("平台", "抖音")
+                    platform = collection.get("平台") or "抖音"
                     
                     # 检查账号表是否已存在
                     existing_account = s.db.get_account_by_sec_user_id(sec_user_id)
@@ -803,7 +922,8 @@ async def api_sync_v2_sync_account():
                         yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ 更新账号: {existing_account.get('账号名称')}'})}\n\n"
                     else:
                         # 调用 API 获取账号信息
-                        info = await s.collector.get_account_info(sec_user_id, platform)
+                        cookie = cookie_list[success % len(cookie_list)]
+                        info = await s.collector.get_account_info(sec_user_id, platform, cookie)
                         if not info:
                             failed += 1
                             errors.append(f"{sec_user_id}: 无法获取账号信息")
@@ -837,7 +957,18 @@ async def api_sync_v2_sync_account():
                     failed += 1
                     errors.append(f"{collection.get('账号标识')}: {str(e)}")
                     yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {collection.get('账号标识')}: {e}'})}\n\n"
-            
+
+            # 自动回写飞书账号表
+            if s.feishu_syncer and s.feishu_syncer.account_table_id:
+                yield f"data: {json.dumps({'type': 'progress', 'message': '正在回写飞书账号表...'})}\n\n"
+                try:
+                    fs_result = s.feishu_syncer.sync_account_to_feishu()
+                    fs_created = fs_result.get("created", 0)
+                    fs_updated = fs_result.get("updated", 0)
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ 飞书回写完成: 新增 {fs_created}, 更新 {fs_updated}'})}\n\n"
+                except Exception as e:
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'⚠️ 飞书回写失败: {e}'})}\n\n"
+
             yield f"data: {json.dumps({'type': 'complete', 'success': failed == 0, 'message': f'同步完成: 成功 {success} 条，失败 {failed} 条', 'total': len(to_process), 'success_count': success, 'failed': failed, 'errors': errors[:5]})}\n\n"
             
         except Exception as e:
@@ -1088,7 +1219,7 @@ async def api_database_clear_table(table_name: str):
 
 @app.post("/api/feishu/sync")
 async def api_feishu_sync():
-    """飞书双向同步"""
+    """飞书双向同步 - SSE 实时进度"""
     fs = get_feishu_syncer()
     if not fs:
         return JSONResponse(
@@ -1096,19 +1227,50 @@ async def api_feishu_sync():
             status_code=400,
         )
 
-    try:
-        result = fs.sync_all()
-        return {
-            "success": len(result.errors) == 0,
-            "message": "飞书同步完成",
-            **result.to_dict(),
-        }
-    except Exception as e:
-        logger.error(f"飞书同步失败: {e}")
-        return JSONResponse(
-            {"success": False, "message": f"同步异常: {str(e)}"},
-            status_code=500,
-        )
+    import json
+    import asyncio
+
+    async def sync_stream():
+        try:
+            yield f"data: {json.dumps({'type': 'start', 'message': '开始双向同步'})}\n\n"
+
+            steps = [
+                ('采集表 → 飞书', fs.sync_collection_to_feishu),
+                ('账号表 → 飞书', fs.sync_account_to_feishu),
+                ('飞书 → 采集表', fs.sync_collection_from_feishu),
+                ('飞书 → 账号表', fs.sync_account_from_feishu),
+            ]
+
+            total = len(steps)
+            all_errors = []
+            results = {}
+
+            for i, (label, fn) in enumerate(steps):
+                yield f"data: {json.dumps({'type': 'progress', 'message': f'[{i+1}/{total}] {label}...'})}\n\n"
+                try:
+                    r = await asyncio.to_thread(fn)
+                    created = r.get("created", 0)
+                    updated = r.get("updated", 0)
+                    failed = r.get("failed", 0)
+                    all_errors.extend(r.get("errors", []))
+                    results[label] = {"created": created, "updated": updated, "failed": failed}
+                    level = "ok" if failed == 0 else "error"
+                    icon = "✅" if failed == 0 else "⚠️"
+                    msg = f"{icon} {label}: 新增 {created}, 更新 {updated}" + (f", 失败 {failed}" if failed else "")
+                    yield f"data: {json.dumps({'type': 'log', 'level': level, 'message': msg})}\n\n"
+                    yield f"data: {json.dumps({'type': 'stats', 'step': i+1, 'total': total})}\n\n"
+                except Exception as e:
+                    all_errors.append(f"{label}: {e}")
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {label}: {e}'})}\n\n"
+
+            summary = "双向同步完成" + (f", {len(all_errors)} 个错误" if all_errors else "")
+            yield f"data: {json.dumps({'type': 'complete', 'success': len(all_errors) == 0, 'message': summary, 'results': results, 'errors': all_errors[:5]})}\n\n"
+
+        except Exception as e:
+            logger.error(f"飞书同步失败: {e}")
+            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'同步失败: {str(e)}'})}\n\n"
+
+    return StreamingResponse(sync_stream(), media_type="text/event-stream")
 
 
 @app.post("/api/feishu/sync/to-feishu")
@@ -1121,11 +1283,13 @@ async def api_feishu_sync_to():
     try:
         coll_result = fs.sync_collection_to_feishu()
         acc_result = fs.sync_account_to_feishu()
+        cookie_result = fs.sync_cookie_to_feishu()
         return {
             "success": True,
-            "message": f"同步到飞书完成: 采集表 {coll_result['created']}新增 {coll_result['updated']}更新, 账号表 {acc_result['created']}新增 {acc_result['updated']}更新",
+            "message": f"同步到飞书完成: 采集表 {coll_result['created']}新增 {coll_result['updated']}更新, 账号表 {acc_result['created']}新增 {acc_result['updated']}更新, Cookie表 {cookie_result['created']}新增 {cookie_result['updated']}更新",
             "collection": coll_result,
             "account": acc_result,
+            "cookie": cookie_result,
         }
     except Exception as e:
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
@@ -1141,14 +1305,105 @@ async def api_feishu_sync_from():
     try:
         coll_result = fs.sync_collection_from_feishu()
         acc_result = fs.sync_account_from_feishu()
+        cookie_result = fs.sync_cookie_from_feishu()
         return {
             "success": True,
-            "message": f"从飞书同步完成: 采集表 {coll_result['created']}新增 {coll_result['updated']}更新, 账号表 {acc_result['created']}新增 {acc_result['updated']}更新",
+            "message": f"从飞书同步完成: 采集表 {coll_result['created']}新增 {coll_result['updated']}更新, 账号表 {acc_result['created']}新增 {acc_result['updated']}更新, Cookie表 {cookie_result['created']}新增 {cookie_result['updated']}更新",
             "collection": coll_result,
             "account": acc_result,
+            "cookie": cookie_result,
         }
     except Exception as e:
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+# --- 飞书同步（全盘/增量）---
+
+def _run_feishu_sync_sse(fs, steps):
+    """通用飞书同步 SSE 生成器"""
+    import json, asyncio
+
+    async def stream():
+        try:
+            total = len(steps)
+            all_errors = []
+            results = {}
+            yield f"data: {json.dumps({'type': 'start', 'message': '开始同步', 'total': total})}\n\n"
+
+            for i, (label, fn) in enumerate(steps):
+                yield f"data: {json.dumps({'type': 'progress', 'message': f'[{i+1}/{total}] {label}...'})}\n\n"
+                try:
+                    r = await asyncio.to_thread(fn)
+                    created = r.get("created", 0)
+                    updated = r.get("updated", 0)
+                    skipped = r.get("skipped", 0)
+                    failed = r.get("failed", 0)
+                    all_errors.extend(r.get("errors", []))
+                    results[label] = {"created": created, "updated": updated, "skipped": skipped, "failed": failed}
+                    if failed > 0:
+                        msg = f"⚠️ {label}: 新增 {created}, 更新 {updated}, 跳过 {skipped}, 失败 {failed}"
+                        yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': msg})}\n\n"
+                    else:
+                        parts = []
+                        if created: parts.append(f"新增 {created}")
+                        if updated: parts.append(f"更新 {updated}")
+                        if skipped: parts.append(f"跳过 {skipped}")
+                        msg = f"✅ {label}: " + (", ".join(parts) if parts else "无变化")
+                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': msg})}\n\n"
+                    yield f"data: {json.dumps({'type': 'stats', 'step': i+1, 'total': total})}\n\n"
+                except Exception as e:
+                    all_errors.append(f"{label}: {e}")
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {label}: {e}'})}\n\n"
+
+            summary = "同步完成" + (f", {len(all_errors)} 个错误" if all_errors else "")
+            yield f"data: {json.dumps({'type': 'complete', 'success': len(all_errors) == 0, 'message': summary, 'results': results, 'errors': all_errors[:5]})}\n\n"
+        except Exception as e:
+            logger.error(f"飞书同步失败: {e}")
+            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'同步失败: {str(e)}'})}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.post("/api/feishu/sync/full/to-feishu")
+async def api_feishu_full_to_feishu():
+    """全盘同步：本地 → 飞书（覆盖）"""
+    fs = get_feishu_syncer()
+    if not fs:
+        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
+    return _run_feishu_sync_sse(fs, [
+        ("采集表 → 飞书", fs.sync_collection_to_feishu),
+        ("账号表 → 飞书", fs.sync_account_to_feishu),
+        ("Cookie表 → 飞书", fs.sync_cookie_to_feishu),
+    ])
+
+
+@app.post("/api/feishu/sync/full/from-feishu")
+async def api_feishu_full_from_feishu():
+    """全盘同步：飞书 → 本地（覆盖）"""
+    fs = get_feishu_syncer()
+    if not fs:
+        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
+    return _run_feishu_sync_sse(fs, [
+        ("飞书 → 采集表", fs.sync_collection_from_feishu),
+        ("飞书 → 账号表", fs.sync_account_from_feishu),
+        ("飞书 → Cookie表", fs.sync_cookie_from_feishu),
+    ])
+
+
+@app.post("/api/feishu/sync/incremental")
+async def api_feishu_incremental_sync():
+    """日常增量同步：双向仅新增，不更新已有记录"""
+    fs = get_feishu_syncer()
+    if not fs:
+        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
+    return _run_feishu_sync_sse(fs, [
+        ("本地 → 飞书：采集表", fs._incremental_collection_to_feishu),
+        ("本地 → 飞书：账号表", fs._incremental_account_to_feishu),
+        ("本地 → 飞书：Cookie表", fs._incremental_cookie_to_feishu),
+        ("飞书 → 本地：采集表", fs._incremental_collection_from_feishu),
+        ("飞书 → 本地：账号表", fs._incremental_account_from_feishu),
+        ("飞书 → 本地：Cookie表", fs._incremental_cookie_from_feishu),
+    ])
 
 
 # --- 采集（使用新数据库）---

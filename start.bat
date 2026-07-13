@@ -1,26 +1,27 @@
 @echo off
-:: DoukHub 一键启动脚本 (Windows)
 cd /d "%~dp0"
 
-:: 检查虚拟环境
-if not exist "venv" (
-    echo 首次运行，正在初始化...
+if not exist "venv\Scripts\python.exe" (
+    echo First run: creating venv...
     python -m venv venv
-    call venv\Scripts\activate.bat
-    pip install -r requirements.txt
-) else (
-    call venv\Scripts\activate.bat
+    venv\Scripts\python.exe -m pip install -r requirements.txt
+)
+
+REM ---------- Auto-kill old process on port 2999 ----------
+echo Checking port 2999...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":2999" ^| findstr "LISTENING"') do (
+    echo Killing old process on port 2999 ^(PID: %%a^)...
+    taskkill /F /PID %%a >nul 2>&1
+    timeout /t 2 /nobreak >nul
 )
 
 echo ================================
-echo   DoukHub 正在启动
-echo   本机访问: http://127.0.0.1:2999
-echo   局域网访问: 请用本机IP替代127.0.0.1
-echo   按 Ctrl+C 退出
+echo   DoukHub Starting...
+echo   Local:  http://127.0.0.1:2999
+echo   Press Ctrl+C to stop
 echo ================================
 
-:: 自动打开浏览器
 start "" "http://127.0.0.1:2999"
 
-python main.py
+venv\Scripts\python.exe main.py
 pause

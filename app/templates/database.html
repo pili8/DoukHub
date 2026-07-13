@@ -9,7 +9,7 @@
 <!-- 数据库概览 -->
 <div class="card">
     <h3>📊 数据库概览</h3>
-    <div id="stats-container" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;text-align:center;">
+    <div id="stats-container" class="db-stats-grid">
         <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
             <div style="font-size:24px;font-weight:bold;color:#e94560;" id="stat-collection">-</div>
             <div style="font-size:12px;color:#888;">采集表缓存</div>
@@ -33,10 +33,39 @@
     </div>
 </div>
 
-<!-- 表浏览 -->
+<!-- 飞书同步 -->
+<div class="card">
+    <h3>🔗 飞书同步</h3>
+
+    <!-- 全盘同步 -->
+    <div style="margin-bottom:16px;">
+        <p style="font-size:13px;color:#888;margin-bottom:8px;">全盘同步：选择一方作为基准覆盖另一方，用于数据整理和全量对齐</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-sm" onclick="feishuSyncSSE('/api/feishu/sync/full/from-feishu', '飞书 → 本地')" id="btn-full-from">飞书 → 本地</button>
+            <button class="btn btn-secondary btn-sm" onclick="feishuSyncSSE('/api/feishu/sync/full/to-feishu', '本地 → 飞书')" id="btn-full-to">本地 → 飞书</button>
+        </div>
+    </div>
+
+    <!-- 增量同步 -->
+    <div style="margin-bottom:12px;">
+        <p style="font-size:13px;color:#888;margin-bottom:8px;">日常增量同步：双向仅同步新增记录，跳过已有记录，速度快</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="feishuSyncSSE('/api/feishu/sync/incremental', '双向增量同步')" id="btn-incremental">⚡ 日常增量同步</button>
+        </div>
+    </div>
+
+    <div id="feishu-sync-status" style="font-size:13px;margin-top:12px;"></div>
+    <div id="feishu-sync-progress" style="display:none;margin-top:8px;height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden;">
+        <div id="feishu-sync-bar" style="height:100%;width:0%;background:#3498db;transition:width 0.3s;"></div>
+    </div>
+    <div id="feishu-sync-log" style="display:none;margin-top:8px;max-height:200px;overflow-y:auto;font-size:13px;font-family:monospace;"></div>
+    <div id="feishu-sync-result" style="margin-top:12px;display:none;"></div>
+</div>
+
+<!-- 表浏览 --><!-- 表浏览 -->
 <div class="card">
     <h3>📋 表浏览</h3>
-    <div style="display:flex;gap:8px;margin-bottom:16px;">
+    <div class="table-scroll" style="margin-bottom:16px;"><div style="display:flex;gap:8px;min-width:max-content;">
         <button class="btn btn-secondary" onclick="showTable('collection_cache')">采集表缓存</button>
         <button class="btn btn-secondary" onclick="showTable('account_cache')">账号表缓存</button>
         <button class="btn btn-secondary" onclick="showTable('cookie_cache')">Cookie缓存</button>
@@ -48,18 +77,28 @@
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
             <h4 id="table-title" style="margin:0;"></h4>
             <div style="display:flex;gap:8px;">
-                <button class="btn btn-danger btn-sm" onclick="clearTable()">🗑️ 清空表</button>
                 <button class="btn btn-secondary btn-sm" onclick="exportTable()">📥 导出Excel</button>
+                <button class="btn btn-primary btn-sm" onclick="validateCookies()" id="btn-validate-cookie" style="display:none;">🔍 验证Cookie</button>
             </div>
         </div>
         <div id="table-content" style="overflow-x:auto;"></div>
+        <div id="cookie-validate-result" style="display:none;margin-top:16px;padding:16px;background:#fafafa;border-radius:8px;border:1px solid #eee;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h4 style="margin:0;">Cookie 验证结果</h4>
+                <span id="cookie-validate-stats" style="font-size:13px;color:#888;"></span>
+            </div>
+            <div id="cookie-validate-progress" style="height:6px;background:#e0e0e0;border-radius:3px;margin-bottom:12px;overflow:hidden;">
+                <div id="cookie-validate-bar" style="height:100%;width:0%;background:#3498db;transition:width 0.3s;"></div>
+            </div>
+            <div id="cookie-validate-log" style="max-height:300px;overflow-y:auto;font-size:13px;font-family:monospace;"></div>
+        </div>
     </div>
 </div>
 
 <!-- 搜索 -->
 <div class="card">
     <h3>🔍 搜索</h3>
-    <div style="display:flex;gap:8px;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <select id="search-table" style="padding:8px;border:1px solid #ddd;border-radius:4px;">
             <option value="collection_cache">采集表缓存</option>
             <option value="account_cache">账号表缓存</option>
@@ -73,6 +112,30 @@
     <div id="search-results" style="margin-top:16px;display:none;"></div>
 </div>
 {% endblock %}
+
+
+<style>
+.db-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    text-align: center;
+}
+.db-stats-grid > div {
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+.db-stats-grid .num { font-size: 24px; font-weight: bold; }
+.db-stats-grid .lbl { font-size: 12px; color: #888; }
+
+@media (max-width: 768px) {
+    .db-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 420px) {
+    .db-stats-grid { grid-template-columns: 1fr; }
+}
+</style>
 
 {% block scripts %}
 <script>
@@ -108,6 +171,8 @@
         
         document.getElementById('table-title').textContent = tableNames[tableName];
         document.getElementById('table-container').style.display = 'block';
+        const validateBtn = document.getElementById('btn-validate-cookie');
+        if (validateBtn) validateBtn.style.display = tableName === 'cookie_cache' ? '' : 'none';
         
         try {
             const data = await apiCall(`/api/database/table/${tableName}`, 'GET');
@@ -122,42 +187,47 @@
             document.getElementById('table-content').innerHTML = '<div style="text-align:center;color:#888;padding:20px;">暂无数据</div>';
             return;
         }
-        
+
         const columns = Object.keys(data[0]);
         let html = '<table style="width:100%;border-collapse:collapse;">';
-        
-        // 表头
+
         html += '<thead><tr>';
         columns.forEach(col => {
-            html += `<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;">${col}</th>`;
+            html += '<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;">' + col + '</th>';
         });
         html += '<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;">操作</th>';
         html += '</tr></thead>';
-        
-        // 数据行
+
         html += '<tbody>';
         data.forEach(row => {
             html += '<tr>';
             columns.forEach(col => {
                 let value = row[col];
-                if (value === null || value === undefined) value = '-';
-                if (typeof value === 'object') value = JSON.stringify(value);
-                if (String(value).length > 50) value = String(value).substring(0, 50) + '...';
-                html += `<td style="padding:8px;border:1px solid #ddd;font-size:12px;">${value}</td>`;
+                if (value === null || value === undefined) { value = '-'; }
+                else if (typeof value === 'object') { value = JSON.stringify(value); }
+                else if (typeof value === 'string' && value.trim().startsWith('[') && value.trim().endsWith(']')) {
+                    try {
+                        const parsed = JSON.parse(value);
+                        if (Array.isArray(parsed)) {
+                            value = parsed.join(', ');
+                        }
+                    } catch(e) {}
+                }
+                if (String(value).length > 80) { value = String(value).substring(0, 80) + '...'; }
+                html += '<td style="padding:8px;border:1px solid #ddd;font-size:12px;">' + value + '</td>';
             });
-            
-            // 操作列
+
             const recordId = row['记录ID'] || row['ID'] || '';
             if (recordId && currentTable !== 'collection_history' && currentTable !== 'scheduled_tasks') {
-                html += `<td style="padding:8px;border:1px solid #ddd;"><button class="btn btn-danger btn-sm" onclick="deleteRecord('${currentTable}', '${recordId}')">删除</button></td>`;
+                html += '<td style="padding:8px;border:1px solid #ddd;"><button class="btn btn-danger btn-sm" onclick="deleteRecord(\'' + currentTable + '\', \'' + recordId + '\')">删除</button></td>';
             } else {
                 html += '<td style="padding:8px;border:1px solid #ddd;">-</td>';
             }
-            
+
             html += '</tr>';
         });
         html += '</tbody></table>';
-        
+
         document.getElementById('table-content').innerHTML = html;
     }
     
@@ -178,25 +248,29 @@
         }
     }
     
-    async function clearTable() {
-        if (!confirm(`确定要清空 ${currentTable} 表吗？此操作不可恢复！`)) return;
-        
-        try {
-            const data = await apiCall(`/api/database/table/${currentTable}`, 'DELETE');
-            if (data.success) {
-                showToast('清空成功', 'success');
-                showTable(currentTable);
-                refreshStats();
-            } else {
-                showToast(data.message || '清空失败', 'error');
-            }
-        } catch (e) {
-            showToast('清空失败: ' + e.message, 'error');
-        }
-    }
     
     function exportTable() {
-        showToast('导出功能开发中...', 'error');
+        if (!currentTable || !document.getElementById('table-content').innerHTML) {
+            showToast('请先选择一张表', 'error');
+            return;
+        }
+        const rows = document.querySelectorAll('#table-content table tr');
+        if (!rows.length) { showToast('没有可导出的数据', 'error'); return; }
+        let csv = [];
+        rows.forEach(function(row) {
+            var cells = row.querySelectorAll('th, td');
+            var line = Array.from(cells).map(function(c) {
+                var text = c.textContent.trim().replace(/"/g, '""');
+                return '"' + text + '"';
+            });
+            csv.push(line.join(','));
+        });
+        var blob = new Blob(['\ufeff' + csv.join('\n')], { type: 'text/csv;charset=utf-8' });
+        var link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = currentTable + '.csv';
+        link.click();
+        showToast('导出成功', 'success');
     }
     
     async function searchTable() {
@@ -226,6 +300,161 @@
         
         renderTable(data);
         document.getElementById('search-results').innerHTML += document.getElementById('table-content').outerHTML;
+    }
+
+    async function feishuSyncSSE(url, title) {
+        if (!confirm('\u786e\u5b9a\u8981\u6267\u884c' + title + '\u5417\uff1f')) return;
+        const btns = document.querySelectorAll('[onclick*="feishuSyncSSE"]');
+        btns.forEach(b => b.disabled = true);
+        const status = document.getElementById('feishu-sync-status');
+        const result = document.getElementById('feishu-sync-result');
+        const progressDiv = document.getElementById('feishu-sync-progress');
+        const barDiv = document.getElementById('feishu-sync-bar');
+        const logDiv = document.getElementById('feishu-sync-log');
+        status.textContent = '\u6b63\u5728' + title + '...';
+        status.style.color = '#3498db';
+        result.style.display = 'none';
+        progressDiv.style.display = 'block';
+        logDiv.style.display = 'block';
+        logDiv.innerHTML = '';
+        barDiv.style.width = '0%';
+        barDiv.style.background = '#3498db';
+
+        function addLog(text, level) {
+            const colors = {ok: '#27ae60', error: '#e74c3c', info: '#3498db'};
+            const div = document.createElement('div');
+            div.style.color = colors[level] || '#666';
+            div.style.padding = '3px 0';
+            div.textContent = text;
+            logDiv.appendChild(div);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        try {
+            addLog(title, 'info');
+            const resp = await fetch(url, {method: 'POST'});
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, {stream: true});
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    let data;
+                    try { data = JSON.parse(line.slice(6)); } catch { continue; }
+                    if (data.type === 'start') {
+                        addLog(data.message, 'info');
+                    } else if (data.type === 'progress') {
+                        status.textContent = data.message;
+                        addLog('-> ' + data.message, 'info');
+                    } else if (data.type === 'log') {
+                        addLog(data.message, data.level);
+                    } else if (data.type === 'stats') {
+                        const pct = (data.step / data.total) * 100;
+                        barDiv.style.width = pct + '%';
+                    } else if (data.type === 'complete') {
+                        barDiv.style.width = '100%';
+                        barDiv.style.background = data.success ? '#27ae60' : '#e74c3c';
+                        status.textContent = data.message;
+                        status.style.color = data.success ? '#27ae60' : '#e74c3c';
+                        addLog(data.message, data.success ? 'ok' : 'error');
+                        if (data.results) {
+                            let html = '';
+                            for (const [label, vals] of Object.entries(data.results)) {
+                                let parts = [];
+                                if (vals.created) parts.push('\u65b0\u589e ' + vals.created);
+                                if (vals.updated) parts.push('\u66f4\u65b0 ' + vals.updated);
+                                if (vals.skipped) parts.push('\u8df3\u8fc7 ' + vals.skipped);
+                                if (vals.failed) parts.push('\u5931\u8d25 ' + vals.failed);
+                                html += '<div>' + label + ': ' + (parts.join(', ') || '\u65e0\u53d8\u5316') + '</div>';
+                            }
+                            if (html) { result.innerHTML = html; result.style.display = 'block'; }
+                        }
+                        refreshStats();
+                    }
+                }
+            }
+        } catch (e) {
+            status.textContent = '\u540c\u6b65\u5931\u8d25: ' + e.message;
+            status.style.color = '#e74c3c';
+            barDiv.style.background = '#e74c3c';
+            addLog('\u8bf7\u6c42\u5931\u8d25: ' + e.message, 'error');
+        } finally {
+            btns.forEach(b => b.disabled = false);
+        }
+    }
+    async function validateCookies() {
+        const btn = document.getElementById('btn-validate-cookie');
+        const resultDiv = document.getElementById('cookie-validate-result');
+        const logDiv = document.getElementById('cookie-validate-log');
+        const barDiv = document.getElementById('cookie-validate-bar');
+        const statsDiv = document.getElementById('cookie-validate-stats');
+
+        btn.disabled = true;
+        btn.textContent = '验证中...';
+        resultDiv.style.display = 'block';
+        logDiv.innerHTML = '';
+        barDiv.style.width = '0%';
+        statsDiv.textContent = '';
+
+        function addLog(text, level) {
+            const colors = {ok: '#27ae60', error: '#e74c3c', info: '#3498db'};
+            const div = document.createElement('div');
+            div.style.color = colors[level] || '#666';
+            div.style.padding = '4px 0';
+            div.textContent = text;
+            logDiv.appendChild(div);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        try {
+            const resp = await fetch('/api/cookies/validate', {method: 'POST'});
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, {stream: true});
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    let data;
+                    try { data = JSON.parse(line.slice(6)); } catch { continue; }
+
+                    if (data.type === 'start') {
+                        addLog('开始验证 ' + (data.total || 0) + ' 个 Cookie...', 'info');
+                    } else if (data.type === 'progress') {
+                        addLog(data.message, 'info');
+                    } else if (data.type === 'log') {
+                        addLog(data.message, data.level);
+                    } else if (data.type === 'stats') {
+                        const pct = data.total > 0 ? ((data.valid + data.invalid) / data.total * 100) : 0;
+                        barDiv.style.width = pct + '%';
+                        statsDiv.textContent = '有效: ' + data.valid + ' / 失效: ' + data.invalid + ' / 共: ' + data.total;
+                    } else if (data.type === 'complete') {
+                        barDiv.style.width = '100%';
+                        barDiv.style.background = data.success ? '#27ae60' : '#e74c3c';
+                        statsDiv.textContent = data.message;
+                        addLog(data.message, data.success ? 'ok' : 'error');
+                        refreshStats();
+                        showTable('cookie_cache');
+                    }
+                }
+            }
+        } catch (e) {
+            addLog('验证请求失败: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔍 验证Cookie';
+        }
     }
 </script>
 {% endblock %}

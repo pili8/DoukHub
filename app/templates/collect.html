@@ -6,7 +6,9 @@
 </div>
 
 <!-- 采集方式选择 -->
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+<div class="collect-mode-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+<!-- 采集方式选择 -->
+<div class="collect-mode-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
     <div class="card" style="cursor:pointer;transition:all 0.2s;" onclick="showCollectMode('account')" id="mode-account-btn">
         <h3 style="margin-bottom:8px;">📥 整号采集</h3>
         <p style="font-size:13px;color:#666;">按账号批量采集所有作品，支持评级筛选</p>
@@ -23,7 +25,7 @@
     <form id="account-form" onsubmit="submitAccountCollect(event)">
         <div class="form-group">
             <label>等级筛选（只采集选中等级以上）</label>
-            <div style="display:flex;gap:16px;">
+            <div class="collect-rating-group" style="display:flex;gap:16px;">
                 <label><input type="checkbox" name="rating" value="4" checked> ⭐⭐⭐⭐</label>
                 <label><input type="checkbox" name="rating" value="3" checked> ⭐⭐⭐</label>
                 <label><input type="checkbox" name="rating" value="2"> ⭐⭐</label>
@@ -69,6 +71,7 @@
     </div>
     <div id="progress-stats" style="margin-top:16px;padding:12px;background:#f0f8ff;border-radius:6px;display:none;">
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;">
+        <div class="collect-stats-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;">
             <div>
                 <div style="font-size:24px;font-weight:bold;color:#e94560;" id="stat-accounts">0</div>
                 <div style="font-size:12px;color:#888;">账号数</div>
@@ -97,7 +100,7 @@
     </div>
     <div id="task-list">
         {% if tasks %}
-        <table>
+        <div class="table-scroll"><table>
             <thead>
                 <tr>
                     <th>任务名</th>
@@ -123,7 +126,7 @@
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% else %}
         <div style="color:#999;font-size:13px;">暂无定时任务</div>
         {% endif %}
@@ -187,6 +190,18 @@
 #mode-account-btn:hover, #mode-detail-btn:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+#task-modal > div {
+    max-width: 90vw;
+    width: 400px;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+@media (max-width: 768px) {
+    .collect-mode-grid { grid-template-columns: 1fr !important; }
+    .collect-rating-group { flex-wrap: wrap; gap: 8px !important; }
+    .collect-stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
 }
 </style>
 {% endblock %}

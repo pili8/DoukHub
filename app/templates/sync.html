@@ -65,6 +65,16 @@
     max-height: 0;
     opacity: 0;
 }
+.sync-stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; text-align: center; margin-top: 12px; }
+.sync-textarea { width: 100%; min-height: 120px; resize: vertical; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+.sync-log-box { max-height: 200px; overflow-y: auto; background: #1a1a2e; color: #ccc; border-radius: 6px; padding: 10px 14px; font-family: monospace; font-size: 12px; line-height: 1.6; }
+.sync-log-box .log-ok { color: #4caf50; }
+.sync-log-box .log-err { color: #f44336; }
+.sync-log-box .log-info { color: #64b5f6; }
+@media (max-width: 768px) {
+    .sync-stats-grid { grid-template-columns: repeat(2,1fr); }
+    .sync-textarea { font-size: 16px; }
+}
 </style>
 
 <div class="page-header">
@@ -74,7 +84,7 @@
 <!-- 1. 数据导入 -->
 <div class="card">
     <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
-        📥 数据导入 <span style="font-size:13px;color:#888;font-weight:normal;">→ 采集表</span>
+        📥 数据导入 <span style="font-size:13px;color:#888;font-weight:normal;">粘贴/预览</span>
         <span class="collapse-icon">▼</span>
     </h3>
     <div class="card-content">
@@ -84,7 +94,6 @@
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
         <button class="btn btn-secondary" onclick="parseImport()">🔍 解析预览</button>
-        <button class="btn btn-primary" onclick="writeToFeishu()" id="write-btn" style="display:none;">📤 写入采集表</button>
         <span id="import-status" style="font-size:13px;color:#888;"></span>
     </div>
     <!-- 导入进度 -->
@@ -124,32 +133,25 @@
 <!-- 3. 同步 -->
 <div class="card">
     <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
-        🔄 三步同步 <span style="font-size:13px;color:#888;font-weight:normal;">采集表 → 解析 → 账号表</span>
+        🔄 三步同步 <span style="font-size:13px;color:#888;font-weight:normal;">导入 → 解析 → 同步</span>
         <span class="collapse-icon">▼</span>
     </h3>
     <div class="card-content">
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-        <button class="btn btn-primary" onclick="startSyncV2()" id="sync-btn">① 快速同步</button>
-        <button class="btn btn-secondary" onclick="updateCollectionV2()" id="update-btn">② 更新采集表</button>
+        <button class="btn btn-primary" onclick="startSyncV2()" id="sync-btn">① 导入采集表</button>
+        <button class="btn btn-secondary" onclick="updateCollectionV2()" id="update-btn">② 解析账号标识</button>
         <button class="btn btn-secondary" onclick="syncAccountV2()" id="sync-account-btn">③ 同步账号表</button>
-        <button class="btn btn-success" onclick="syncAllV2()" id="sync-all-btn">⚡ 一键同步</button>
+        <button class="btn btn-success" onclick="syncAllV2()" id="sync-all-btn">⚡ 一键执行</button>
         <button class="btn btn-danger" onclick="stopSync()" id="stop-sync-btn" style="display:none;">⏹ 停止</button>
     </div>
     <div style="font-size:12px;color:#888;margin-bottom:12px;">
-        <div>① 快速同步：导入文本到采集表（解析分享码、等级、标签）</div>
-        <div>② 更新采集表：调用 API 获取 sec_user_id（解析短链接）</div>
-        <div>③ 同步账号表：调用 API 获取账号详细信息（昵称、粉丝数等）</div>
-        <div>⚡ 一键同步：依次执行三个步骤</div>
+        <div>① 导入采集表：解析粘贴的文本（分享码、等级、标签）写入本地，同时拉取飞书采集表</div>
+        <div>② 解析账号标识：调用 TTD API 解析短链接，获取 sec_user_id（账号唯一标识）</div>
+        <div>③ 同步账号表：调用 TTD API 获取账号信息（昵称、粉丝数、作品数），回写飞书账号表</div>
+        <div>⚡ 一键执行：依次执行三个步骤</div>
     </div>
 
-    <!-- 飞书同步 -->
-    <div style="border-top:1px solid #eee;padding-top:12px;margin-top:12px;">
-        <div style="font-size:13px;font-weight:600;margin-bottom:8px;">飞书同步</div>
-        <div style="display:flex;gap:8px;">
-            <button class="btn btn-secondary btn-sm" onclick="feishuSync('to')">📤 本地→飞书</button>
-            <button class="btn btn-secondary btn-sm" onclick="feishuSync('from')">📥 飞书→本地</button>
-            <button class="btn btn-secondary btn-sm" onclick="feishuSync('all')">🔄 双向同步</button>
-        </div>
+    
     </div>
     <!-- 同步进度 -->
     <div id="sync-progress" style="display:none;margin-top:16px;">
@@ -160,7 +162,7 @@
             <span id="sync-progress-text">连接飞书...</span>
             <span id="sync-progress-count"></span>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;margin-top:12px;">
+        <div class="sync-stats-grid">
             <div style="padding:8px;background:#f8f9fa;border-radius:6px;">
                 <div style="font-size:20px;font-weight:bold;color:#e94560;" id="stat-total">0</div>
                 <div style="font-size:11px;color:#888;">总记录</div>
@@ -171,7 +173,7 @@
             </div>
             <div style="padding:8px;background:#f8f9fa;border-radius:6px;">
                 <div style="font-size:20px;font-weight:bold;color:#f39c12;" id="stat-api">0</div>
-                <div style="font-size:11px;color:#888;">API调用</div>
+                <div style="font-size:11px;color:#888;">跳过</div>
             </div>
             <div style="padding:8px;background:#f8f9fa;border-radius:6px;">
                 <div style="font-size:20px;font-weight:bold;color:#e74c3c;" id="stat-failed">0</div>
@@ -322,8 +324,20 @@
         `).join('');
 
         document.getElementById('import-preview').style.display = 'block';
-        document.getElementById('write-btn').style.display = 'inline-block';
-        document.getElementById('import-status').textContent = `解析完成: ${parsedData.length} 条`;
+
+        const totalLines = text.split('\n').filter(l => l.trim()).length;
+        const parsed = parsedData.length;
+        const skipped = totalLines - parsed;
+        document.getElementById('import-status').innerHTML = 
+            `解析完成: <b>${parsed}</b> 条` +
+            (skipped > 0 ? ` <span style="color:#e74c3c;">（跳过 ${skipped} 行无效）</span>` : '') +
+            (parsed > 0 ? ` <span style="color:#27ae60;">→ 点击「① 导入采集表」写入数据库</span>` : '');
+
+        // 显示预览统计
+        const previewHeader = document.querySelector('#import-preview > div:first-child');
+        if (previewHeader) {
+            previewHeader.innerHTML = `解析结果预览（共 ${parsed} 条）`;
+        }
     }
 
     function parseSimpleFormat(text) {
@@ -419,57 +433,6 @@
         }
     }
 
-    async function writeToFeishu() {
-        if (parsedData.length === 0) return;
-
-        const btn = document.getElementById('write-btn');
-        btn.disabled = true;
-        btn.textContent = '写入中...';
-
-        const progressDiv = document.getElementById('import-progress');
-        const progressBar = document.getElementById('import-progress-bar');
-        const progressText = document.getElementById('import-progress-text');
-        const progressCount = document.getElementById('import-progress-count');
-        const logBox = document.getElementById('import-log');
-
-        progressDiv.style.display = 'block';
-        logBox.style.display = 'block';
-        logBox.innerHTML = '';
-        progressBar.style.width = '0%';
-
-        const total = parsedData.length;
-        progressText.textContent = `批量写入 ${total} 条记录...`;
-        progressCount.textContent = `1 批次 (≤500条/批)`;
-        addLog(logBox, `<div class="log-info">→ 正在批量写入 ${total} 条记录...</div>`);
-        progressBar.style.width = '30%';
-
-        try {
-            // 一次性发送所有数据，后端分批处理
-            const data = await apiCall('/api/import/collection', 'POST', { items: parsedData });
-            
-            progressBar.style.width = '100%';
-            
-            if (data.success) {
-                addLog(logBox, `<div class="log-ok">✅ 写入完成: ${data.count} 条成功</div>`);
-                progressText.textContent = `完成: 成功 ${data.count} 条`;
-                showToast(`写入完成: ${data.count} 条`, 'success');
-            } else {
-                addLog(logBox, `<div class="log-err">❌ ${data.message}</div>`);
-                if (data.errors) {
-                    data.errors.forEach(e => addLog(logBox, `<div class="log-err">  → ${e}</div>`));
-                }
-                progressText.textContent = data.message;
-                showToast(data.message, 'error');
-            }
-        } catch (e) {
-            addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
-            progressText.textContent = `请求失败`;
-            showToast('写入请求失败', 'error');
-        } finally {
-            btn.disabled = false;
-            btn.textContent = '📤 写入采集表';
-        }
-    }
 
     // ========== 同步 ==========
     let currentEventSource = null;
@@ -516,7 +479,7 @@
                 progressBar.style.background = '#f44336';
                 showToast(error.message, 'error');
                 btn.disabled = false;
-                btn.textContent = '① 快速同步';
+                btn.textContent = '① 导入采集表';
                 stopBtn.style.display = 'none';
                 return;
             }
@@ -567,7 +530,7 @@
             }
         } finally {
             btn.disabled = false;
-            btn.textContent = '① 快速同步';
+            btn.textContent = '① 导入采集表';
             stopBtn.style.display = 'none';
             syncAbortController = null;
         }
@@ -617,8 +580,10 @@
                 if (data.success) {
                     addLog(logBox, `<div class="log-ok">✅ ${data.message}</div>`);
                     progressText.textContent = `同步完成: ${data.message}`;
-                    showToast('同步完成', 'success');
-                    setTimeout(() => location.reload(), 2000);
+                    if (!window._syncAllMode) {
+                        showToast('同步完成', 'success');
+                        setTimeout(() => location.reload(), 2000);
+                    }
                 } else {
                     addLog(logBox, `<div class="log-err">❌ ${data.message}</div>`);
                     progressText.textContent = `失败: ${data.message}`;
@@ -629,7 +594,7 @@
         }
     }
 
-    // ========== 获取账号信息 ==========
+    // ========== 步骤2：解析账号标识 ==========
     let fetchInfoAbortController = null;
 
     async function fetchAccountInfo() {
@@ -654,7 +619,7 @@
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
 
-        progressText.textContent = '正在获取账号信息...';
+        progressText.textContent = '步骤2：解析账号标识';
         addLog(logBox, '<div class="log-info">→ 开始获取账号详细信息...</div>');
 
         // 创建 AbortController
@@ -674,7 +639,7 @@
                 progressBar.style.background = '#f44336';
                 showToast(error.message, 'error');
                 btn.disabled = false;
-                btn.textContent = '② 获取账号信息';
+                btn.textContent = '② 解析账号标识';
                 stopBtn.style.display = 'none';
                 return;
             }
@@ -722,7 +687,7 @@
             }
         } finally {
             btn.disabled = false;
-            btn.textContent = '② 获取账号信息';
+            btn.textContent = '② 解析账号标识';
             stopBtn.style.display = 'none';
             fetchInfoAbortController = null;
         }
@@ -765,7 +730,7 @@
         if (!text.trim()) {
             addLog(logBox, '<div class="log-err">❌ 请先输入要导入的文本</div>');
             btn.disabled = false;
-            btn.textContent = '① 快速同步';
+            btn.textContent = '① 导入采集表';
             stopBtn.style.display = 'none';
             return;
         }
@@ -787,8 +752,12 @@
                 document.getElementById('stat-success').textContent = data.success || 0;
                 document.getElementById('stat-failed').textContent = data.failed || 0;
                 document.getElementById('stat-total').textContent = data.total || 0;
+                if (data.skipped) document.getElementById('stat-api').textContent = data.skipped;
 
                 addLog(logBox, `<div class="log-ok">✅ ${data.message}</div>`);
+                if (data.skipped > 0) {
+                    addLog(logBox, `<div class="log-info">→ 跳过 ${data.skipped} 条无效记录</div>`);
+                }
                 progressText.textContent = data.message;
                 showToast('导入完成', 'success');
             } else {
@@ -809,7 +778,7 @@
             }
         } finally {
             btn.disabled = false;
-            btn.textContent = '① 快速同步';
+            btn.textContent = '① 导入采集表';
             stopBtn.style.display = 'none';
             syncV2AbortController = null;
         }
@@ -836,7 +805,7 @@
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
 
-        progressText.textContent = '步骤2：更新采集表';
+        progressText.textContent = '步骤2：解析账号标识';
         addLog(logBox, '<div class="log-info">→ 开始获取 sec_user_id...</div>');
 
         syncV2AbortController = new AbortController();
@@ -854,7 +823,7 @@
                 progressBar.style.background = '#f44336';
                 showToast(error.message, 'error');
                 btn.disabled = false;
-                btn.textContent = '② 更新采集表';
+                btn.textContent = '② 解析账号标识';
                 stopBtn.style.display = 'none';
                 return;
             }
@@ -895,7 +864,7 @@
             }
         } finally {
             btn.disabled = false;
-            btn.textContent = '② 更新采集表';
+            btn.textContent = '② 解析账号标识';
             stopBtn.style.display = 'none';
             syncV2AbortController = null;
         }
@@ -1003,67 +972,77 @@
         logBox.style.display = 'block';
         logBox.innerHTML = '';
         progressBar.style.width = '0%';
+        progressBar.style.background = '#3498db';
         document.getElementById('stat-total').textContent = '...';
         document.getElementById('stat-success').textContent = '0';
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
 
         progressText.textContent = '⚡ 一键同步';
-        addLog(logBox, '<div class="log-info">→ 开始一键同步...</div>');
+        addLog(logBox, '<div class="log-info">→ 开始一键同步（分步执行）...</div>');
 
         const text = document.getElementById('import-text').value;
-
         syncV2AbortController = new AbortController();
 
-        try {
-            const response = await fetch('/api/sync/v2/all', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text }),
-                signal: syncV2AbortController.signal
-            });
+        async function runStep(url, body, label) {
+            addLog(logBox, `<div class="log-info">━━━ ${label} ━━━</div>`);
+            const opts = { method: 'POST', signal: syncV2AbortController.signal };
+            if (body !== null) {
+                opts.headers = { 'Content-Type': 'application/json' };
+                opts.body = JSON.stringify(body);
+            }
+            const response = await fetch(url, opts);
+            if (!response.ok) {
+                let msg = `HTTP ${response.status}`;
+                try { msg = (await response.json()).message || msg; } catch {}
+                throw new Error(msg);
+            }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try { handleSyncEvent(JSON.parse(line.slice(6))); } catch {}
+                    }
+                }
+            }
+        }
 
-            const data = await response.json();
+        window._syncAllMode = true;
+        try {
+            await runStep('/api/sync/v2/import', { text }, '步骤1：导入采集表');
+            await runStep('/api/sync/v2/update-collection', null, '步骤2：解析短链接');
+            await runStep('/api/sync/v2/sync-account', null, '步骤3：获取详情 + 回写飞书');
 
             progressBar.style.width = '100%';
-
-            if (data.success) {
-                addLog(logBox, `<div class="log-ok">✅ ${data.message}</div>`);
-                
-                if (data.step1) {
-                    addLog(logBox, `<div class="log-info">→ 步骤1: 成功 ${data.step1.success} 条，失败 ${data.step1.failed} 条</div>`);
-                }
-                if (data.step2) {
-                    addLog(logBox, `<div class="log-info">→ 步骤2: 成功 ${data.step2.success} 条，失败 ${data.step2.failed} 条</div>`);
-                }
-                if (data.step3) {
-                    addLog(logBox, `<div class="log-info">→ 步骤3: 成功 ${data.step3.success} 条，失败 ${data.step3.failed} 条</div>`);
-                }
-
-                progressText.textContent = data.message;
-                showToast('一键同步完成', 'success');
-                setTimeout(() => location.reload(), 2000);
-            } else {
-                addLog(logBox, `<div class="log-err">❌ ${data.message}</div>`);
-                progressText.textContent = `失败: ${data.message}`;
-                progressBar.style.background = '#f44336';
-                showToast(data.message, 'error');
-            }
+            progressBar.style.background = '#27ae60';
+            progressText.textContent = '✅ 一键同步完成';
+            addLog(logBox, '<div class="log-ok">✅ 全部步骤执行完成</div>');
+            showToast('一键同步完成', 'success');
+            setTimeout(() => location.reload(), 2000);
         } catch (e) {
             if (e.name === 'AbortError') {
-                addLog(logBox, `<div class="log-info">→ 同步已停止</div>`);
-                progressText.textContent = `同步已停止`;
+                addLog(logBox, '<div class="log-info">→ 同步已停止</div>');
+                progressText.textContent = '同步已停止';
                 showToast('同步已停止', 'error');
             } else {
                 addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
-                progressText.textContent = `请求失败`;
-                showToast('同步请求失败', 'error');
+                progressText.textContent = `失败: ${e.message}`;
+                progressBar.style.background = '#f44336';
+                showToast('同步请求失败: ' + e.message, 'error');
             }
         } finally {
             btn.disabled = false;
-            btn.textContent = '⚡ 一键同步';
+            btn.textContent = '⚡ 一键执行';
             stopBtn.style.display = 'none';
             syncV2AbortController = null;
+            window._syncAllMode = false;
         }
     }
 
@@ -1080,26 +1059,26 @@
     }
 
     // ========== 飞书同步 ==========
-    async function feishuSync(direction) {
-        showToast('正在同步...');
+    async function syncFeishu() {
+        const btn = document.getElementById('feishu-sync-btn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '同步中...';
+        }
         try {
-            let url;
-            if (direction === 'to') {
-                url = '/api/feishu/sync/to-feishu';
-            } else if (direction === 'from') {
-                url = '/api/feishu/sync/from-feishu';
-            } else {
-                url = '/api/feishu/sync';
-            }
-
-            const data = await apiCall(url, 'POST');
+            const data = await apiCall('/api/feishu/sync', 'POST');
             if (data.success) {
-                showToast(data.message, 'success');
+                showToast(data.message || '飞书同步完成', 'success');
             } else {
-                showToast(data.message || '同步失败', 'error');
+                showToast(data.message || '飞书同步失败', 'error');
             }
         } catch (e) {
-            showToast('同步请求失败: ' + e.message, 'error');
+            showToast('飞书同步请求失败: ' + e.message, 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '🔄 飞书同步';
+            }
         }
     }
 </script>
