@@ -206,7 +206,7 @@ class Syncer:
 
         # 获取所有未获取 sec_user_id 的记录
         collections = self.db.get_all_collections()
-        to_process = [c for c in collections if not c.get("账号标识")]
+        to_process = [c for c in collections if not c.get("sec_user_id")]
 
         result.total = len(to_process)
 
@@ -246,7 +246,7 @@ class Syncer:
                 else:
                     # 更新 sec_user_id
                     self.db.update_collection(collection["记录ID"], {
-                        "账号标识": sec_user_id,
+                        "sec_user_id": sec_user_id,
                         "已同步": True,
                         "同步错误": None,
                     })
@@ -276,13 +276,13 @@ class Syncer:
 
         # 获取所有已同步但账号表未更新的记录
         collections = self.db.get_all_collections()
-        to_process = [c for c in collections if c.get("已同步") and c.get("账号标识")]
+        to_process = [c for c in collections if c.get("已同步") and c.get("sec_user_id")]
 
         result.total = len(to_process)
 
         for collection in to_process:
             try:
-                sec_user_id = collection["账号标识"]
+                sec_user_id = collection["sec_user_id"]
                 platform = collection.get("平台") or "\u6296\u97f3"
 
                 # 检查账号表是否已存在
@@ -299,7 +299,7 @@ class Syncer:
                     self.db.update_account(existing_account["记录ID"], {
                         "等级": new_level,
                         "标签": json.dumps(merged_tags),
-                        "已更新": True,
+                        "已获取信息": True,
                     })
                 else:
                     # 调用 API 获取账号信息
@@ -318,7 +318,7 @@ class Syncer:
                         "账号名称": info.get("nickname", ""),
                         "平台": platform,
                         "链接": f"https://www.douyin.com/user/{sec_user_id}",
-                        "账号标识": sec_user_id,
+                        "sec_user_id": sec_user_id,
                         "等级": collection.get("等级"),
                         "标签": collection.get("标签"),
                         "昵称": info.get("nickname", ""),
@@ -326,14 +326,14 @@ class Syncer:
                         "作品数": info.get("aweme_count", 0),
                         "签名": info.get("signature", ""),
                         "头像": info.get("avatar", ""),
-                        "已更新": True,
+                        "已获取信息": True,
                     })
 
                 result.success += 1
 
             except Exception as e:
                 result.failed += 1
-                result.errors.append(f"{collection.get('账号标识')}: {str(e)}")
+                result.errors.append(f"{collection.get('sec_user_id')}: {str(e)}")
 
         # 自动回写到飞书账号表
         if self.feishu_syncer and self.feishu_syncer.account_table_id:

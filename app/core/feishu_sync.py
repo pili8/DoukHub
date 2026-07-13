@@ -104,48 +104,46 @@ class FeishuSyncer:
         return fields
 
     def _build_account_fields(self, record: dict) -> dict:
+        """本地账号 → 飞书字段。字段名现已与飞书对齐，直接传递。"""
         fields = {
-            "\u8d26\u53f7\u540d\u79f0": record.get("\u8d26\u53f7\u540d\u79f0", ""),
-            "\u5e73\u53f0": record.get("\u5e73\u53f0", ""),
-            "sec_user_id": record.get("\u8d26\u53f7\u6807\u8bc6", ""),
-            "\u7b49\u7ea7": record.get("\u7b49\u7ea7", 3),
-            "\u5df2\u83b7\u53d6\u4fe1\u606f": bool(record.get("\u5df2\u66f4\u65b0", False)),
+            "账号名称": record.get("账号名称", ""),
+            "平台": record.get("平台", ""),
+            "sec_user_id": record.get("sec_user_id", ""),
+            "等级": record.get("等级", 3),
+            "已获取信息": bool(record.get("已获取信息", False)),
         }
-        if record.get("\u94fe\u63a5"):
-            fields["\u94fe\u63a5"] = record["\u94fe\u63a5"]
-        tags = record.get("\u6807\u7b7e")
+        if record.get("链接"):
+            fields["链接"] = record["链接"]
+        tags = record.get("标签")
         if tags:
             try:
                 if isinstance(tags, str):
                     tags = json.loads(tags)
-                fields["\u6807\u7b7e"] = tags
+                fields["标签"] = tags
             except Exception:
                 pass
-        if record.get("\u6635\u79f0"):
-            fields["\u6635\u79f0"] = record["\u6635\u79f0"]
-        if record.get("\u7c89\u4e1d\u6570") is not None:
-            fields["\u7c89\u4e1d\u6570"] = record["\u7c89\u4e1d\u6570"]
-        if record.get("\u4f5c\u54c1\u6570") is not None:
-            fields["\u4f5c\u54c1\u6570"] = record["\u4f5c\u54c1\u6570"]
-        if record.get("\u7b7e\u540d"):
-            fields["\u7b7e\u540d"] = record["\u7b7e\u540d"]
-        if record.get("\u5934\u50cf"):
-            fields["\u5934\u50cf"] = record["\u5934\u50cf"]
-        if record.get("\u66f4\u65b0\u9519\u8bef"):
-            fields["\u5907\u6ce8"] = record["\u66f4\u65b0\u9519\u8bef"]
-        # 同步"启用"字段到飞书
-        enabled = record.get("\u542f\u7528")
+        if record.get("昵称"):
+            fields["昵称"] = record["昵称"]
+        if record.get("粉丝数") is not None:
+            fields["粉丝数"] = record["粉丝数"]
+        if record.get("作品数") is not None:
+            fields["作品数"] = record["作品数"]
+        if record.get("签名"):
+            fields["签名"] = record["签名"]
+        if record.get("头像"):
+            fields["头像"] = record["头像"]
+        # 备注（本地"备注"对应飞书"备注"）
+        if record.get("备注"):
+            fields["备注"] = record["备注"]
+        # 启用
+        enabled = record.get("启用")
         if enabled is not None:
-            fields["\u542f\u7528"] = bool(enabled)
-        # 同步"采集类型"到飞书（发布/喜欢/收藏）
-        ct = record.get("\u91c7\u96c6\u7c7b\u578b")
+            fields["启用"] = bool(enabled)
+        # 采集类型
+        ct = record.get("采集类型")
         if ct:
-            fields["\u91c7\u96c6\u7c7b\u578b"] = ct
-        # 同步"代理"到飞书
-        proxy = record.get("\u4ee3\u7406")
-        if proxy:
-            fields["\u4ee3\u7406"] = proxy
-        fields["\u540c\u6b65\u65f6\u95f4"] = int(_time.time() * 1000)
+            fields["采集类型"] = ct
+        fields["同步时间"] = int(_time.time() * 1000)
         return fields
 
     def _build_cookie_fields(self, cookie: dict) -> dict:
@@ -200,34 +198,38 @@ class FeishuSyncer:
         return data
 
     def _feishu_record_to_local_account(self, record):
+        """飞书记录 → 本地账号。字段名现已与飞书对齐，直接读取。"""
         fields = record.get("fields", {})
         sec = self._parse_text_value(fields.get("sec_user_id", ""))
         if not sec.strip():
             return None
         data = {
-            "\u8d26\u53f7\u6807\u8bc6": sec,
-            "\u8d26\u53f7\u540d\u79f0": self._parse_text_value(fields.get("\u8d26\u53f7\u540d\u79f0", "")),
-            "\u5e73\u53f0": self._parse_text_value(fields.get("\u5e73\u53f0", "")),
-            "\u7b49\u7ea7": self._safe_int(fields.get("\u7b49\u7ea7", 3), 3),
+            "sec_user_id": sec,
+            "账号名称": self._parse_text_value(fields.get("账号名称", "")),
+            "平台": self._parse_text_value(fields.get("平台", "")),
+            "等级": self._safe_int(fields.get("等级", 3), 3),
         }
-        tags = fields.get("\u6807\u7b7e")
+        tags = fields.get("标签")
         if tags:
-            data["\u6807\u7b7e"] = json.dumps(tags if isinstance(tags, list) else [str(tags)])
-        for k, fk in [("\u6635\u79f0", "\u6635\u79f0"), ("\u7c89\u4e1d\u6570", "\u7c89\u4e1d\u6570"), ("\u4f5c\u54c1\u6570", "\u4f5c\u54c1\u6570"), ("\u7b7e\u540d", "\u7b7e\u540d")]:
+            data["标签"] = json.dumps(tags if isinstance(tags, list) else [str(tags)])
+        for k, fk in [("昵称", "昵称"), ("粉丝数", "粉丝数"), ("作品数", "作品数"), ("签名", "签名"), ("头像", "头像"), ("链接", "链接")]:
             v = fields.get(fk)
             if v is not None:
-                data[k] = self._safe_int(v) if k in ("\u7c89\u4e1d\u6570", "\u4f5c\u54c1\u6570") else self._parse_text_value(v)
-        # 从飞书读取"启用"字段（复选框）
-        if "\u542f\u7528" in fields:
-            data["\u542f\u7528"] = bool(fields.get("\u542f\u7528"))
-        # 从飞书读取"采集类型"
-        ct = self._parse_text_value(fields.get("\u91c7\u96c6\u7c7b\u578b", ""))
+                data[k] = self._safe_int(v) if k in ("粉丝数", "作品数") else self._parse_text_value(v)
+        # 备注
+        remark = self._parse_text_value(fields.get("备注", ""))
+        if remark:
+            data["备注"] = remark
+        # 启用
+        if "启用" in fields:
+            data["启用"] = bool(fields.get("启用"))
+        # 采集类型
+        ct = self._parse_text_value(fields.get("采集类型", ""))
         if ct:
-            data["\u91c7\u96c6\u7c7b\u578b"] = ct
-        # 从飞书读取"代理"
-        proxy = self._parse_text_value(fields.get("\u4ee3\u7406", ""))
-        if proxy:
-            data["\u4ee3\u7406"] = proxy
+            data["采集类型"] = ct
+        # 已获取信息
+        if "已获取信息" in fields:
+            data["已获取信息"] = bool(fields.get("已获取信息"))
         return data
 
     def _feishu_record_to_local_cookie(self, record):

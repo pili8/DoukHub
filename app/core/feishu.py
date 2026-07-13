@@ -237,7 +237,6 @@ class FeishuClient:
                 ("标签", 4, None),
                 ("启用", 7, None),
                 ("采集类型", 3, {"options": [{"name": "发布"}, {"name": "喜欢"}, {"name": "收藏"}]}),
-                ("代理", 1, None),
                 ("备注", 1, None),
                 ("sec_user_id", 1, None),
                 ("昵称", 1, None),

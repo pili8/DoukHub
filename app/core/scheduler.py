@@ -122,7 +122,7 @@ class TaskScheduler:
             accounts = [
                 a for a in accounts
                 if a.get("等级", 0) in rating_filter
-                and a.get("账号标识")
+                and a.get("sec_user_id")
                 and a.get("启用", 1)  # 默认启用（兼容旧数据）
             ]
 
@@ -145,7 +145,7 @@ class TaskScheduler:
                         Account(
                             name=account.get("账号名称", ""),
                             platform=account.get("平台", "抖音"),
-                            sec_user_id=account.get("账号标识", ""),
+                            sec_user_id=account.get("sec_user_id", ""),
                             collection_type=account.get("采集类型", "发布"),
                         ),
                         cookie=cookie,
@@ -155,7 +155,7 @@ class TaskScheduler:
                     self.db.add_history({
                         "账号名称": account.get("账号名称", ""),
                         "平台": account.get("平台", ""),
-                        "账号标识": account.get("账号标识", ""),
+                        "sec_user_id": account.get("sec_user_id", ""),
                         "采集类型": account.get("采集类型", "发布"),
                         "等级": account.get("等级"),
                         "状态": result.status,

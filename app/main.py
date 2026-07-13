@@ -779,7 +779,7 @@ async def api_sync_v2_update_collection():
             
             # 获取所有未获取 sec_user_id 的记录
             collections = s.db.get_all_collections()
-            to_process = [c for c in collections if not c.get("账号标识") and str(c.get("分享码", "")).strip()]
+            to_process = [c for c in collections if not c.get("sec_user_id") and str(c.get("分享码", "")).strip()]
             
             yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': 0, 'failed': 0})}\n\n"
             yield f"data: {json.dumps({'type': 'progress', 'message': f'需要处理 {len(to_process)} 条记录'})}\n\n"
@@ -838,7 +838,7 @@ async def api_sync_v2_update_collection():
                     else:
                         # 更新 sec_user_id
                         s.db.update_collection(collection["记录ID"], {
-                            "账号标识": sec_user_id,
+                            "sec_user_id": sec_user_id,
                             "已同步": True,
                             "同步错误": None,
                         })
@@ -883,7 +883,7 @@ async def api_sync_v2_sync_account():
             
             # 获取所有已同步但账号表未更新的记录
             collections = s.db.get_all_collections()
-            to_process = [c for c in collections if c.get("已同步") and c.get("账号标识")]
+            to_process = [c for c in collections if c.get("已同步") and c.get("sec_user_id")]
             
             yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': 0, 'failed': 0})}\n\n"
             yield f"data: {json.dumps({'type': 'progress', 'message': f'需要处理 {len(to_process)} 条记录'})}\n\n"
@@ -903,10 +903,10 @@ async def api_sync_v2_sync_account():
             errors = []
             
             for i, collection in enumerate(to_process):
-                yield f"data: {json.dumps({'type': 'progress', 'message': f'处理 [{i+1}/{len(to_process)}]: {collection["账号标识"]}'})}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'message': f'处理 [{i+1}/{len(to_process)}]: {collection["sec_user_id"]}'})}\n\n"
                 
                 try:
-                    sec_user_id = collection["账号标识"]
+                    sec_user_id = collection["sec_user_id"]
                     platform = collection.get("平台") or "抖音"
                     
                     # 检查账号表是否已存在
@@ -923,7 +923,7 @@ async def api_sync_v2_sync_account():
                         s.db.update_account(existing_account["记录ID"], {
                             "等级": new_level,
                             "标签": json.dumps(merged_tags),
-                            "已更新": True,
+                            "已获取信息": True,
                         })
                         success += 1
                         yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ 更新账号: {existing_account.get('账号名称')}'})}\n\n"
@@ -944,7 +944,7 @@ async def api_sync_v2_sync_account():
                             "账号名称": info.get("nickname", ""),
                             "平台": platform,
                             "链接": f"https://www.douyin.com/user/{sec_user_id}",
-                            "账号标识": sec_user_id,
+                            "sec_user_id": sec_user_id,
                             "等级": collection.get("等级"),
                             "标签": collection.get("标签"),
                             "昵称": info.get("nickname", ""),
@@ -952,7 +952,7 @@ async def api_sync_v2_sync_account():
                             "作品数": info.get("aweme_count", 0),
                             "签名": info.get("signature", ""),
                             "头像": info.get("avatar", ""),
-                            "已更新": True,
+                            "已获取信息": True,
                         })
                         success += 1
                         yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ 新增账号: {info.get('nickname')}'})}\n\n"
@@ -962,8 +962,8 @@ async def api_sync_v2_sync_account():
                     
                 except Exception as e:
                     failed += 1
-                    errors.append(f"{collection.get('账号标识')}: {str(e)}")
-                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {collection.get('账号标识')}: {e}'})}\n\n"
+                    errors.append(f"{collection.get('sec_user_id')}: {str(e)}")
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {collection.get('sec_user_id')}: {e}'})}\n\n"
 
             # 自动回写飞书账号表
             if s.feishu_syncer and s.feishu_syncer.account_table_id:
@@ -1675,7 +1675,7 @@ async def api_collect_v2_account(request: Request):
         names = [n.strip() for n in account_names.split(",") if n.strip()]
         accounts = [a for a in accounts if a.get("账号名称") in names]
     else:
-        accounts = [a for a in accounts if a.get("等级", 0) >= rating_min and a.get("账号标识")]
+        accounts = [a for a in accounts if a.get("等级", 0) >= rating_min and a.get("sec_user_id")]
 
     if not accounts:
         return JSONResponse({"success": False, "message": "没有符合条件的账号"}, status_code=400)
@@ -1698,8 +1698,8 @@ async def api_collect_v2_account(request: Request):
             failed = 0
 
             for i, account in enumerate(accounts):
-                account_name = account.get("账号名称") or account.get("昵称") or account.get("账号标识", "")
-                sec_user_id = account.get("账号标识", "")
+                account_name = account.get("账号名称") or account.get("昵称") or account.get("sec_user_id", "")
+                sec_user_id = account.get("sec_user_id", "")
                 platform = account.get("平台", "抖音")
                 collection_type = account.get("采集类型", "发布")
 
@@ -1731,7 +1731,7 @@ async def api_collect_v2_account(request: Request):
                         db.add_history({
                             "账号名称": account_name,
                             "平台": platform,
-                            "账号标识": sec_user_id,
+                            "sec_user_id": sec_user_id,
                             "采集类型": collection_type,
                             "等级": account.get("等级"),
                             "状态": "成功",
@@ -1746,7 +1746,7 @@ async def api_collect_v2_account(request: Request):
                         db.add_history({
                             "账号名称": account_name,
                             "平台": platform,
-                            "账号标识": sec_user_id,
+                            "sec_user_id": sec_user_id,
                             "采集类型": collection_type,
                             "等级": account.get("等级"),
                             "状态": "失败",

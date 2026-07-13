@@ -27,7 +27,7 @@ class Database:
                     平台 TEXT,
                     等级 INTEGER,
                     标签 TEXT,
-                    账号标识 TEXT,
+                    sec_user_id TEXT,
                     已同步 BOOLEAN DEFAULT 0,
                     同步错误 TEXT,
                     备注 TEXT,
@@ -35,20 +35,18 @@ class Database:
                     粉丝数 INTEGER,
                     作品数 INTEGER,
                     创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    更新时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+                    同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_collection_share ON collection_cache(分享码)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_collection_sec_user_id ON collection_cache(账号标识)")
 
-            # 表2：账号表缓存
+            # 表2：账号表缓存（字段名对齐飞书）
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS account_cache (
                     记录ID TEXT PRIMARY KEY,
                     账号名称 TEXT,
                     平台 TEXT,
                     链接 TEXT,
-                    账号标识 TEXT UNIQUE NOT NULL,
+                    sec_user_id TEXT UNIQUE NOT NULL,
                     等级 INTEGER,
                     标签 TEXT,
                     昵称 TEXT,
@@ -56,25 +54,14 @@ class Database:
                     作品数 INTEGER,
                     签名 TEXT,
                     头像 TEXT,
-                    已更新 BOOLEAN DEFAULT 0,
-                    更新错误 TEXT,
+                    已获取信息 BOOLEAN DEFAULT 0,
+                    备注 TEXT,
                     启用 BOOLEAN DEFAULT 1,
                     采集类型 TEXT DEFAULT '发布',
-                    代理 TEXT,
                     创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    更新时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+                    同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_account_sec_user_id ON account_cache(账号标识)")
-            # 兼容旧库：自动补齐缺失字段
-            existing_cols = [r[1] for r in conn.execute("PRAGMA table_info(account_cache)").fetchall()]
-            for col, ddl in [
-                ("启用", "BOOLEAN DEFAULT 1"),
-                ("采集类型", "TEXT DEFAULT '发布'"),
-                ("代理", "TEXT"),
-            ]:
-                if col not in existing_cols:
-                    conn.execute(f"ALTER TABLE account_cache ADD COLUMN {col} {ddl}")
 
             # 表3：Cookie表缓存
             conn.execute("""
@@ -87,17 +74,17 @@ class Database:
                     备注 TEXT,
                     验证时间 DATETIME,
                     创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    更新时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+                    同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
-            # 表4：采集历史
+            # 表4：采集历史（这表的字段不进飞书，但 sec_user_id 与飞书一致）
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS collection_history (
                     ID INTEGER PRIMARY KEY AUTOINCREMENT,
                     账号名称 TEXT,
                     平台 TEXT,
-                    账号标识 TEXT,
+                    sec_user_id TEXT,
                     采集类型 TEXT,
                     等级 INTEGER,
                     标签 TEXT,
@@ -110,8 +97,6 @@ class Database:
                     创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_history_sec_user_id ON collection_history(账号标识)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_history_created_at ON collection_history(创建时间)")
 
             # 表5：定时任务
             conn.execute("""
@@ -124,9 +109,70 @@ class Database:
                     上次运行 DATETIME,
                     下次运行 DATETIME,
                     创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    更新时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+                    同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # 兼容旧库：自动迁移字段名（账号标识→sec_user_id 等）
+            # 必须在 CREATE INDEX 之前执行，因为索引依赖字段名
+            self._migrate_legacy_columns(conn)
+
+            # 创建索引（依赖字段名，必须在迁移之后）
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_collection_share ON collection_cache(分享码)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_collection_sec_user_id ON collection_cache(sec_user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_account_sec_user_id ON account_cache(sec_user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_history_sec_user_id ON collection_history(sec_user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_history_created_at ON collection_history(创建时间)")
+
+    def _migrate_legacy_columns(self, conn):
+        """迁移旧库字段名，使其对齐飞书。
+        - account_cache: 账号标识→sec_user_id, 更新错误→备注, 更新时间→同步时间, 已更新→已获取信息
+        - collection_cache: 账号标识→sec_user_id, 更新时间→同步时间
+        - collection_history: 账号标识→sec_user_id
+        - 其他表: 更新时间→同步时间
+        - 删除 account_cache.代理（如存在）
+        """
+        rename_map = {
+            "collection_cache": [
+                ("账号标识", "sec_user_id"),
+                ("更新时间", "同步时间"),
+            ],
+            "account_cache": [
+                ("账号标识", "sec_user_id"),
+                ("更新错误", "备注"),
+                ("更新时间", "同步时间"),
+                ("已更新", "已获取信息"),
+            ],
+            "collection_history": [
+                ("账号标识", "sec_user_id"),
+            ],
+            "cookie_cache": [
+                ("更新时间", "同步时间"),
+            ],
+            "scheduled_tasks": [
+                ("更新时间", "同步时间"),
+            ],
+        }
+        # 新增字段（旧库可能缺）
+        add_columns = {
+            "account_cache": [
+                ("启用", "BOOLEAN DEFAULT 1"),
+                ("采集类型", "TEXT DEFAULT '发布'"),
+            ],
+        }
+        for table, renames in rename_map.items():
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            for old, new in renames:
+                if old in cols and new not in cols:
+                    conn.execute(f'ALTER TABLE {table} RENAME COLUMN "{old}" TO "{new}"')
+                elif old in cols and new in cols:
+                    # 两个都存在（异常情况），保留新字段
+                    pass
+        for table, additions in add_columns.items():
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            for col, ddl in additions:
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
     def _connect(self) -> sqlite3.Connection:
         """创建数据库连接"""
@@ -155,9 +201,9 @@ class Database:
             return dict(row) if row else None
 
     def get_collection_by_sec_user_id(self, sec_user_id: str) -> Optional[dict]:
-        """根据账号标识获取记录"""
+        """根据 sec_user_id 获取记录"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM collection_cache WHERE 账号标识 = ?", (sec_user_id,)).fetchone()
+            row = conn.execute("SELECT * FROM collection_cache WHERE sec_user_id = ?", (sec_user_id,)).fetchone()
             return dict(row) if row else None
 
     def insert_collection(self, data: dict) -> bool:
@@ -172,8 +218,8 @@ class Database:
     def update_collection(self, record_id: str, data: dict) -> bool:
         """更新采集表记录"""
         with self._connect() as conn:
-            if "更新时间" not in data:
-                data["更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if "同步时间" not in data:
+                data["同步时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE collection_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
             conn.commit()
@@ -202,9 +248,9 @@ class Database:
             return [dict(row) for row in rows]
 
     def get_account_by_sec_user_id(self, sec_user_id: str) -> Optional[dict]:
-        """根据账号标识获取记录"""
+        """根据 sec_user_id 获取记录"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM account_cache WHERE 账号标识 = ?", (sec_user_id,)).fetchone()
+            row = conn.execute("SELECT * FROM account_cache WHERE sec_user_id = ?", (sec_user_id,)).fetchone()
             return dict(row) if row else None
 
     def get_account_by_id(self, record_id: str) -> Optional[dict]:
@@ -225,8 +271,8 @@ class Database:
     def update_account(self, record_id: str, data: dict) -> bool:
         """更新账号表记录"""
         with self._connect() as conn:
-            if "更新时间" not in data:
-                data["更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if "同步时间" not in data:
+                data["同步时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE account_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
             conn.commit()
@@ -272,8 +318,8 @@ class Database:
     def update_cookie(self, record_id: str, data: dict) -> bool:
         """更新 Cookie 记录"""
         with self._connect() as conn:
-            if "更新时间" not in data:
-                data["更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if "同步时间" not in data:
+                data["同步时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE cookie_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
             conn.commit()
@@ -342,7 +388,7 @@ class Database:
     def update_task(self, task_id: int, data: dict) -> bool:
         """更新定时任务"""
         with self._connect() as conn:
-            data["更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            data["同步时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE scheduled_tasks SET {set_clause} WHERE ID = ?", list(data.values()) + [task_id])
             conn.commit()
@@ -469,11 +515,11 @@ class Database:
             raise ValueError(f"表 {table} 无主键，无法定位记录")
         pk = pk_cols[0]
         with self._connect() as conn:
-            # 更新时间自动刷新（如果表有此字段）
+            # 同步时间自动刷新（如果表有此字段）
             set_clause = f'"{field}" = ?'
             params: list[Any] = [value]
-            if "更新时间" in col_names and field != "更新时间":
-                set_clause += ', "更新时间" = ?'
+            if "同步时间" in col_names and field != "同步时间":
+                set_clause += ', "同步时间" = ?'
                 params.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             params.append(record_id)
             cursor = conn.execute(

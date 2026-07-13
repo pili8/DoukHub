@@ -29,11 +29,27 @@ def test_account_cache_has_collection_type_field(db):
     assert "采集类型" in names
 
 
-def test_account_cache_has_proxy_field(db):
-    """账号表应该有"代理"字段（飞书已定义，本地补齐）"""
+def test_account_cache_no_proxy_field(db):
+    """账号表不应该有"代理"字段（已删除，飞书也已移除）"""
     schema = db.get_table_schema("account_cache")
     names = [c["name"] for c in schema]
-    assert "代理" in names
+    assert "代理" not in names
+
+
+def test_account_cache_fields_align_with_feishu(db):
+    """账号表关键字段应与飞书对齐：sec_user_id / 备注 / 同步时间 / 已获取信息"""
+    schema = db.get_table_schema("account_cache")
+    names = {c["name"] for c in schema}
+    # 飞书字段名（应全部存在）
+    assert "sec_user_id" in names
+    assert "备注" in names
+    assert "同步时间" in names
+    assert "已获取信息" in names
+    # 旧字段名（应已迁移）
+    assert "账号标识" not in names
+    assert "更新错误" not in names
+    assert "更新时间" not in names
+    assert "已更新" not in names
 
 
 def test_cookie_cache_has_enabled_field(db):
@@ -139,7 +155,7 @@ def test_update_record_field_nonexistent_record(db):
 
 def test_update_record_field_account(db):
     """账号表的启用字段也能正常切换"""
-    db.insert_account({"记录ID": "a1", "账号标识": "sec1", "启用": 1})
+    db.insert_account({"记录ID": "a1", "sec_user_id": "sec1", "启用": 1})
     ok = db.update_record_field("account_cache", "a1", "启用", 0)
     assert ok is True
     acc = db.get_account_by_id("a1")
@@ -199,8 +215,8 @@ def test_import_records_empty_records(db):
 def test_import_records_account_with_enabled(db):
     """账号表导入时支持"启用"字段"""
     records = [
-        {"记录ID": "a1", "账号标识": "sec1", "启用": 0},
-        {"记录ID": "a2", "账号标识": "sec2"},  # 默认启用
+        {"记录ID": "a1", "sec_user_id": "sec1", "启用": 0},
+        {"记录ID": "a2", "sec_user_id": "sec2"},  # 默认启用
     ]
     r = db.import_records("account_cache", records)
     assert r["created"] == 2
@@ -213,10 +229,10 @@ def test_import_records_account_with_enabled(db):
 # ========== 旧库迁移 ==========
 
 def test_old_db_migration_adds_enabled_column():
-    """旧 account_cache 表（无启用字段）应自动迁移"""
+    """旧 account_cache 表（旧字段名）应自动迁移到新字段名"""
     p = pathlib.Path(tempfile.mkdtemp()) / "old.db"
     d = Database(db_path=p)
-    # 手动删除字段模拟旧表（重建表）
+    # 手动重建为最旧的 schema（账号标识/更新错误/更新时间/已更新）
     import sqlite3
     with sqlite3.connect(str(p)) as conn:
         conn.executescript("""
@@ -239,18 +255,28 @@ def test_old_db_migration_adds_enabled_column():
                 创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
                 更新时间 DATETIME DEFAULT CURRENT_TIMESTAMP
             );
-            INSERT INTO account_cache(记录ID, 账号标识) VALUES('a1', 'sec1');
+            INSERT INTO account_cache(记录ID, 账号标识, 更新错误, 已更新)
+            VALUES('a1', 'sec1', 'old error msg', 1);
         """)
-    # 重新初始化 Database，应自动加"启用/采集类型/代理"三个字段
+    # 重新初始化 Database，应自动迁移字段名
     d2 = Database(db_path=p)
     schema = d2.get_table_schema("account_cache")
     names = [c["name"] for c in schema]
+    # 新字段名都存在
+    assert "sec_user_id" in names
+    assert "备注" in names
+    assert "同步时间" in names
+    assert "已获取信息" in names
     assert "启用" in names
     assert "采集类型" in names
-    assert "代理" in names
-    # 旧数据应保留，且新字段使用默认值
+    # 旧字段名已迁移走
+    for old_name in ["账号标识", "更新错误", "更新时间", "已更新", "代理"]:
+        assert old_name not in names, f"旧字段 {old_name} 不应存在"
+    # 旧数据保留，且字段名迁移后值正确
     acc = d2.get_account_by_id("a1")
     assert acc is not None
-    assert acc["启用"] in (1, True)
+    assert acc["sec_user_id"] == "sec1"
+    assert acc["备注"] == "old error msg"  # 旧"更新错误"的值迁过来
+    assert acc["已获取信息"] in (1, True)  # 旧"已更新"的值迁过来
+    assert acc["启用"] in (1, True)  # 默认值
     assert acc["采集类型"] == "发布"  # 默认值
-    assert acc["代理"] is None
