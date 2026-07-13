@@ -95,11 +95,13 @@
             <h4 id="table-title" style="margin:0;">-</h4>
             <div style="display:flex;gap:8px;align-items:center;">
                 <button class="btn btn-primary btn-sm" onclick="validateCookies()" id="btn-validate-cookie" style="display:none;">🔍 验证Cookie</button>
-                <button onclick="exportTable()" title="导出当前结果为 Excel" style="background:none;border:1px solid #ddd;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:14px;color:#888;">📥</button>
+                <button class="btn btn-secondary btn-sm" onclick="importCsv()" title="从 CSV 导入（严格模式）">📤 导入</button>
+                <button class="btn btn-secondary btn-sm" onclick="exportCsv()" title="导出全量 CSV">📥 导出</button>
             </div>
         </div>
         <div id="table-content" style="overflow-x:auto;"></div>
         <div id="pagination" style="margin-top:12px;"></div>
+        <input type="file" id="import-file-input" accept=".csv" style="display:none;">
         <div id="cookie-validate-result" style="display:none;margin-top:16px;padding:16px;background:#fafafa;border-radius:8px;border:1px solid #eee;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                 <h4 style="margin:0;">Cookie 验证结果</h4>
@@ -110,6 +112,17 @@
             </div>
             <div id="cookie-validate-log" style="max-height:300px;overflow-y:auto;font-size:13px;font-family:monospace;"></div>
         </div>
+    </div>
+</div>
+
+<!-- 导入预览弹窗 -->
+<div id="import-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:8px;padding:24px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h3 style="margin:0;">📥 导入预览</h3>
+            <button onclick="closeImportModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">×</button>
+        </div>
+        <div id="import-modal-body"></div>
     </div>
 </div>
 {% endblock %}
@@ -152,6 +165,10 @@
     let currentTable = '';
     let currentKeyword = '';
     let currentPage = 1;
+    let sortField = '';     // 当前排序字段
+    let sortOrder = 'desc'; // asc / desc
+    let schemaFields = [];  // 当前表字段定义（含类型）
+    let pendingImportFile = null; // 导入预览暂存的文件
 
     document.addEventListener('DOMContentLoaded', () => {
         refreshStats();
@@ -183,9 +200,18 @@
         document.getElementById('table-content').innerHTML = '<div style="text-align:center;color:#888;padding:20px;">加载中...</div>';
         document.getElementById('pagination').innerHTML = '';
 
+        // 加载 schema（用于排序和启用字段检测）
+        try {
+            const sd = await apiCall(`/api/database/table/${tableName}/schema`, 'GET');
+            schemaFields = sd.fields || [];
+        } catch (e) {
+            schemaFields = [];
+        }
+
         const offset = (page - 1) * PAGE_SIZE;
         let url = `/api/database/table/${tableName}?limit=${PAGE_SIZE}&offset=${offset}`;
         if (keyword) url += `&search=${encodeURIComponent(keyword)}`;
+        if (sortField) url += `&sort_field=${encodeURIComponent(sortField)}&sort_order=${sortOrder}`;
 
         try {
             const data = await apiCall(url, 'GET');
@@ -193,6 +219,17 @@
         } catch (e) {
             showToast('获取表数据失败: ' + e.message, 'error');
         }
+    }
+
+    function toggleSort(field) {
+        if (sortField === field) {
+            // 同字段：切换顺序
+            sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortField = field;
+            sortOrder = 'asc';
+        }
+        showTable(currentTable, 1, currentKeyword);
     }
 
     function renderTable(data) {
@@ -217,11 +254,20 @@
             columns.push('记录ID');
         }
 
+        // schema 类型映射（用于识别布尔字段）
+        const fieldType = {};
+        schemaFields.forEach(f => fieldType[f.name] = (f.type || '').toUpperCase());
+
         // 表格
         let html = '<table style="width:100%;border-collapse:collapse;">';
         html += '<thead><tr>';
         columns.forEach(col => {
-            html += `<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;white-space:nowrap;">${col}</th>`;
+            const isSortable = true;  // 所有字段都可排序
+            const arrow = sortField === col ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : '';
+            const cursor = isSortable ? 'cursor:pointer;' : '';
+            const onclick = isSortable ? ` onclick="toggleSort('${col}')"` : '';
+            const color = sortField === col ? '#3498db;' : '#333;';
+            html += `<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;white-space:nowrap;${cursor}${color}"${onclick} title="${isSortable ? '点击排序' : ''}">${col}${arrow}</th>`;
         });
         html += '<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;">操作</th>';
         html += '</tr></thead><tbody>';
@@ -230,15 +276,30 @@
             html += '<tr>';
             columns.forEach(col => {
                 let value = row[col];
-                if (value === null || value === undefined) { value = '-'; }
-                else if (typeof value === 'object') { value = JSON.stringify(value); }
-                else if (typeof value === 'string' && value.trim().startsWith('[') && value.trim().endsWith(']')) {
-                    try {
-                        const parsed = JSON.parse(value);
-                        if (Array.isArray(parsed)) value = parsed.join(', ');
-                    } catch(e) {}
+                const isBool = fieldType[col] === 'BOOLEAN';
+
+                // 布尔字段渲染为复选框
+                if (isBool) {
+                    const checked = value === true || value === 1 ? 'checked' : '';
+                    const rid = row['记录ID'] || row['ID'] || '';
+                    // 只对有主键的行可切换
+                    if (rid && col === '启用') {
+                        html += `<td style="padding:8px;border:1px solid #ddd;text-align:center;"><input type="checkbox" ${checked} onchange="toggleEnabled('${rid}', '${col}', this.checked)" title="启用/禁用"></td>`;
+                        return;
+                    }
+                    // 其他布尔字段只展示
+                    value = value === true || value === 1 ? '✓' : (value === false || value === 0 ? '○' : '-');
+                } else {
+                    if (value === null || value === undefined) { value = '-'; }
+                    else if (typeof value === 'object') { value = JSON.stringify(value); }
+                    else if (typeof value === 'string' && value.trim().startsWith('[') && value.trim().endsWith(']')) {
+                        try {
+                            const parsed = JSON.parse(value);
+                            if (Array.isArray(parsed)) value = parsed.join(', ');
+                        } catch(e) {}
+                    }
+                    if (String(value).length > 80) { value = String(value).substring(0, 80) + '...'; }
                 }
-                if (String(value).length > 80) { value = String(value).substring(0, 80) + '...'; }
                 html += `<td style="padding:8px;border:1px solid #ddd;font-size:12px;white-space:nowrap;">${value}</td>`;
             });
 
@@ -254,6 +315,22 @@
 
         document.getElementById('table-content').innerHTML = html;
         renderPagination(total, data.limit || PAGE_SIZE, data.offset || 0);
+    }
+
+    async function toggleEnabled(recordId, field, value) {
+        try {
+            const url = `/api/database/table/${currentTable}/record/${recordId}?field=${encodeURIComponent(field)}&value=${value ? 'true' : 'false'}`;
+            const data = await apiCall(url, 'PATCH');
+            if (!data.success) {
+                showToast(data.message || '更新失败', 'error');
+                showTable(currentTable, currentPage, currentKeyword); // 刷新恢复
+            } else {
+                showToast('已' + (value ? '启用' : '禁用'), 'success');
+            }
+        } catch (e) {
+            showToast('更新失败: ' + e.message, 'error');
+            showTable(currentTable, currentPage, currentKeyword);
+        }
     }
 
     function renderPagination(total, limit, offset) {
@@ -338,28 +415,148 @@
         }
     }
 
-    function exportTable() {
-        if (!currentTable || !document.getElementById('table-content').innerHTML) {
+    function exportCsv() {
+        if (!currentTable) {
             showToast('请先选择一张表', 'error');
             return;
         }
-        const rows = document.querySelectorAll('#table-content table tr');
-        if (!rows.length) { showToast('没有可导出的数据', 'error'); return; }
-        let csv = [];
-        rows.forEach(function(row) {
-            var cells = row.querySelectorAll('th, td');
-            var line = Array.from(cells).map(function(c) {
-                var text = c.textContent.trim().replace(/"/g, '""');
-                return '"' + text + '"';
+        let url = `/api/database/table/${currentTable}/export`;
+        if (currentKeyword) url += `?search=${encodeURIComponent(currentKeyword)}`;
+        showToast('正在导出，请稍候...', 'info');
+        // 触发下载
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }
+
+    function importCsv() {
+        if (!currentTable) {
+            showToast('请先选择一张表', 'error');
+            return;
+        }
+        const input = document.getElementById('import-file-input');
+        input.value = '';
+        input.onchange = handleImportFile;
+        input.click();
+    }
+
+    async function handleImportFile(ev) {
+        const file = ev.target.files[0];
+        if (!file) return;
+        if (!file.name.toLowerCase().endsWith('.csv')) {
+            showToast('请上传 CSV 文件', 'error');
+            return;
+        }
+        pendingImportFile = file;
+        // 调预览接口
+        const fd = new FormData();
+        fd.append('file', file);
+        try {
+            const resp = await fetch(`/api/database/table/${currentTable}/import/preview`, {
+                method: 'POST',
+                body: fd,
             });
-            csv.push(line.join(','));
-        });
-        var blob = new Blob(['\ufeff' + csv.join('\n')], { type: 'text/csv;charset=utf-8' });
-        var link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = currentTable + '.csv';
-        link.click();
-        showToast('已导出当前页 ' + (rows.length - 1) + ' 条', 'success');
+            const data = await resp.json();
+            if (!data.success) {
+                showToast(data.message || '预览失败', 'error');
+                if (data.expected_fields) {
+                    console.log('期望字段:', data.expected_fields);
+                }
+                return;
+            }
+            showImportPreview(data);
+        } catch (e) {
+            showToast('预览失败: ' + e.message, 'error');
+        }
+    }
+
+    function showImportPreview(data) {
+        const body = document.getElementById('import-modal-body');
+        const fields = data.fields || [];
+        const preview = data.preview || [];
+        const errors = data.errors || [];
+
+        let html = `<div style="margin-bottom:16px;padding:12px;background:#f8f9fa;border-radius:6px;">`;
+        html += `<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:14px;">`;
+        html += `<span>📊 总计 <b>${data.total}</b></span>`;
+        html += `<span style="color:#27ae60;">➕ 新增 <b>${data.new}</b></span>`;
+        html += `<span style="color:#888;">⏭️ 跳过 <b>${data.skipped}</b></span>`;
+        if (errors.length) html += `<span style="color:#e74c3c;">⚠️ 错误 <b>${errors.length}</b></span>`;
+        html += `</div></div>`;
+
+        if (errors.length) {
+            html += `<div style="margin-bottom:12px;color:#e74c3c;font-size:13px;max-height:120px;overflow-y:auto;border:1px solid #f5c6cb;background:#fff5f5;padding:8px;border-radius:4px;">`;
+            errors.forEach(e => html += `<div>${e}</div>`);
+            html += `</div>`;
+        }
+
+        if (preview.length) {
+            html += `<div style="font-size:13px;color:#888;margin-bottom:6px;">前 ${preview.length} 行预览：</div>`;
+            html += '<div style="overflow-x:auto;border:1px solid #eee;border-radius:4px;">';
+            html += '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+            html += '<thead><tr>';
+            fields.forEach(f => html += `<th style="padding:6px;background:#f8f9fa;border:1px solid #eee;white-space:nowrap;">${f}</th>`);
+            html += '</tr></thead><tbody>';
+            preview.forEach(row => {
+                html += '<tr>';
+                fields.forEach(f => {
+                    let v = row[f];
+                    if (v === null || v === undefined) v = '';
+                    if (typeof v === 'object') v = JSON.stringify(v);
+                    const disp = String(v).length > 40 ? String(v).substring(0, 40) + '...' : v;
+                    html += `<td style="padding:6px;border:1px solid #eee;white-space:nowrap;">${disp}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        html += `<div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">`;
+        html += `<button class="btn btn-secondary btn-sm" onclick="closeImportModal()">取消</button>`;
+        if (data.new > 0) {
+            html += `<button class="btn btn-primary btn-sm" onclick="confirmImport()">确认导入（新增 ${data.new} 条）</button>`;
+        } else {
+            html += `<button class="btn btn-primary btn-sm" disabled>无可导入数据</button>`;
+        }
+        html += `</div>`;
+
+        body.innerHTML = html;
+        document.getElementById('import-modal').style.display = 'flex';
+    }
+
+    function closeImportModal() {
+        document.getElementById('import-modal').style.display = 'none';
+        pendingImportFile = null;
+    }
+
+    async function confirmImport() {
+        if (!pendingImportFile) {
+            showToast('文件已失效，请重新选择', 'error');
+            closeImportModal();
+            return;
+        }
+        const fd = new FormData();
+        fd.append('file', pendingImportFile);
+        try {
+            const resp = await fetch(`/api/database/table/${currentTable}/import/confirm`, {
+                method: 'POST',
+                body: fd,
+            });
+            const data = await resp.json();
+            if (data.success) {
+                showToast(`导入完成：新增 ${data.created}，跳过 ${data.skipped}，失败 ${data.failed}`, data.failed ? 'error' : 'success');
+                closeImportModal();
+                showTable(currentTable, 1, '');
+                refreshStats();
+            } else {
+                showToast(data.message || '导入失败', 'error');
+            }
+        } catch (e) {
+            showToast('导入失败: ' + e.message, 'error');
+        }
     }
 
     async function feishuSyncSSE(url, title) {

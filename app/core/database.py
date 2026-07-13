@@ -58,11 +58,16 @@ class Database:
                     头像 TEXT,
                     已更新 BOOLEAN DEFAULT 0,
                     更新错误 TEXT,
+                    启用 BOOLEAN DEFAULT 1,
                     创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
                     更新时间 DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_account_sec_user_id ON account_cache(账号标识)")
+            # 兼容旧库：如果 account_cache 缺"启用"字段，自动补上
+            existing_cols = [r[1] for r in conn.execute("PRAGMA table_info(account_cache)").fetchall()]
+            if "启用" not in existing_cols:
+                conn.execute("ALTER TABLE account_cache ADD COLUMN 启用 BOOLEAN DEFAULT 1")
 
             # 表3：Cookie表缓存
             conn.execute("""
@@ -376,3 +381,158 @@ class Database:
                 params = [f"%{keyword}%" for _ in columns]
                 rows = conn.execute(f"SELECT * FROM {table} WHERE {conditions}", params).fetchall()
             return [dict(row) for row in rows]
+
+    # ========== 通用表操作（用于数据库管理界面） ==========
+
+    # 允许操作的表白名单
+    VALID_TABLES = {
+        "collection_cache", "account_cache", "cookie_cache",
+        "collection_history", "scheduled_tasks",
+    }
+
+    def get_table_schema(self, table: str) -> list[dict]:
+        """获取表结构信息。
+        返回字段列表，每项: {name, type, pk, notnull, default}
+        """
+        with self._connect() as conn:
+            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            return [
+                {
+                    "name": r[1],
+                    "type": r[2],
+                    "pk": r[5],
+                    "notnull": r[3],
+                    "default": r[4],
+                }
+                for r in rows
+            ]
+
+    def query_table(
+        self,
+        table: str,
+        limit: int = 100,
+        offset: int = 0,
+        search: str = "",
+        sort_field: Optional[str] = None,
+        sort_order: str = "desc",
+    ) -> dict:
+        """通用表查询，支持搜索、排序、分页。
+        返回 {records, total, limit, offset}
+        """
+        with self._connect() as conn:
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+
+            # 构造 WHERE
+            params: list[Any] = []
+            where = ""
+            if search:
+                where = " WHERE " + " OR ".join([f'CAST("{c}" AS TEXT) LIKE ?' for c in cols])
+                params = [f"%{search}%"] * len(cols)
+
+            # 构造 ORDER BY
+            order = " ORDER BY rowid DESC"
+            if sort_field and sort_field in cols:
+                direction = "ASC" if sort_order.lower() == "asc" else "DESC"
+                order = f' ORDER BY "{sort_field}" {direction}'
+
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM {table}{where}", params
+            ).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT * FROM {table}{where}{order} LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
+            return {
+                "records": [dict(row) for row in rows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+
+    def update_record_field(self, table: str, record_id: str, field: str, value: Any) -> bool:
+        """通用单字段更新（用于启用/禁用开关）。
+        record_id 按主键列匹配；如果没有主键则报错。
+        """
+        schema = self.get_table_schema(table)
+        pk_cols = [s["name"] for s in schema if s["pk"]]
+        col_names = [s["name"] for s in schema]
+        if field not in col_names:
+            raise ValueError(f"字段 {field} 不存在于表 {table}")
+        if not pk_cols:
+            raise ValueError(f"表 {table} 无主键，无法定位记录")
+        pk = pk_cols[0]
+        with self._connect() as conn:
+            # 更新时间自动刷新（如果表有此字段）
+            set_clause = f'"{field}" = ?'
+            params: list[Any] = [value]
+            if "更新时间" in col_names and field != "更新时间":
+                set_clause += ', "更新时间" = ?'
+                params.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            params.append(record_id)
+            cursor = conn.execute(
+                f'UPDATE {table} SET {set_clause} WHERE "{pk}" = ?',
+                params,
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def import_records(self, table: str, records: list[dict], skip_existing: bool = True) -> dict:
+        """通用导入。
+        - records: 已经按字段名整理好的字典列表
+        - skip_existing: 主键已存在则跳过（不报错）
+        返回 {created, skipped, failed, errors[]}
+        """
+        schema = self.get_table_schema(table)
+        pk_cols = [s["name"] for s in schema if s["pk"]]
+        col_names = [s["name"] for s in schema]
+        result = {"created": 0, "skipped": 0, "failed": 0, "errors": []}
+        if not records:
+            return result
+        with self._connect() as conn:
+            for idx, rec in enumerate(records, start=2):  # start=2: 第1行是表头，第2行开始是数据
+                # 严格模式：所有键必须在 schema 内
+                unknown = [k for k in rec.keys() if k not in col_names]
+                if unknown:
+                    result["failed"] += 1
+                    result["errors"].append(f"第{idx}行：未知字段 {unknown}")
+                    continue
+                # 必填字段（NOT NULL 且无默认）
+                missing = [
+                    s["name"] for s in schema
+                    if s["notnull"] and s["default"] is None and s["pk"] == 0
+                    and (s["name"] not in rec or rec[s["name"]] in (None, ""))
+                ]
+                if missing:
+                    result["failed"] += 1
+                    result["errors"].append(f"第{idx}行：缺少必填字段 {missing}")
+                    continue
+                # 主键已存在跳过
+                if pk_cols and pk_cols[0] in rec and rec[pk_cols[0]]:
+                    pk_val = rec[pk_cols[0]]
+                    existed = conn.execute(
+                        f'SELECT 1 FROM {table} WHERE "{pk_cols[0]}" = ?', (pk_val,)
+                    ).fetchone()
+                    if existed:
+                        if skip_existing:
+                            result["skipped"] += 1
+                            continue
+                        else:
+                            result["failed"] += 1
+                            result["errors"].append(f"第{idx}行：主键 {pk_val} 已存在")
+                            continue
+                # 过滤 None 值（避免插入 None 覆盖默认值）
+                clean = {k: v for k, v in rec.items() if v is not None and v != ""}
+                try:
+                    if clean:
+                        fields = ", ".join([f'"{k}"' for k in clean.keys()])
+                        placeholders = ", ".join(["?"] * len(clean))
+                        conn.execute(
+                            f'INSERT INTO {table} ({fields}) VALUES ({placeholders})',
+                            list(clean.values()),
+                        )
+                        result["created"] += 1
+                except Exception as e:
+                    result["failed"] += 1
+                    result["errors"].append(f"第{idx}行：{str(e)}")
+            conn.commit()
+        return result

@@ -118,10 +118,12 @@ class TaskScheduler:
         try:
             # 从新数据库获取账号
             accounts = self.db.get_all_accounts()
-            # 筛选符合等级的账号
+            # 筛选符合等级 + 已启用采集的账号
             accounts = [
                 a for a in accounts
-                if a.get("等级", 0) in rating_filter and a.get("账号标识")
+                if a.get("等级", 0) in rating_filter
+                and a.get("账号标识")
+                and a.get("启用", 1)  # 默认启用（兼容旧数据）
             ]
 
             if not accounts:

@@ -133,6 +133,10 @@ class FeishuSyncer:
             fields["\u5934\u50cf"] = record["\u5934\u50cf"]
         if record.get("\u66f4\u65b0\u9519\u8bef"):
             fields["\u5907\u6ce8"] = record["\u66f4\u65b0\u9519\u8bef"]
+        # 同步"启用"字段到飞书
+        enabled = record.get("\u542f\u7528")
+        if enabled is not None:
+            fields["\u542f\u7528"] = bool(enabled)
         fields["\u540c\u6b65\u65f6\u95f4"] = int(_time.time() * 1000)
         return fields
 
@@ -205,6 +209,9 @@ class FeishuSyncer:
             v = fields.get(fk)
             if v is not None:
                 data[k] = self._safe_int(v) if k in ("\u7c89\u4e1d\u6570", "\u4f5c\u54c1\u6570") else self._parse_text_value(v)
+        # 从飞书读取"启用"字段（复选框）
+        if "\u542f\u7528" in fields:
+            data["\u542f\u7528"] = bool(fields.get("\u542f\u7528"))
         return data
 
     def _feishu_record_to_local_cookie(self, record):

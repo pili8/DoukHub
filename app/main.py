@@ -1,7 +1,9 @@
 """DoukHub 主入口 — FastAPI Web 应用"""
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -1131,32 +1133,262 @@ async def api_database_stats():
 
 
 @app.get("/api/database/table/{table_name}")
-async def api_database_table(table_name: str, limit: int = 100, offset: int = 0, search: str = ""):
-    """获取表数据，支持分页和搜索。返回 {records, total, limit, offset}"""
+async def api_database_table(
+    table_name: str,
+    limit: int = 100,
+    offset: int = 0,
+    search: str = "",
+    sort_field: str = "",
+    sort_order: str = "desc",
+):
+    """获取表数据，支持分页、搜索、排序。返回 {records, total, limit, offset}"""
     db = get_database()
 
     # 验证表名
-    valid_tables = ["collection_cache", "account_cache", "cookie_cache", "collection_history", "scheduled_tasks"]
-    if table_name not in valid_tables:
+    if table_name not in db.VALID_TABLES:
         return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
 
+    result = db.query_table(
+        table_name,
+        limit=limit,
+        offset=offset,
+        search=search,
+        sort_field=sort_field or None,
+        sort_order=sort_order,
+    )
+    return result
+
+
+@app.get("/api/database/table/{table_name}/schema")
+async def api_database_table_schema(table_name: str):
+    """获取表结构（字段列表）"""
+    db = get_database()
+    if table_name not in db.VALID_TABLES:
+        return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
+    return {"fields": db.get_table_schema(table_name)}
+
+
+@app.patch("/api/database/table/{table_name}/record/{record_id}")
+async def api_database_update_field(
+    table_name: str, record_id: str, field: str = "", value: str = ""
+):
+    """更新单条记录的单个字段（用于启用/禁用开关等）"""
+    db = get_database()
+    if table_name not in db.VALID_TABLES:
+        return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
+    if not field:
+        return JSONResponse({"success": False, "message": "缺少 field 参数"}, status_code=400)
+
+    # 解析 value：支持布尔/数字/文本
+    parsed_value: Any = value
+    if value.lower() in ("true", "false"):
+        parsed_value = value.lower() == "true"
+    elif value in ("1", "0"):
+        parsed_value = value == "1"
+    elif value.isdigit():
+        parsed_value = int(value)
+
+    try:
+        ok = db.update_record_field(table_name, record_id, field, parsed_value)
+        if ok:
+            return {"success": True, "message": "更新成功"}
+        return JSONResponse({"success": False, "message": "未找到记录"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@app.get("/api/database/table/{table_name}/export")
+async def api_database_export_csv(table_name: str, search: str = ""):
+    """全量导出表为 CSV（含 BOM 头，Excel 可直接打开）"""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    db = get_database()
+    if table_name not in db.VALID_TABLES:
+        return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
+
+    schema = db.get_table_schema(table_name)
+    col_names = [s["name"] for s in schema]
+    result = db.query_table(table_name, limit=10**9, offset=0, search=search)
+    records = result["records"]
+
+    # 写 CSV
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(col_names)
+    for r in records:
+        writer.writerow([_csv_cell(r.get(c, "")) for c in col_names])
+
+    content = "\ufeff" + buf.getvalue()  # BOM + 内容
+    filename = f"DoukHub_{table_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([content.encode("utf-8")]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _csv_cell(v: Any) -> str:
+    """格式化 CSV 单元格值"""
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return str(v)
+
+
+@app.post("/api/database/table/{table_name}/import/preview")
+async def api_database_import_preview(table_name: str, request: Request):
+    """严格模式导入预览：上传 CSV，校验表头，返回统计和前5行预览，不写入。"""
+    import csv
+    import io
+
+    db = get_database()
+    if table_name not in db.VALID_TABLES:
+        return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
+
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        return JSONResponse({"success": False, "message": "缺少上传文件"}, status_code=400)
+
+    try:
+        content = await file.read()
+    except Exception as e:
+        return JSONResponse({"success": False, "message": f"读取文件失败: {e}"}, status_code=400)
+
+    # 解码（处理 BOM）
+    text = content.decode("utf-8-sig") if content.startswith(b"\xef\xbb\xbf") else content.decode("utf-8", errors="replace")
+    reader = csv.reader(io.StringIO(text))
+    rows = list(reader)
+    if not rows:
+        return JSONResponse({"success": False, "message": "CSV 文件为空"}, status_code=400)
+
+    header = [h.strip() for h in rows[0]]
+    schema = db.get_table_schema(table_name)
+    col_names = [s["name"] for s in schema]
+    pk_cols = [s["name"] for s in schema if s["pk"]]
+    pk = pk_cols[0] if pk_cols else None
+
+    # 严格校验表头
+    unknown = [h for h in header if h not in col_names]
+    if unknown:
+        return JSONResponse({
+            "success": False,
+            "message": f"表头存在未知字段（严格模式要求完全匹配）: {unknown}",
+            "expected_fields": col_names,
+        }, status_code=400)
+
+    # 解析数据
+    parsed_rows: list[dict] = []
+    errors: list[str] = []
+    for idx, row in enumerate(rows[1:], start=2):
+        if not any(c.strip() for c in row):  # 跳过空行
+            continue
+        if len(row) < len(header):
+            errors.append(f"第{idx}行：列数不足")
+            continue
+        record = {header[i]: _parse_csv_value(row[i], schema, header[i]) for i in range(len(header))}
+        parsed_rows.append(record)
+
+    # 模拟统计（不写入）
+    new_count = 0
+    skip_count = 0
     with db._connect() as conn:
-        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
-        if search:
-            where = " OR ".join([f"CAST(\"{c}\" AS TEXT) LIKE ?" for c in cols])
-            like = f"%{search}%"
-            total = conn.execute(f"SELECT COUNT(*) FROM {table_name} WHERE {where}", [like] * len(cols)).fetchone()[0]
-            rows = conn.execute(
-                f"SELECT * FROM {table_name} WHERE {where} ORDER BY rowid DESC LIMIT ? OFFSET ?",
-                [like] * len(cols) + [limit, offset]
-            ).fetchall()
-        else:
-            total = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
-            rows = conn.execute(
-                f"SELECT * FROM {table_name} ORDER BY rowid DESC LIMIT ? OFFSET ?",
-                (limit, offset)
-            ).fetchall()
-        return {"records": [dict(row) for row in rows], "total": total, "limit": limit, "offset": offset}
+        for r in parsed_rows:
+            if pk and r.get(pk):
+                existed = conn.execute(
+                    f'SELECT 1 FROM {table_name} WHERE "{pk}" = ?', (r[pk],)
+                ).fetchone()
+                if existed:
+                    skip_count += 1
+                    continue
+            new_count += 1
+
+    preview = parsed_rows[:5]
+    return {
+        "success": True,
+        "total": len(parsed_rows),
+        "new": new_count,
+        "skipped": skip_count,
+        "errors": errors[:20],
+        "preview": preview,
+        "fields": header,
+    }
+
+
+@app.post("/api/database/table/{table_name}/import/confirm")
+async def api_database_import_confirm(table_name: str, request: Request):
+    """严格模式导入确认：再次上传 CSV，执行写入（跳过已存在主键）。"""
+    import csv
+    import io
+
+    db = get_database()
+    if table_name not in db.VALID_TABLES:
+        return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
+
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        return JSONResponse({"success": False, "message": "缺少上传文件"}, status_code=400)
+
+    try:
+        content = await file.read()
+    except Exception as e:
+        return JSONResponse({"success": False, "message": f"读取文件失败: {e}"}, status_code=400)
+
+    text = content.decode("utf-8-sig") if content.startswith(b"\xef\xbb\xbf") else content.decode("utf-8", errors="replace")
+    reader = csv.reader(io.StringIO(text))
+    rows = list(reader)
+    if not rows:
+        return JSONResponse({"success": False, "message": "CSV 文件为空"}, status_code=400)
+
+    header = [h.strip() for h in rows[0]]
+    schema = db.get_table_schema(table_name)
+    col_names = [s["name"] for s in schema]
+    unknown = [h for h in header if h not in col_names]
+    if unknown:
+        return JSONResponse({
+            "success": False,
+            "message": f"表头存在未知字段: {unknown}",
+        }, status_code=400)
+
+    parsed = []
+    for idx, row in enumerate(rows[1:], start=2):
+        if not any(c.strip() for c in row):
+            continue
+        if len(row) < len(header):
+            continue
+        record = {header[i]: _parse_csv_value(row[i], schema, header[i]) for i in range(len(header))}
+        parsed.append(record)
+
+    result = db.import_records(table_name, parsed, skip_existing=True)
+    return {"success": True, **result}
+
+
+def _parse_csv_value(raw: str, schema: list[dict], field: str) -> Any:
+    """根据字段类型把 CSV 字符串解析为合适的 Python 值"""
+    s = (raw or "").strip()
+    col_def = next((c for c in schema if c["name"] == field), None)
+    if not col_def:
+        return s
+    col_type = (col_def.get("type") or "").upper()
+    if s == "":
+        return None
+    if col_type == "BOOLEAN":
+        return s.lower() in ("true", "1", "是", "yes", "y")
+    if col_type in ("INTEGER", "INT"):
+        try:
+            return int(s)
+        except ValueError:
+            return s
+    if col_type == "REAL":
+        try:
+            return float(s)
+        except ValueError:
+            return s
+    return s
 
 
 @app.delete("/api/database/table/{table_name}/record/{record_id}")
