@@ -1347,18 +1347,20 @@ def _run_feishu_sync_sse(fs, steps):
                     created = r.get("created", 0)
                     updated = r.get("updated", 0)
                     uptodate = r.get("skipped_uptodate", 0)
+                    duplicate = r.get("skipped_duplicate", 0)
                     invalid = r.get("skipped_invalid", 0)
                     failed = r.get("failed", 0)
                     all_errors.extend(r.get("errors", []))
-                    results[label] = {"created": created, "updated": updated, "uptodate": uptodate, "invalid": invalid, "failed": failed}
+                    results[label] = {"created": created, "updated": updated, "uptodate": uptodate, "duplicate": duplicate, "invalid": invalid, "failed": failed}
                     if failed > 0:
-                        msg = f"⚠️ {label}: 新增 {created}, 更新 {updated}, 已最新 {uptodate}, 无效 {invalid}, 失败 {failed}"
+                        msg = f"⚠️ {label}: 新增 {created}, 更新 {updated}, 已最新 {uptodate}, 重复 {duplicate}, 无效 {invalid}, 失败 {failed}"
                         yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': msg})}\n\n"
                     else:
                         parts = []
                         if created: parts.append(f"新增 {created}")
                         if updated: parts.append(f"更新 {updated}")
                         if uptodate: parts.append(f"已最新 {uptodate}")
+                        if duplicate: parts.append(f"重复 {duplicate}")
                         if invalid: parts.append(f"无效 {invalid}")
                         msg = f"✅ {label}: " + (", ".join(parts) if parts else "无变化")
                         yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': msg})}\n\n"

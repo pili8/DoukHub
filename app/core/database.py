@@ -149,16 +149,13 @@ class Database:
             return dict(row) if row else None
 
     def insert_collection(self, data: dict) -> bool:
-        """插入采集表记录"""
+        """插入采集表记录。UNIQUE 冲突会抛出 sqlite3.IntegrityError，调用方按需捕获。"""
         with self._connect() as conn:
-            try:
-                fields = ", ".join(data.keys())
-                placeholders = ", ".join(["?" for _ in data])
-                conn.execute(f"INSERT INTO collection_cache ({fields}) VALUES ({placeholders})", list(data.values()))
-                conn.commit()
-                return True
-            except sqlite3.IntegrityError:
-                return False
+            fields = ", ".join(data.keys())
+            placeholders = ", ".join(["?" for _ in data])
+            conn.execute(f"INSERT INTO collection_cache ({fields}) VALUES ({placeholders})", list(data.values()))
+            conn.commit()
+            return True
 
     def update_collection(self, record_id: str, data: dict) -> bool:
         """更新采集表记录"""
@@ -205,16 +202,13 @@ class Database:
             return dict(row) if row else None
 
     def insert_account(self, data: dict) -> bool:
-        """插入账号表记录"""
+        """插入账号表记录。UNIQUE 冲突会抛出 sqlite3.IntegrityError，调用方按需捕获。"""
         with self._connect() as conn:
-            try:
-                fields = ", ".join(data.keys())
-                placeholders = ", ".join(["?" for _ in data])
-                conn.execute(f"INSERT INTO account_cache ({fields}) VALUES ({placeholders})", list(data.values()))
-                conn.commit()
-                return True
-            except sqlite3.IntegrityError:
-                return False
+            fields = ", ".join(data.keys())
+            placeholders = ", ".join(["?" for _ in data])
+            conn.execute(f"INSERT INTO account_cache ({fields}) VALUES ({placeholders})", list(data.values()))
+            conn.commit()
+            return True
 
     def update_account(self, record_id: str, data: dict) -> bool:
         """更新账号表记录"""
@@ -255,16 +249,13 @@ class Database:
             return [dict(row) for row in rows]
 
     def insert_cookie(self, data: dict) -> bool:
-        """插入 Cookie 记录"""
+        """插入 Cookie 记录。UNIQUE 冲突会抛出 sqlite3.IntegrityError，调用方按需捕获。"""
         with self._connect() as conn:
-            try:
-                fields = ", ".join(data.keys())
-                placeholders = ", ".join(["?" for _ in data])
-                conn.execute(f"INSERT INTO cookie_cache ({fields}) VALUES ({placeholders})", list(data.values()))
-                conn.commit()
-                return True
-            except sqlite3.IntegrityError:
-                return False
+            fields = ", ".join(data.keys())
+            placeholders = ", ".join(["?" for _ in data])
+            conn.execute(f"INSERT INTO cookie_cache ({fields}) VALUES ({placeholders})", list(data.values()))
+            conn.commit()
+            return True
 
     def update_cookie(self, record_id: str, data: dict) -> bool:
         """更新 Cookie 记录"""

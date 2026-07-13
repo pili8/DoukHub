@@ -429,6 +429,7 @@
                                 if (vals.created) parts.push('新增 ' + vals.created);
                                 if (vals.updated) parts.push('更新 ' + vals.updated);
                                 if (vals.uptodate) parts.push('已最新 ' + vals.uptodate);
+                                if (vals.duplicate) parts.push('重复 ' + vals.duplicate);
                                 if (vals.invalid) parts.push('无效 ' + vals.invalid);
                                 if (vals.failed) parts.push('失败 ' + vals.failed);
                                 html += '<div>' + label + ': ' + (parts.join(', ') || '无变化') + '</div>';

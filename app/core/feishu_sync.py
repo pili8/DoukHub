@@ -2,6 +2,7 @@
 """飞书双向同步 - 本地数据库 <-> 飞书表"""
 import json
 import logging
+import sqlite3
 import time as _time
 from datetime import datetime
 
@@ -296,7 +297,9 @@ class FeishuSyncer:
     # ========== 飞书 -> 本地（全盘） ==========
 
     def _from_feishu_full(self, table_id, convert_fn, db_update_fn, db_insert_fn, get_by_id_fn):
-        result = {"created": 0, "updated": 0, "failed": 0, "errors": []}
+        # skipped_duplicate: 飞书数据 UNIQUE 字段与本地已有冲突（如同一分享码录了多次）
+        # skipped_invalid: 转换函数返回 None（数据本身缺关键字段）
+        result = {"created": 0, "updated": 0, "skipped_duplicate": 0, "skipped_invalid": 0, "failed": 0, "errors": []}
         if not table_id:
             return result
         try:
@@ -304,6 +307,7 @@ class FeishuSyncer:
                 rid = record.get("record_id", "")
                 local_data = convert_fn(record)
                 if not local_data:
+                    result["skipped_invalid"] += 1
                     continue
                 local_data["\u8bb0\u5f55ID"] = rid
                 existing = get_by_id_fn(rid)
@@ -316,10 +320,10 @@ class FeishuSyncer:
                         result["errors"].append(f"{rid}: {e}")
                 else:
                     try:
-                        if db_insert_fn(local_data):
-                            result["created"] += 1
-                        else:
-                            result["failed"] += 1
+                        db_insert_fn(local_data)
+                        result["created"] += 1
+                    except sqlite3.IntegrityError:
+                        result["skipped_duplicate"] += 1
                     except Exception as e:
                         result["failed"] += 1
                         result["errors"].append(f"{rid}: {e}")
@@ -331,8 +335,9 @@ class FeishuSyncer:
 
     def _from_feishu_incremental(self, table_id, db_get_by_id, convert_fn, db_update_fn, db_insert_fn):
         # skipped_uptodate: 本地已是最新的
-        # skipped_invalid: 飞书数据无法转换或本地插入失败（数据问题）
-        result = {"created": 0, "updated": 0, "skipped_uptodate": 0, "skipped_invalid": 0, "failed": 0, "errors": []}
+        # skipped_duplicate: 飞书数据 UNIQUE 字段与本地已有冲突（如同一分享码录了多次）
+        # skipped_invalid: 转换函数返回 None（数据本身缺关键字段）
+        result = {"created": 0, "updated": 0, "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0, "failed": 0, "errors": []}
         if not table_id:
             return result
         try:
@@ -368,10 +373,14 @@ class FeishuSyncer:
                 ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
                 if ts:
                     local_data["\u66f4\u65b0\u65f6\u95f4"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
-                if db_insert_fn(local_data):
+                try:
+                    db_insert_fn(local_data)
                     result["created"] += 1
-                else:
-                    result["skipped_invalid"] += 1
+                except sqlite3.IntegrityError:
+                    result["skipped_duplicate"] += 1
+                except Exception as e:
+                    result["failed"] += 1
+                    result["errors"].append(f"{rid}: {e}")
         except Exception as e:
             result["errors"].append(str(e))
         return result
