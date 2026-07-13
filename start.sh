@@ -21,6 +21,33 @@ else
     source venv/bin/activate
 fi
 
+# 检测 2999 端口占用（只看 LISTEN，避免误杀浏览器残留连接）
+PORT=2999
+PIDS=$(lsof -ti :$PORT -sTCP:LISTEN 2>/dev/null)
+if [ -n "$PIDS" ]; then
+    echo "⚠️  端口 $PORT 已被以下进程占用："
+    lsof -i :$PORT -sTCP:LISTEN -nP 2>/dev/null
+    echo ""
+    read -p "是否终止占用进程并继续启动？(y/N) " confirm
+    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        echo "正在终止占用进程..."
+        kill $PIDS 2>/dev/null
+        sleep 1
+        # 若仍存活则强制终止
+        PIDS2=$(lsof -ti :$PORT -sTCP:LISTEN 2>/dev/null)
+        if [ -n "$PIDS2" ]; then
+            echo "进程未响应，强制终止..."
+            kill -9 $PIDS2 2>/dev/null
+            sleep 1
+        fi
+        echo "✓ 端口 $PORT 已释放"
+    else
+        echo "已取消启动。"
+        read -p "按回车键关闭窗口..."
+        exit 1
+    fi
+fi
+
 echo "================================"
 echo "  DoukHub 正在启动"
 echo "  本机访问: http://127.0.0.1:2999"
