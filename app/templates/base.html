@@ -57,7 +57,7 @@
 
         .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
         .page-header h2 { font-size: 24px; }
-        .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow-x: auto; -webkit-overflow-scrolling: touch; }
         .card h3 { margin-bottom: 12px; font-size: 16px; color: #555; }
 
         .btn { display: inline-block; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all 0.2s; white-space: nowrap; }
@@ -116,25 +116,24 @@
             .stats-grid { grid-template-columns: repeat(2, 1fr); }
         }
 
-        /* ===== Mobile (<=768px) ===== */
+        /* ===== Mobile (<=768px) — 侧栏常驻左侧 ===== */
         @media (max-width: 768px) {
-            .mobile-topbar { display: flex; }
-            .sidebar-overlay { display: none; }
-            .sidebar-overlay.show { display: block; }
+            /* 侧栏不再滑出：隐藏顶部菜单栏与遮罩 */
+            .mobile-topbar { display: none !important; }
+            .sidebar-overlay { display: none !important; }
 
-           .sidebar {
-               position: fixed;
-                top: 52px; left: 0; bottom: 0;
-               z-index: 1000;
-               transform: translateX(-100%);
-               transition: transform 0.25s ease;
-               overflow-y: auto;
-           }
-            .sidebar.open { transform: translateX(0); }
-            .sidebar h1 { display: none; }
+            .layout { display: flex; }
+            .sidebar {
+                position: static;
+                width: 140px;
+                transform: none;
+                padding: 12px 0;
+                flex-shrink: 0;
+            }
+            .sidebar h1 { font-size: 15px; padding: 0 12px 12px; margin-bottom: 6px; }
+            .sidebar a { padding: 10px 12px; font-size: 13px; }
 
-            .layout { display: block; }
-            .main { padding: 60px 14px 20px; max-width: 100%; }
+            .main { padding: 14px; max-width: 100%; }
 
             .page-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 16px; }
             .page-header h2 { font-size: 20px; }
@@ -175,7 +174,7 @@
         /* ===== Small phone (<=420px) ===== */
         @media (max-width: 420px) {
             .stats-grid { grid-template-columns: 1fr; }
-            .main { padding: 56px 10px 16px; }
+            .main { padding: 10px; }
             .status-actions { flex-direction: column; }
             .status-actions .btn { width: 100%; }
         }
