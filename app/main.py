@@ -547,16 +547,21 @@ async def api_sync():
             {"success": False, "message": "飞书未配置，请先在设置中填写飞书信息"},
             status_code=400,
         )
-    # 同步前自动检测并创建缺失字段
+    # 同步前自动检测并创建缺失字段（三张表都检查）
     f = get_feishu()
     if f:
-        try:
-            f.ensure_fields(
-                config.feishu["app_token"],
-                config.feishu["account_table_id"],
-            )
-        except Exception:
-            pass
+        app_token = config.feishu.get("app_token", "")
+        for table_type, table_id_key in [
+            ("account", "account_table_id"),
+            ("collection", "collection_table_id"),
+            ("cookie", "cookie_table_id"),
+        ]:
+            table_id = config.feishu.get(table_id_key, "")
+            if table_id:
+                try:
+                    f.ensure_fields(app_token, table_id, table_type=table_type)
+                except Exception:
+                    pass
     
     import json
     import asyncio
@@ -1696,6 +1701,7 @@ async def api_collect_v2_account(request: Request):
                 account_name = account.get("账号名称") or account.get("昵称") or account.get("账号标识", "")
                 sec_user_id = account.get("账号标识", "")
                 platform = account.get("平台", "抖音")
+                collection_type = account.get("采集类型", "发布")
 
                 yield f"data: {json.dumps({'type': 'progress', 'message': f'采集 [{i+1}/{len(accounts)}]: {account_name}'})}\n\n"
 
@@ -1712,7 +1718,7 @@ async def api_collect_v2_account(request: Request):
                             name=account_name,
                             platform=platform,
                             sec_user_id=sec_user_id,
-                            collection_type="发布",
+                            collection_type=collection_type,
                         ),
                         cookie=cookie,
                     )
@@ -1726,7 +1732,7 @@ async def api_collect_v2_account(request: Request):
                             "账号名称": account_name,
                             "平台": platform,
                             "账号标识": sec_user_id,
-                            "采集类型": "发布",
+                            "采集类型": collection_type,
                             "等级": account.get("等级"),
                             "状态": "成功",
                             "作品数": result.works_count,
@@ -1741,7 +1747,7 @@ async def api_collect_v2_account(request: Request):
                             "账号名称": account_name,
                             "平台": platform,
                             "账号标识": sec_user_id,
-                            "采集类型": "发布",
+                            "采集类型": collection_type,
                             "等级": account.get("等级"),
                             "状态": "失败",
                             "作品数": 0,

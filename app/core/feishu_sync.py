@@ -137,6 +137,14 @@ class FeishuSyncer:
         enabled = record.get("\u542f\u7528")
         if enabled is not None:
             fields["\u542f\u7528"] = bool(enabled)
+        # 同步"采集类型"到飞书（发布/喜欢/收藏）
+        ct = record.get("\u91c7\u96c6\u7c7b\u578b")
+        if ct:
+            fields["\u91c7\u96c6\u7c7b\u578b"] = ct
+        # 同步"代理"到飞书
+        proxy = record.get("\u4ee3\u7406")
+        if proxy:
+            fields["\u4ee3\u7406"] = proxy
         fields["\u540c\u6b65\u65f6\u95f4"] = int(_time.time() * 1000)
         return fields
 
@@ -212,6 +220,14 @@ class FeishuSyncer:
         # 从飞书读取"启用"字段（复选框）
         if "\u542f\u7528" in fields:
             data["\u542f\u7528"] = bool(fields.get("\u542f\u7528"))
+        # 从飞书读取"采集类型"
+        ct = self._parse_text_value(fields.get("\u91c7\u96c6\u7c7b\u578b", ""))
+        if ct:
+            data["\u91c7\u96c6\u7c7b\u578b"] = ct
+        # 从飞书读取"代理"
+        proxy = self._parse_text_value(fields.get("\u4ee3\u7406", ""))
+        if proxy:
+            data["\u4ee3\u7406"] = proxy
         return data
 
     def _feishu_record_to_local_cookie(self, record):

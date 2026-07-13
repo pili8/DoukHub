@@ -146,6 +146,7 @@ class TaskScheduler:
                             name=account.get("账号名称", ""),
                             platform=account.get("平台", "抖音"),
                             sec_user_id=account.get("账号标识", ""),
+                            collection_type=account.get("采集类型", "发布"),
                         ),
                         cookie=cookie,
                     )
@@ -155,7 +156,7 @@ class TaskScheduler:
                         "账号名称": account.get("账号名称", ""),
                         "平台": account.get("平台", ""),
                         "账号标识": account.get("账号标识", ""),
-                        "采集类型": "发布",
+                        "采集类型": account.get("采集类型", "发布"),
                         "等级": account.get("等级"),
                         "状态": result.status,
                         "作品数": result.works_count,

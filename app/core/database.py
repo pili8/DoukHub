@@ -59,15 +59,22 @@ class Database:
                     已更新 BOOLEAN DEFAULT 0,
                     更新错误 TEXT,
                     启用 BOOLEAN DEFAULT 1,
+                    采集类型 TEXT DEFAULT '发布',
+                    代理 TEXT,
                     创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
                     更新时间 DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_account_sec_user_id ON account_cache(账号标识)")
-            # 兼容旧库：如果 account_cache 缺"启用"字段，自动补上
+            # 兼容旧库：自动补齐缺失字段
             existing_cols = [r[1] for r in conn.execute("PRAGMA table_info(account_cache)").fetchall()]
-            if "启用" not in existing_cols:
-                conn.execute("ALTER TABLE account_cache ADD COLUMN 启用 BOOLEAN DEFAULT 1")
+            for col, ddl in [
+                ("启用", "BOOLEAN DEFAULT 1"),
+                ("采集类型", "TEXT DEFAULT '发布'"),
+                ("代理", "TEXT"),
+            ]:
+                if col not in existing_cols:
+                    conn.execute(f"ALTER TABLE account_cache ADD COLUMN {col} {ddl}")
 
             # 表3：Cookie表缓存
             conn.execute("""

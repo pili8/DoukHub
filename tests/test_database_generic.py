@@ -22,6 +22,20 @@ def test_account_cache_has_enabled_field(db):
     assert "启用" in names
 
 
+def test_account_cache_has_collection_type_field(db):
+    """账号表应该有"采集类型"字段（飞书已定义，本地补齐）"""
+    schema = db.get_table_schema("account_cache")
+    names = [c["name"] for c in schema]
+    assert "采集类型" in names
+
+
+def test_account_cache_has_proxy_field(db):
+    """账号表应该有"代理"字段（飞书已定义，本地补齐）"""
+    schema = db.get_table_schema("account_cache")
+    names = [c["name"] for c in schema]
+    assert "代理" in names
+
+
 def test_cookie_cache_has_enabled_field(db):
     schema = db.get_table_schema("cookie_cache")
     names = [c["name"] for c in schema]
@@ -227,12 +241,16 @@ def test_old_db_migration_adds_enabled_column():
             );
             INSERT INTO account_cache(记录ID, 账号标识) VALUES('a1', 'sec1');
         """)
-    # 重新初始化 Database，应自动加"启用"字段
+    # 重新初始化 Database，应自动加"启用/采集类型/代理"三个字段
     d2 = Database(db_path=p)
     schema = d2.get_table_schema("account_cache")
     names = [c["name"] for c in schema]
     assert "启用" in names
-    # 旧数据应保留，且启用字段默认为 1
+    assert "采集类型" in names
+    assert "代理" in names
+    # 旧数据应保留，且新字段使用默认值
     acc = d2.get_account_by_id("a1")
     assert acc is not None
     assert acc["启用"] in (1, True)
+    assert acc["采集类型"] == "发布"  # 默认值
+    assert acc["代理"] is None
