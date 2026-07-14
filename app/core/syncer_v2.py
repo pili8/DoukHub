@@ -295,39 +295,48 @@ class Syncer:
                     new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
                     merged_tags = self.merge_tags(existing_tags, new_tags)
 
-                    # 更新账号表
+                    # 先更新等级/标签（不碰 已获取信息）
                     self.db.update_account(existing_account["记录ID"], {
                         "等级": new_level,
                         "标签": json.dumps(merged_tags),
-                        "已获取信息": True,
                     })
+                    account_id = existing_account["记录ID"]
+                    need_fetch = not existing_account.get("已获取信息")
                 else:
-                    # 调用 API 获取账号信息
-                    cookies = self.db.get_enabled_cookies()
-                    cookie = cookies[0].get("Cookie", "") if cookies else ""
-                    info = await self.collector.get_account_info(sec_user_id, platform, cookie)
-                    if not info:
-                        result.failed += 1
-                        result.errors.append(f"{sec_user_id}: 无法获取账号信息")
-                        continue
-
-                    # 创建账号记录
+                    # 创建账号记录（已获取信息=False）
                     record_id = f"acc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{result.total}"
                     self.db.insert_account({
                         "记录ID": record_id,
-                        "账号名称": info.get("nickname", ""),
+                        "账号名称": "",
                         "平台": platform,
                         "链接": f"https://www.douyin.com/user/{sec_user_id}",
                         "sec_user_id": sec_user_id,
                         "等级": collection.get("等级"),
                         "标签": collection.get("标签"),
-                        "昵称": info.get("nickname", ""),
-                        "粉丝数": info.get("follower_count", 0),
-                        "作品数": info.get("aweme_count", 0),
-                        "签名": info.get("signature", ""),
-                        "头像": info.get("avatar", ""),
-                        "已获取信息": True,
+                        "已获取信息": False,
                     })
+                    account_id = record_id
+                    need_fetch = True
+
+                # 未获取信息的，调 API 补全
+                if need_fetch:
+                    cookies = self.db.get_enabled_cookies()
+                    cookie = cookies[0].get("Cookie", "") if cookies else ""
+                    info = await self.collector.get_account_info(sec_user_id, platform, cookie)
+                    if info and info.get("nickname"):
+                        self.db.update_account(account_id, {
+                            "账号名称": info.get("nickname", ""),
+                            "昵称": info.get("nickname", ""),
+                            "粉丝数": info.get("follower_count", 0),
+                            "作品数": info.get("aweme_count", 0),
+                            "签名": info.get("signature", ""),
+                            "头像": info.get("avatar", ""),
+                            "已获取信息": True,
+                        })
+                    else:
+                        result.failed += 1
+                        result.errors.append(f"{sec_user_id}: 无法获取账号信息")
+                        continue
 
                 result.success += 1
 
