@@ -1640,7 +1640,7 @@ async def api_feishu_full_from_feishu():
 
 @app.post("/api/feishu/sync/incremental")
 async def api_feishu_incremental_sync():
-    """日常增量同步：双向仅新增，不更新已有记录"""
+    """增量同步：双向仅新增，不更新已有记录"""
     fs = get_feishu_syncer()
     if not fs:
         return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
