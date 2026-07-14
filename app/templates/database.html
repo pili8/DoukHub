@@ -668,40 +668,59 @@
                         addLog(data.message, data.success ? 'ok' : 'error');
                         if (data.results) {
                             // 计算汇总数据
-                            let totalCreated = 0, totalUpdated = 0, totalUptodate = 0, totalDuplicate = 0, totalInvalid = 0, totalFailed = 0;
+                            let totalCreated = 0, totalUpdated = 0, totalDeleted = 0, totalSkipped = 0, totalFailed = 0;
                             for (const [label, vals] of Object.entries(data.results)) {
                                 totalCreated += vals.created || 0;
                                 totalUpdated += vals.updated || 0;
-                                totalUptodate += vals.uptodate || 0;
-                                totalDuplicate += vals.duplicate || 0;
-                                totalInvalid += vals.invalid || 0;
+                                totalDeleted += vals.deleted || 0;
+                                totalSkipped += (vals.uptodate || 0) + (vals.duplicate || 0) + (vals.invalid || 0);
                                 totalFailed += vals.failed || 0;
                             }
-                            // 显示汇总卡片
-                            let html = '<div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">';
-                            if (totalCreated > 0) html += `<div style="padding:10px 16px;background:#e8f5e9;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#4caf50;">${totalCreated}</div><div style="font-size:12px;color:#666;">新增</div></div>`;
-                            if (totalUpdated > 0) html += `<div style="padding:10px 16px;background:#e3f2fd;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#2196f3;">${totalUpdated}</div><div style="font-size:12px;color:#666;">更新</div></div>`;
-                            if (totalUptodate > 0) html += `<div style="padding:10px 16px;background:#f5f5f5;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#888;">${totalUptodate}</div><div style="font-size:12px;color:#666;">已最新</div></div>`;
-                            if (totalDuplicate > 0) html += `<div style="padding:10px 16px;background:#fff3e0;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#f39c12;">${totalDuplicate}</div><div style="font-size:12px;color:#666;">重复</div></div>`;
-                            if (totalInvalid > 0) html += `<div style="padding:10px 16px;background:#fafafa;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#999;">${totalInvalid}</div><div style="font-size:12px;color:#666;">无效</div></div>`;
-                            if (totalFailed > 0) html += `<div style="padding:10px 16px;background:#ffebee;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#f44336;">${totalFailed}</div><div style="font-size:12px;color:#666;">失败</div></div>`;
+                            
+                            // 顶部摘要：一句话总结变化
+                            let summary = '本次同步：';
+                            let summaryParts = [];
+                            if (totalCreated > 0) summaryParts.push(`<span style="color:#4caf50;font-weight:600;">新增 ${totalCreated} 条</span>`);
+                            if (totalUpdated > 0) summaryParts.push(`<span style="color:#2196f3;font-weight:600;">更新 ${totalUpdated} 条</span>`);
+                            if (totalDeleted > 0) summaryParts.push(`<span style="color:#f44336;font-weight:600;">删除 ${totalDeleted} 条</span>`);
+                            if (totalSkipped > 0) summaryParts.push(`<span style="color:#888;">跳过 ${totalSkipped} 条</span>`);
+                            if (totalFailed > 0) summaryParts.push(`<span style="color:#f44336;">失败 ${totalFailed} 条</span>`);
+                            summary += summaryParts.length > 0 ? summaryParts.join('，') : '<span style="color:#888;">无变化</span>';
+                            
+                            let html = `<div style="padding:12px;background:#fff;border-radius:6px;margin-bottom:12px;font-size:14px;">${summary}</div>`;
+                            
+                            // 变化统计卡片（只展示有变化的）
+                            html += '<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">';
+                            if (totalCreated > 0) html += `<div style="padding:12px 20px;background:#e8f5e9;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#4caf50;">+${totalCreated}</div><div style="font-size:13px;color:#666;margin-top:4px;">✅ 新增</div></div>`;
+                            if (totalUpdated > 0) html += `<div style="padding:12px 20px;background:#e3f2fd;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#2196f3;">~${totalUpdated}</div><div style="font-size:13px;color:#666;margin-top:4px;">🔄 更新</div></div>`;
+                            if (totalDeleted > 0) html += `<div style="padding:12px 20px;background:#ffebee;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#f44336;">-${totalDeleted}</div><div style="font-size:13px;color:#666;margin-top:4px;">🗑️ 删除</div></div>`;
+                            if (totalSkipped > 0) html += `<div style="padding:12px 20px;background:#f5f5f5;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#888;">⏭${totalSkipped}</div><div style="font-size:13px;color:#666;margin-top:4px;">跳过</div></div>`;
+                            if (totalFailed > 0) html += `<div style="padding:12px 20px;background:#ffebee;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#f44336;">!${totalFailed}</div><div style="font-size:13px;color:#666;margin-top:4px;">❌ 失败</div></div>`;
                             html += '</div>';
-                            // 显示详细分解
+                            
+                            // 详细分解（按方向展示）
                             html += '<div style="font-size:13px;line-height:1.8;">';
                             for (const [label, vals] of Object.entries(data.results)) {
                                 let parts = [];
-                                if (vals.created) parts.push('<span style="color:#4caf50;">新增 ' + vals.created + '</span>');
-                                if (vals.updated) parts.push('<span style="color:#2196f3;">更新 ' + vals.updated + '</span>');
-                                if (vals.uptodate) parts.push('<span style="color:#888;">已最新 ' + vals.uptodate + '</span>');
-                                if (vals.duplicate) parts.push('<span style="color:#f39c12;">重复 ' + vals.duplicate + '</span>');
-                                if (vals.invalid) parts.push('<span style="color:#999;">无效 ' + vals.invalid + '</span>');
-                                if (vals.failed) parts.push('<span style="color:#f44336;">失败 ' + vals.failed + '</span>');
-                                html += '<div style="padding:6px 0;border-bottom:1px solid #e0e0e0;"><span style="font-weight:600;">' + label + ':</span> ' + (parts.join(', ') || '<span style="color:#888;">无变化</span>') + '</div>';
+                                if (vals.created) parts.push(`<span style="color:#4caf50;">+${vals.created}</span>`);
+                                if (vals.updated) parts.push(`<span style="color:#2196f3;">~${vals.updated}</span>`);
+                                if (vals.deleted) parts.push(`<span style="color:#f44336;">-${vals.deleted}</span>`);
+                                if (vals.uptodate) parts.push(`<span style="color:#888;">⏭${vals.uptodate}</span>`);
+                                if (vals.duplicate) parts.push(`<span style="color:#f39c12;">重${vals.duplicate}</span>`);
+                                if (vals.invalid) parts.push(`<span style="color:#999;">无${vals.invalid}</span>`);
+                                if (vals.failed) parts.push(`<span style="color:#f44336;">!${vals.failed}</span>`);
+                                
+                                // 计算变化量
+                                const changes = (vals.created || 0) + (vals.updated || 0) + (vals.deleted || 0);
+                                const changeText = changes > 0 ? `<span style="background:#fff3e0;padding:2px 6px;border-radius:4px;font-size:11px;margin-left:6px;">变化 ${changes}</span>` : '';
+                                
+                                html += `<div style="padding:8px 0;border-bottom:1px solid #e0e0e0;"><span style="font-weight:600;">${label}</span>${changeText}: ${parts.length > 0 ? parts.join(' ') : '<span style="color:#888;">无变化</span>'}</div>`;
                             }
                             html += '</div>';
-                            // 显示错误信息
+                            
+                            // 错误信息
                             if (data.errors && data.errors.length > 0) {
-                                html += '<div style="margin-top:12px;padding:10px;background:#ffebee;border-radius:6px;font-size:12px;color:#c62828;"><div style="font-weight:600;margin-bottom:6px;">错误详情:</div>' + data.errors.slice(0, 5).map(e => '<div>' + e + '</div>').join('') + (data.errors.length > 5 ? '<div style="color:#888;margin-top:4px;">... 还有 ' + (data.errors.length - 5) + ' 个错误</div>' : '') + '</div>';
+                                html += '<div style="margin-top:12px;padding:10px;background:#ffebee;border-radius:6px;font-size:12px;color:#c62828;"><div style="font-weight:600;margin-bottom:6px;">❌ 错误详情:</div>' + data.errors.slice(0, 5).map(e => '<div style="margin-top:4px;">• ' + e + '</div>').join('') + (data.errors.length > 5 ? '<div style="color:#888;margin-top:4px;">... 还有 ' + (data.errors.length - 5) + ' 个错误</div>' : '') + '</div>';
                             }
                             resultContent.innerHTML = html;
                             result.style.display = 'block';
