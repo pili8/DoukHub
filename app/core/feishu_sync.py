@@ -277,18 +277,20 @@ class FeishuSyncer:
                     continue
                 if rid and rid in feishu_index:
                     if incremental:
-                        fs_time = self._safe_int(feishu_index[rid].get("fields", {}).get("\u540c\u6b65\u65f6\u95f4", 0))
-                        local_time = self._parse_local_time(local.get("\u540c\u6b65\u65f6\u95f4", ""))
-                        if fs_time and local_time and fs_time >= local_time - 5000:
+                        # 比较「最后更新时间」
+                        fs_update_time = self._safe_int(feishu_index[rid].get("fields", {}).get("最后更新时间", 0))
+                        local_update_time = self._parse_local_time(local.get("最后更新时间", ""))
+                        # 如果飞书的最后更新时间 >= 本地的最后更新时间，说明飞书已是最新
+                        if fs_update_time and local_update_time and fs_update_time >= local_update_time - 5000:
                             result["skipped_uptodate"] += 1
                             continue
                     fields = build_fn(local)
                     if fields:
                         to_update.append({"record_id": rid, "fields": fields})
-                        sync_ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
-                        if sync_ts and db_update_fn:
+                        # 更新本地的最后更新时间为当前时间
+                        if db_update_fn:
                             try:
-                                db_update_fn(rid, {"\u540c\u6b65\u65f6\u95f4": datetime.fromtimestamp(sync_ts / 1000).strftime("%Y-%m-%d %H:%M:%S")})
+                                db_update_fn(rid, {"最后更新时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
                             except Exception:
                                 pass
                 else:
@@ -374,10 +376,11 @@ class FeishuSyncer:
     # ========== 飞书 -> 本地（增量） ==========
 
     def _from_feishu_incremental(self, table_id, db_get_by_id, convert_fn, db_update_fn, db_insert_fn):
-        # 飞书→本地方向：总是更新，因为飞书 API 不提供记录修改时间
+        # 飞书→本地方向：比较「最后更新时间」，只更新有变化的记录
+        # skipped_uptodate: 本地已是最新的（最后更新时间相同或更新）
         # skipped_duplicate: 飞书数据 UNIQUE 字段与本地已有冲突（如同一分享码录了多次）
         # skipped_invalid: 转换函数返回 None（数据本身缺关键字段）
-        result = {"created": 0, "updated": 0, "skipped_duplicate": 0, "skipped_invalid": 0, "failed": 0, "errors": []}
+        result = {"created": 0, "updated": 0, "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0, "failed": 0, "errors": []}
         if not table_id:
             return result
         try:
@@ -386,14 +389,23 @@ class FeishuSyncer:
                 fields = record.get("fields", {})
                 existing = db_get_by_id(rid)
                 if existing:
-                    # 总是更新：将飞书数据覆盖到本地
+                    # 比较「最后更新时间」
+                    feishu_update_time = self._safe_int(fields.get("最后更新时间", 0))
+                    local_update_time = self._parse_local_time(existing.get("最后更新时间", ""))
+                    
+                    # 如果飞书的最后更新时间 <= 本地的最后更新时间，说明本地已是最新
+                    if feishu_update_time and local_update_time and feishu_update_time <= local_update_time + 5000:
+                        result["skipped_uptodate"] += 1
+                        continue
+                    
+                    # 飞书有更新，同步到本地
                     try:
                         local_data = convert_fn(record)
                         if local_data:
                             local_data["synced"] = True
-                            ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
-                            if ts:
-                                local_data["\u540c\u6b65\u65f6\u95f4"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                            # 保存飞书的最后更新时间到本地
+                            if feishu_update_time:
+                                local_data["最后更新时间"] = datetime.fromtimestamp(feishu_update_time / 1000).strftime("%Y-%m-%d %H:%M:%S")
                             db_update_fn(rid, local_data)
                             result["updated"] += 1
                         else:
@@ -402,15 +414,16 @@ class FeishuSyncer:
                         result["failed"] += 1
                         result["errors"].append(f"{rid}: {e}")
                     continue
+                # 新记录，插入本地
                 local_data = convert_fn(record)
                 if not local_data:
                     result["skipped_invalid"] += 1
                     continue
-                local_data["\u8bb0\u5f55ID"] = rid
+                local_data["记录ID"] = rid
                 local_data["synced"] = True
-                ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
-                if ts:
-                    local_data["\u540c\u6b65\u65f6\u95f4"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                feishu_update_time = self._safe_int(fields.get("最后更新时间", 0))
+                if feishu_update_time:
+                    local_data["最后更新时间"] = datetime.fromtimestamp(feishu_update_time / 1000).strftime("%Y-%m-%d %H:%M:%S")
                 try:
                     db_insert_fn(local_data)
                     result["created"] += 1

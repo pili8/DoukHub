@@ -177,6 +177,11 @@ class Database:
             add_columns.setdefault(_tbl, []).append(
                 ("synced", "BOOLEAN DEFAULT 0"),
             )
+        # 最后更新时间：用于增量同步检测数据变化
+        for _tbl in ("collection_cache", "account_cache", "cookie_cache"):
+            add_columns.setdefault(_tbl, []).append(
+                ("最后更新时间", "DATETIME"),
+            )
         for table, renames in rename_map.items():
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
             for old, new in renames:
@@ -238,8 +243,9 @@ class Database:
     def update_collection(self, record_id: str, data: dict) -> bool:
         """更新采集表记录"""
         with self._connect() as conn:
-            if "同步时间" not in data:
-                data["同步时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 自动更新「最后更新时间」字段
+            if "最后更新时间" not in data:
+                data["最后更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE collection_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
             conn.commit()
@@ -294,8 +300,9 @@ class Database:
     def update_account(self, record_id: str, data: dict) -> bool:
         """更新账号表记录"""
         with self._connect() as conn:
-            if "同步时间" not in data:
-                data["同步时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 自动更新「最后更新时间」字段
+            if "最后更新时间" not in data:
+                data["最后更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE account_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
             conn.commit()
@@ -344,8 +351,9 @@ class Database:
     def update_cookie(self, record_id: str, data: dict) -> bool:
         """更新 Cookie 记录"""
         with self._connect() as conn:
-            if "同步时间" not in data:
-                data["同步时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 自动更新「最后更新时间」字段
+            if "最后更新时间" not in data:
+                data["最后更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE cookie_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
             conn.commit()
