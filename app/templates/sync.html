@@ -130,7 +130,41 @@
     </div>
 </div>
 
-<!-- 3. 同步 -->
+<!-- 3. 飞书双向增量同步 -->
+<div class="card">
+    <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
+        🔄 飞书双向增量同步 <span style="font-size:13px;color:#888;font-weight:normal;">本地 ↔ 飞书</span>
+        <span class="collapse-icon">▼</span>
+    </h3>
+    <div class="card-content">
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
+            <button class="btn btn-primary" onclick="startIncrementalSync()" id="incr-sync-btn">▶ 开始同步</button>
+            <button class="btn btn-danger" onclick="stopIncrementalSync()" id="stop-incr-sync-btn" style="display:none;">⏹ 停止</button>
+            <span id="incr-sync-status" style="font-size:13px;color:#888;"></span>
+        </div>
+        <div style="font-size:12px;color:#888;margin-bottom:12px;">
+            双向同步采集表、账号表、Cookie表，仅同步新增和更新的记录
+        </div>
+        
+        <!-- 进度区域 -->
+        <div id="incr-progress-area" style="display:none;">
+            <div class="progress-bar-container" style="margin-bottom:8px;">
+                <div class="progress-bar" id="incr-progress-bar" style="width:0%"></div>
+            </div>
+            <div id="incr-progress-steps"></div>
+        </div>
+        
+        <!-- 结果区域 -->
+        <div id="incr-result-area" style="display:none;margin-top:16px;padding:12px;background:#f8f9fa;border-radius:6px;">
+            <div style="font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                <span>📊</span> 同步结果
+            </div>
+            <div id="incr-result-content"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 4. 同步 -->
 <div class="card">
     <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
         🔄 三步同步 <span style="font-size:13px;color:#888;font-weight:normal;">导入 → 解析 → 同步</span>
@@ -1078,6 +1112,210 @@
                 btn.disabled = false;
                 btn.textContent = '🔄 飞书同步';
             }
+        }
+    }
+
+    // ========== 飞书双向增量同步 ==========
+    let incrSyncAbortController = null;
+
+    async function startIncrementalSync() {
+        const btn = document.getElementById('incr-sync-btn');
+        const stopBtn = document.getElementById('stop-incr-sync-btn');
+        const status = document.getElementById('incr-sync-status');
+        const progressArea = document.getElementById('incr-progress-area');
+        const resultArea = document.getElementById('incr-result-area');
+        
+        btn.disabled = true;
+        btn.textContent = '同步中...';
+        stopBtn.style.display = 'inline-block';
+        status.textContent = '正在连接...';
+        status.style.color = '#888';
+        progressArea.style.display = 'block';
+        resultArea.style.display = 'none';
+        
+        incrSyncAbortController = new AbortController();
+        
+        try {
+            const response = await fetch('/api/feishu/sync/incremental', {
+                method: 'POST',
+                signal: incrSyncAbortController.signal
+            });
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            
+            const progressBar = document.getElementById('incr-progress-bar');
+            const progressSteps = document.getElementById('incr-progress-steps');
+            progressSteps.innerHTML = '';
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.substring(6));
+                            handleIncrSyncEvent(data, progressBar, progressSteps, status);
+                        } catch (e) {
+                            console.error('Parse error:', e, line);
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                status.textContent = '已停止';
+                status.style.color = '#f39c12';
+                showToast('同步已停止', 'error');
+            } else {
+                status.textContent = '失败: ' + e.message;
+                status.style.color = '#e74c3c';
+                showToast('同步请求失败: ' + e.message, 'error');
+            }
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '▶ 开始同步';
+            stopBtn.style.display = 'none';
+            incrSyncAbortController = null;
+        }
+    }
+
+    function handleIncrSyncEvent(data, progressBar, progressSteps, status) {
+        const type = data.type;
+        
+        if (type === 'start') {
+            status.textContent = data.message || '开始同步...';
+            status.style.color = '#888';
+        }
+        else if (type === 'progress') {
+            status.textContent = data.message;
+            // 添加进度步骤
+            const stepDiv = document.createElement('div');
+            stepDiv.className = 'incr-step-item';
+            stepDiv.style.cssText = 'padding:8px 12px;margin-bottom:6px;border-radius:6px;background:#e3f2fd;border-left:3px solid #2196f3;font-size:13px;';
+            stepDiv.textContent = data.message;
+            progressSteps.appendChild(stepDiv);
+        }
+        else if (type === 'log') {
+            const level = data.level;
+            const msg = data.message;
+            // 更新最后一个进度步骤
+            const lastStep = progressSteps.lastElementChild;
+            if (lastStep) {
+                if (level === 'ok') {
+                    lastStep.style.background = '#e8f5e9';
+                    lastStep.style.borderLeftColor = '#4caf50';
+                    lastStep.textContent = msg;
+                } else if (level === 'error') {
+                    lastStep.style.background = '#ffebee';
+                    lastStep.style.borderLeftColor = '#f44336';
+                    lastStep.textContent = msg;
+                }
+            }
+        }
+        else if (type === 'stats') {
+            const step = data.step;
+            const total = data.total;
+            const percent = Math.round((step / total) * 100);
+            progressBar.style.width = percent + '%';
+        }
+        else if (type === 'complete') {
+            const success = data.success;
+            const message = data.message;
+            const results = data.results || {};
+            const errors = data.errors || [];
+            
+            status.textContent = message;
+            status.style.color = success ? '#27ae60' : '#e74c3c';
+            progressBar.style.width = '100%';
+            progressBar.style.background = success ? '#4caf50' : '#f44336';
+            
+            // 显示结果
+            showIncrSyncResults(results, errors, success);
+            
+            if (success) {
+                showToast(message, 'success');
+            } else {
+                showToast(message, 'error');
+            }
+        }
+    }
+
+    function showIncrSyncResults(results, errors, success) {
+        const resultArea = document.getElementById('incr-result-area');
+        const resultContent = document.getElementById('incr-result-content');
+        
+        resultArea.style.display = 'block';
+        resultContent.innerHTML = '';
+        
+        // 汇总信息
+        let totalCreated = 0, totalUpdated = 0, totalFailed = 0;
+        for (const [label, result] of Object.entries(results)) {
+            totalCreated += result.created || 0;
+            totalUpdated += result.updated || 0;
+            totalFailed += result.failed || 0;
+        }
+        
+        // 汇总卡片
+        const summaryDiv = document.createElement('div');
+        summaryDiv.style.cssText = 'display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;';
+        summaryDiv.innerHTML = `
+            <div style="padding:10px 16px;background:#e8f5e9;border-radius:6px;min-width:80px;">
+                <div style="font-size:20px;font-weight:bold;color:#4caf50;">${totalCreated}</div>
+                <div style="font-size:12px;color:#666;">新增</div>
+            </div>
+            <div style="padding:10px 16px;background:#e3f2fd;border-radius:6px;min-width:80px;">
+                <div style="font-size:20px;font-weight:bold;color:#2196f3;">${totalUpdated}</div>
+                <div style="font-size:12px;color:#666;">更新</div>
+            </div>
+            <div style="padding:10px 16px;background:${totalFailed > 0 ? '#ffebee' : '#f5f5f5'};border-radius:6px;min-width:80px;">
+                <div style="font-size:20px;font-weight:bold;color:${totalFailed > 0 ? '#f44336' : '#999'};">${totalFailed}</div>
+                <div style="font-size:12px;color:#666;">失败</div>
+            </div>
+        `;
+        resultContent.appendChild(summaryDiv);
+        
+        // 详细结果
+        const detailsDiv = document.createElement('div');
+        detailsDiv.style.cssText = 'font-size:13px;line-height:1.8;';
+        
+        for (const [label, result] of Object.entries(results)) {
+            const parts = [];
+            if (result.created) parts.push(`<span style="color:#4caf50;">新增 ${result.created}</span>`);
+            if (result.updated) parts.push(`<span style="color:#2196f3;">更新 ${result.updated}</span>`);
+            if (result.uptodate) parts.push(`<span style="color:#888;">已最新 ${result.uptodate}</span>`);
+            if (result.duplicate) parts.push(`<span style="color:#f39c12;">重复 ${result.duplicate}</span>`);
+            if (result.invalid) parts.push(`<span style="color:#999;">无效 ${result.invalid}</span>`);
+            if (result.failed) parts.push(`<span style="color:#f44336;">失败 ${result.failed}</span>`);
+            
+            const row = document.createElement('div');
+            row.style.cssText = 'padding:6px 0;border-bottom:1px solid #e0e0e0;';
+            row.innerHTML = `<span style="font-weight:600;">${label}:</span> ${parts.join(', ') || '<span style="color:#888;">无变化</span>'}`;
+            detailsDiv.appendChild(row);
+        }
+        
+        resultContent.appendChild(detailsDiv);
+        
+        // 错误信息
+        if (errors.length > 0) {
+            const errorDiv = document.createElement('div');
+            errorDiv.style.cssText = 'margin-top:12px;padding:10px;background:#ffebee;border-radius:6px;font-size:12px;color:#c62828;';
+            errorDiv.innerHTML = '<div style="font-weight:600;margin-bottom:6px;">错误详情:</div>' + 
+                errors.slice(0, 5).map(e => `<div>${e}</div>`).join('') +
+                (errors.length > 5 ? `<div style="color:#888;margin-top:4px;">... 还有 ${errors.length - 5} 个错误</div>` : '');
+            resultContent.appendChild(errorDiv);
+        }
+    }
+
+    function stopIncrementalSync() {
+        if (incrSyncAbortController) {
+            incrSyncAbortController.abort();
         }
     }
 </script>

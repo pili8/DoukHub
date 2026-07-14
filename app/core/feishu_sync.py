@@ -194,7 +194,7 @@ class FeishuSyncer:
             "\u5df2\u540c\u6b65": self._feishu_to_db_synced(fields.get("\u540c\u6b65\u72b6\u6001")),
         }
         if fields.get("sec_user_id"):
-            data["\u8d26\u53f7\u6807\u8bc6"] = fields["sec_user_id"]
+            data["sec_user_id"] = fields["sec_user_id"]
         tags = fields.get("\u6807\u7b7e")
         if tags:
             data["\u6807\u7b7e"] = json.dumps(tags if isinstance(tags, list) else [str(tags)])
@@ -307,8 +307,6 @@ class FeishuSyncer:
                                         db_update_fn(oid, update_data)
                                     except Exception:
                                         pass
-                        result["failed"] += len(batch)
-                        result["errors"].append("create: " + resp.get("msg", ""))
                 except Exception as e:
                     result["failed"] += len(batch)
                     result["errors"].append("create err: " + str(e))
