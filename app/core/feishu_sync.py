@@ -374,10 +374,10 @@ class FeishuSyncer:
     # ========== 飞书 -> 本地（增量） ==========
 
     def _from_feishu_incremental(self, table_id, db_get_by_id, convert_fn, db_update_fn, db_insert_fn):
-        # skipped_uptodate: 本地已是最新的（数据内容相同）
+        # 飞书→本地方向：总是更新，因为飞书 API 不提供记录修改时间
         # skipped_duplicate: 飞书数据 UNIQUE 字段与本地已有冲突（如同一分享码录了多次）
         # skipped_invalid: 转换函数返回 None（数据本身缺关键字段）
-        result = {"created": 0, "updated": 0, "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0, "failed": 0, "errors": []}
+        result = {"created": 0, "updated": 0, "skipped_duplicate": 0, "skipped_invalid": 0, "failed": 0, "errors": []}
         if not table_id:
             return result
         try:
@@ -386,38 +386,18 @@ class FeishuSyncer:
                 fields = record.get("fields", {})
                 existing = db_get_by_id(rid)
                 if existing:
-                    # 比较实际数据内容，而不仅仅是时间戳
-                    local_data = convert_fn(record)
-                    if not local_data:
-                        result["skipped_invalid"] += 1
-                        continue
-                    
-                    # 检查数据是否有变化
-                    has_changes = False
-                    for key, value in local_data.items():
-                        if key in ("记录ID", "synced", "同步时间"):
-                            continue  # 跳过元数据字段
-                        existing_value = existing.get(key)
-                        # 处理不同类型的数据比较
-                        if isinstance(value, bool) or isinstance(existing_value, bool):
-                            if bool(value) != bool(existing_value):
-                                has_changes = True
-                                break
-                        elif str(value) != str(existing_value):
-                            has_changes = True
-                            break
-                    
-                    if not has_changes:
-                        result["skipped_uptodate"] += 1
-                        continue
-                    
+                    # 总是更新：将飞书数据覆盖到本地
                     try:
-                        local_data["synced"] = True
-                        ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
-                        if ts:
-                            local_data["\u540c\u6b65\u65f6\u95f4"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
-                        db_update_fn(rid, local_data)
-                        result["updated"] += 1
+                        local_data = convert_fn(record)
+                        if local_data:
+                            local_data["synced"] = True
+                            ts = self._safe_int(fields.get("\u540c\u6b65\u65f6\u95f4", 0))
+                            if ts:
+                                local_data["\u540c\u6b65\u65f6\u95f4"] = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                            db_update_fn(rid, local_data)
+                            result["updated"] += 1
+                        else:
+                            result["skipped_invalid"] += 1
                     except Exception as e:
                         result["failed"] += 1
                         result["errors"].append(f"{rid}: {e}")
