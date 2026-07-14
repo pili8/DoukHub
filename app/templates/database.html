@@ -55,11 +55,19 @@
     </div>
 
     <div id="feishu-sync-status" style="font-size:13px;margin-top:12px;"></div>
-    <div id="feishu-sync-progress" style="display:none;margin-top:8px;height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden;">
-        <div id="feishu-sync-bar" style="height:100%;width:0%;background:#3498db;transition:width 0.3s;"></div>
+    <!-- 进度区域 -->
+    <div id="feishu-sync-progress" style="display:none;margin-top:12px;padding:16px;background:#e3f2fd;border-left:4px solid #2196f3;border-radius:6px;">
+        <div style="font-weight:600;margin-bottom:10px;color:#1565c0;font-size:14px;">⏳ 同步进度</div>
+        <div style="height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden;margin-bottom:8px;">
+            <div id="feishu-sync-bar" style="height:100%;width:0%;background:#2196f3;transition:width 0.3s;"></div>
+        </div>
+        <div id="feishu-sync-log" style="max-height:200px;overflow-y:auto;font-size:13px;font-family:monospace;"></div>
     </div>
-    <div id="feishu-sync-log" style="display:none;margin-top:8px;max-height:200px;overflow-y:auto;font-size:13px;font-family:monospace;"></div>
-    <div id="feishu-sync-result" style="margin-top:12px;display:none;"></div>
+    <!-- 结果区域 -->
+    <div id="feishu-sync-result" style="margin-top:16px;padding:16px;background:#f5f5f5;border-left:4px solid #4caf50;border-radius:6px;display:none;">
+        <div style="font-weight:600;margin-bottom:12px;color:#2e7d32;font-size:14px;">📊 同步结果</div>
+        <div id="feishu-sync-result-content"></div>
+    </div>
 </div>
 
 <!-- 搜索 -->
@@ -603,6 +611,7 @@
         btns.forEach(b => b.disabled = true);
         const status = document.getElementById('feishu-sync-status');
         const result = document.getElementById('feishu-sync-result');
+        const resultContent = document.getElementById('feishu-sync-result-content');
         const progressDiv = document.getElementById('feishu-sync-progress');
         const barDiv = document.getElementById('feishu-sync-bar');
         const logDiv = document.getElementById('feishu-sync-log');
@@ -658,18 +667,44 @@
                         status.style.color = data.success ? '#27ae60' : '#e74c3c';
                         addLog(data.message, data.success ? 'ok' : 'error');
                         if (data.results) {
-                            let html = '';
+                            // 计算汇总数据
+                            let totalCreated = 0, totalUpdated = 0, totalUptodate = 0, totalDuplicate = 0, totalInvalid = 0, totalFailed = 0;
+                            for (const [label, vals] of Object.entries(data.results)) {
+                                totalCreated += vals.created || 0;
+                                totalUpdated += vals.updated || 0;
+                                totalUptodate += vals.uptodate || 0;
+                                totalDuplicate += vals.duplicate || 0;
+                                totalInvalid += vals.invalid || 0;
+                                totalFailed += vals.failed || 0;
+                            }
+                            // 显示汇总卡片
+                            let html = '<div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;">';
+                            if (totalCreated > 0) html += `<div style="padding:10px 16px;background:#e8f5e9;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#4caf50;">${totalCreated}</div><div style="font-size:12px;color:#666;">新增</div></div>`;
+                            if (totalUpdated > 0) html += `<div style="padding:10px 16px;background:#e3f2fd;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#2196f3;">${totalUpdated}</div><div style="font-size:12px;color:#666;">更新</div></div>`;
+                            if (totalUptodate > 0) html += `<div style="padding:10px 16px;background:#f5f5f5;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#888;">${totalUptodate}</div><div style="font-size:12px;color:#666;">已最新</div></div>`;
+                            if (totalDuplicate > 0) html += `<div style="padding:10px 16px;background:#fff3e0;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#f39c12;">${totalDuplicate}</div><div style="font-size:12px;color:#666;">重复</div></div>`;
+                            if (totalInvalid > 0) html += `<div style="padding:10px 16px;background:#fafafa;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#999;">${totalInvalid}</div><div style="font-size:12px;color:#666;">无效</div></div>`;
+                            if (totalFailed > 0) html += `<div style="padding:10px 16px;background:#ffebee;border-radius:6px;min-width:80px;"><div style="font-size:20px;font-weight:bold;color:#f44336;">${totalFailed}</div><div style="font-size:12px;color:#666;">失败</div></div>`;
+                            html += '</div>';
+                            // 显示详细分解
+                            html += '<div style="font-size:13px;line-height:1.8;">';
                             for (const [label, vals] of Object.entries(data.results)) {
                                 let parts = [];
-                                if (vals.created) parts.push('新增 ' + vals.created);
-                                if (vals.updated) parts.push('更新 ' + vals.updated);
-                                if (vals.uptodate) parts.push('已最新 ' + vals.uptodate);
-                                if (vals.duplicate) parts.push('重复 ' + vals.duplicate);
-                                if (vals.invalid) parts.push('无效 ' + vals.invalid);
-                                if (vals.failed) parts.push('失败 ' + vals.failed);
-                                html += '<div>' + label + ': ' + (parts.join(', ') || '无变化') + '</div>';
+                                if (vals.created) parts.push('<span style="color:#4caf50;">新增 ' + vals.created + '</span>');
+                                if (vals.updated) parts.push('<span style="color:#2196f3;">更新 ' + vals.updated + '</span>');
+                                if (vals.uptodate) parts.push('<span style="color:#888;">已最新 ' + vals.uptodate + '</span>');
+                                if (vals.duplicate) parts.push('<span style="color:#f39c12;">重复 ' + vals.duplicate + '</span>');
+                                if (vals.invalid) parts.push('<span style="color:#999;">无效 ' + vals.invalid + '</span>');
+                                if (vals.failed) parts.push('<span style="color:#f44336;">失败 ' + vals.failed + '</span>');
+                                html += '<div style="padding:6px 0;border-bottom:1px solid #e0e0e0;"><span style="font-weight:600;">' + label + ':</span> ' + (parts.join(', ') || '<span style="color:#888;">无变化</span>') + '</div>';
                             }
-                            if (html) { result.innerHTML = html; result.style.display = 'block'; }
+                            html += '</div>';
+                            // 显示错误信息
+                            if (data.errors && data.errors.length > 0) {
+                                html += '<div style="margin-top:12px;padding:10px;background:#ffebee;border-radius:6px;font-size:12px;color:#c62828;"><div style="font-weight:600;margin-bottom:6px;">错误详情:</div>' + data.errors.slice(0, 5).map(e => '<div>' + e + '</div>').join('') + (data.errors.length > 5 ? '<div style="color:#888;margin-top:4px;">... 还有 ' + (data.errors.length - 5) + ' 个错误</div>' : '') + '</div>';
+                            }
+                            resultContent.innerHTML = html;
+                            result.style.display = 'block';
                         }
                         refreshStats();
                     }
