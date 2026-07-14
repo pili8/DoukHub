@@ -80,34 +80,39 @@ class FeishuSyncer:
 
     def _build_collection_fields(self, record: dict) -> dict:
         fields = {
-            "Share": record.get("\u5206\u4eab\u7801", ""),
-            "\u5e73\u53f0": record.get("\u5e73\u53f0", ""),
-            "\u7b49\u7ea7": record.get("\u7b49\u7ea7", 3),
-            "\u540c\u6b65\u72b6\u6001": self._db_to_feishu_synced(record.get("\u5df2\u540c\u6b65", False)),
+            "Share": record.get("分享码", ""),
+            "平台": record.get("平台", ""),
+            "等级": record.get("等级", 3),
+            "同步状态": self._db_to_feishu_synced(record.get("已同步", False)),
         }
-        tags = record.get("\u6807\u7b7e")
+        tags = record.get("标签")
         if tags:
             try:
                 if isinstance(tags, str):
                     tags = json.loads(tags)
-                fields["\u6807\u7b7e"] = tags
+                fields["标签"] = tags
             except Exception:
                 pass
         if record.get("sec_user_id"):
             fields["sec_user_id"] = record["sec_user_id"]
-        if record.get("\u540c\u6b65\u9519\u8bef"):
-            fields["\u5907\u6ce8"] = record["\u540c\u6b65\u9519\u8bef"]
-        elif record.get("\u5907\u6ce8"):
-            fields["\u5907\u6ce8"] = record["\u5907\u6ce8"]
-        if record.get("\u6635\u79f0"):
-            fields["\u6635\u79f0"] = record["\u6635\u79f0"]
-        if record.get("\u7c89\u4e1d\u6570") is not None:
-            fields["\u7c89\u4e1d\u6570"] = record["\u7c89\u4e1d\u6570"]
-        if record.get("\u4f5c\u54c1\u6570") is not None:
-            fields["\u4f5c\u54c1\u6570"] = record["\u4f5c\u54c1\u6570"]
-        if record.get("\u8d26\u53f7\u540d\u79f0"):
-            fields["\u8d26\u53f7\u540d\u79f0"] = record["\u8d26\u53f7\u540d\u79f0"]
-        fields["\u540c\u6b65\u65f6\u95f4"] = int(_time.time() * 1000)
+        if record.get("同步错误"):
+            fields["备注"] = record["同步错误"]
+        elif record.get("备注"):
+            fields["备注"] = record["备注"]
+        if record.get("昵称"):
+            fields["昵称"] = record["昵称"]
+        if record.get("粉丝数") is not None:
+            fields["粉丝数"] = record["粉丝数"]
+        if record.get("作品数") is not None:
+            fields["作品数"] = record["作品数"]
+        if record.get("账号名称"):
+            fields["账号名称"] = record["账号名称"]
+        if record.get("签名"):
+            fields["签名"] = record["签名"]
+        if record.get("头像"):
+            # URL 字段需要对象格式
+            fields["头像"] = {"link": record["头像"], "text": "头像"}
+        fields["同步时间"] = int(_time.time() * 1000)
         return fields
 
     def _build_account_fields(self, record: dict) -> dict:
@@ -120,7 +125,8 @@ class FeishuSyncer:
             "已获取信息": bool(record.get("已获取信息", False)),
         }
         if record.get("链接"):
-            fields["链接"] = record["链接"]
+            # URL 字段需要对象格式
+            fields["链接"] = {"link": record["链接"], "text": "链接"}
         tags = record.get("标签")
         if tags:
             try:
@@ -138,7 +144,8 @@ class FeishuSyncer:
         if record.get("签名"):
             fields["签名"] = record["签名"]
         if record.get("头像"):
-            fields["头像"] = record["头像"]
+            # URL 字段需要对象格式
+            fields["头像"] = {"link": record["头像"], "text": "头像"}
         # 备注（本地"备注"对应飞书"备注"）
         if record.get("备注"):
             fields["备注"] = record["备注"]
