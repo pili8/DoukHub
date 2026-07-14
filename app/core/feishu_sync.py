@@ -93,8 +93,8 @@ class FeishuSyncer:
                 fields["\u6807\u7b7e"] = tags
             except Exception:
                 pass
-        if record.get("\u8d26\u53f7\u6807\u8bc6"):
-            fields["sec_user_id"] = record["\u8d26\u53f7\u6807\u8bc6"]
+        if record.get("sec_user_id"):
+            fields["sec_user_id"] = record["sec_user_id"]
         if record.get("\u540c\u6b65\u9519\u8bef"):
             fields["\u5907\u6ce8"] = record["\u540c\u6b65\u9519\u8bef"]
         elif record.get("\u5907\u6ce8"):

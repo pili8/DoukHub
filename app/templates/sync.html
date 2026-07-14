@@ -1054,10 +1054,9 @@
 
             progressBar.style.width = '100%';
             progressBar.style.background = '#27ae60';
-            progressText.textContent = '✅ 一键同步完成';
+            progressText.textContent = '✅ 一键同步完成 <button onclick="location.reload()" style="margin-left:12px;padding:4px 12px;font-size:12px;background:#3498db;color:white;border:none;border-radius:4px;cursor:pointer;">刷新页面</button>';
             addLog(logBox, '<div class="log-ok">✅ 全部步骤执行完成</div>');
             showToast('一键同步完成', 'success');
-            setTimeout(() => location.reload(), 2000);
         } catch (e) {
             if (e.name === 'AbortError') {
                 addLog(logBox, '<div class="log-info">→ 同步已停止</div>');
