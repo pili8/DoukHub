@@ -690,7 +690,7 @@
                             let html = `<div style="padding:12px;background:#fff;border-radius:6px;margin-bottom:12px;font-size:14px;">${summary}</div>`;
                             
                             // 变化统计卡片（只展示有变化的）
-                            html += '<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">';
+                            html += '<div style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap;">';
                             if (totalCreated > 0) html += `<div style="padding:12px 20px;background:#e8f5e9;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#4caf50;">+${totalCreated}</div><div style="font-size:13px;color:#666;margin-top:4px;">✅ 新增</div></div>`;
                             if (totalUpdated > 0) html += `<div style="padding:12px 20px;background:#e3f2fd;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#2196f3;">~${totalUpdated}</div><div style="font-size:13px;color:#666;margin-top:4px;">🔄 更新</div></div>`;
                             if (totalDeleted > 0) html += `<div style="padding:12px 20px;background:#ffebee;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#f44336;">-${totalDeleted}</div><div style="font-size:13px;color:#666;margin-top:4px;">🗑️ 删除</div></div>`;
@@ -698,23 +698,26 @@
                             if (totalFailed > 0) html += `<div style="padding:12px 20px;background:#ffebee;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#f44336;">!${totalFailed}</div><div style="font-size:13px;color:#666;margin-top:4px;">❌ 失败</div></div>`;
                             html += '</div>';
                             
-                            // 详细分解（按方向展示）
+                            // 图例说明
+                            html += '<div style="font-size:11px;color:#999;margin-bottom:12px;">符号说明：+新增 ~更新 -删除 ⏭跳过 !失败</div>';
+                            
+                            // 详细分解（按方向展示，用中文）
                             html += '<div style="font-size:13px;line-height:1.8;">';
                             for (const [label, vals] of Object.entries(data.results)) {
                                 let parts = [];
-                                if (vals.created) parts.push(`<span style="color:#4caf50;">+${vals.created}</span>`);
-                                if (vals.updated) parts.push(`<span style="color:#2196f3;">~${vals.updated}</span>`);
-                                if (vals.deleted) parts.push(`<span style="color:#f44336;">-${vals.deleted}</span>`);
-                                if (vals.uptodate) parts.push(`<span style="color:#888;">⏭${vals.uptodate}</span>`);
-                                if (vals.duplicate) parts.push(`<span style="color:#f39c12;">重${vals.duplicate}</span>`);
-                                if (vals.invalid) parts.push(`<span style="color:#999;">无${vals.invalid}</span>`);
-                                if (vals.failed) parts.push(`<span style="color:#f44336;">!${vals.failed}</span>`);
+                                if (vals.created) parts.push(`<span style="color:#4caf50;">新增 ${vals.created}</span>`);
+                                if (vals.updated) parts.push(`<span style="color:#2196f3;">更新 ${vals.updated}</span>`);
+                                if (vals.deleted) parts.push(`<span style="color:#f44336;">删除 ${vals.deleted}</span>`);
+                                if (vals.uptodate) parts.push(`<span style="color:#888;">跳过 ${vals.uptodate}</span>`);
+                                if (vals.duplicate) parts.push(`<span style="color:#f39c12;">重复 ${vals.duplicate}</span>`);
+                                if (vals.invalid) parts.push(`<span style="color:#999;">无效 ${vals.invalid}</span>`);
+                                if (vals.failed) parts.push(`<span style="color:#f44336;">失败 ${vals.failed}</span>`);
                                 
                                 // 计算变化量
                                 const changes = (vals.created || 0) + (vals.updated || 0) + (vals.deleted || 0);
                                 const changeText = changes > 0 ? `<span style="background:#fff3e0;padding:2px 6px;border-radius:4px;font-size:11px;margin-left:6px;">变化 ${changes}</span>` : '';
                                 
-                                html += `<div style="padding:8px 0;border-bottom:1px solid #e0e0e0;"><span style="font-weight:600;">${label}</span>${changeText}: ${parts.length > 0 ? parts.join(' ') : '<span style="color:#888;">无变化</span>'}</div>`;
+                                html += `<div style="padding:8px 0;border-bottom:1px solid #e0e0e0;"><span style="font-weight:600;">${label}</span>${changeText}：${parts.length > 0 ? parts.join('，') : '<span style="color:#888;">无变化</span>'}</div>`;
                             }
                             html += '</div>';
                             
