@@ -699,7 +699,9 @@
                             html += '</div>';
                             
                             // 图例说明
-                            html += '<div style="font-size:11px;color:#999;margin-bottom:12px;">符号说明：+新增 ~更新 -删除 ⏭跳过 !失败</div>';
+                            if (totalCreated > 0 || totalUpdated > 0 || totalDeleted > 0 || totalFailed > 0) {
+                                html += '<div style="font-size:11px;color:#999;margin-bottom:12px;">符号：+新增 ~更新 -删除 ⏭跳过（已存在） !失败</div>';
+                            }
                             
                             // 详细分解（按方向展示，用中文）
                             html += '<div style="font-size:13px;line-height:1.8;">';
