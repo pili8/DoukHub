@@ -293,8 +293,9 @@
                     const checked = value === true || value === 1 ? 'checked' : '';
                     const rid = row['记录ID'] || row['ID'] || '';
                     // 只对有主键的行可切换
-                    if (rid && col === '启用') {
-                        html += `<td style="padding:8px;border:1px solid #ddd;text-align:center;"><input type="checkbox" ${checked} onchange="toggleEnabled('${rid}', '${col}', this.checked)" title="启用/禁用"></td>`;
+                    if (rid && (col === '启用' || col === '已获取信息')) {
+                        const title = col === '启用' ? '启用/禁用' : '已获取信息/未获取信息';
+                        html += `<td style="padding:8px;border:1px solid #ddd;text-align:center;"><input type="checkbox" ${checked} onchange="toggleEnabled('${rid}', '${col}', this.checked)" title="${title}"></td>`;
                         return;
                     }
                     // 其他布尔字段只展示

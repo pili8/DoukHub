@@ -70,15 +70,83 @@
 .sync-log-box { max-height: 200px; overflow-y: auto; background: #1a1a2e; color: #ccc; border-radius: 6px; padding: 10px 14px; font-family: monospace; font-size: 12px; line-height: 1.6; }
 .sync-log-box .log-ok { color: #4caf50; }
 .sync-log-box .log-err { color: #f44336; }
-.sync-log-box .log-info { color: #64b5f6; }
-@media (max-width: 768px) {
-    .sync-stats-grid { grid-template-columns: repeat(2,1fr); }
-    .sync-textarea { font-size: 16px; }
-}
+    .sync-log-box .log-info { color: #64b5f6; }
+    
+    /* 增强样式 */
+    .sync-workflow {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+    
+    .sync-step {
+        flex: 1;
+        min-width: 200px;
+        padding: 16px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 12px;
+        text-align: center;
+    }
+    
+    .sync-step.completed {
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    }
+    
+    .sync-step.warning {
+        background: linear-gradient(135deg, #ff9a9e 0%, #fad0c4 100%);
+        color: #333;
+    }
+    
+    .sync-step-number {
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 8px;
+    }
+    
+    .sync-step-title {
+        font-size: 16px;
+        font-weight: 500;
+        margin-bottom: 4px;
+    }
+    
+    .sync-step-desc {
+        font-size: 12px;
+        opacity: 0.9;
+    }
+    
+    @media (max-width: 768px) {
+        .sync-stats-grid { grid-template-columns: repeat(2,1fr); }
+        .sync-textarea { font-size: 16px; }
+        .sync-workflow { flex-direction: column; }
+    }
 </style>
 
 <div class="page-header">
-    <h2>同步</h2>
+    <h2>🔄 同步管理</h2>
+    <div style="display: flex; gap: 8px;">
+        <button class="btn btn-outline" onclick="syncFeishu()" id="feishu-sync-btn">🔄 飞书同步</button>
+    </div>
+</div>
+
+<!-- 同步工作流程 -->
+<div class="sync-workflow">
+    <div class="sync-step" id="step1-indicator">
+        <div class="sync-step-number">①</div>
+        <div class="sync-step-title">导入采集表</div>
+        <div class="sync-step-desc">解析文本，去重合并</div>
+    </div>
+    <div class="sync-step" id="step2-indicator">
+        <div class="sync-step-number">②</div>
+        <div class="sync-step-title">解析账号标识</div>
+        <div class="sync-step-desc">获取sec_user_id</div>
+    </div>
+    <div class="sync-step" id="step3-indicator">
+        <div class="sync-step-number">③</div>
+        <div class="sync-step-title">同步账号表</div>
+        <div class="sync-step-desc">获取详情，回写飞书</div>
+    </div>
 </div>
 
 <!-- 1. 数据导入 -->
