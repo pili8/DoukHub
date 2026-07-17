@@ -1,15 +1,16 @@
-"""飞书双向同步 v2 - 本地数据库 <-> 飞书表
+"""飞书双向同步 v3 - 本地数据库 <-> 飞书表
 
-设计原则（参见 DEVELOPMENT.md 和方案讨论）：
+设计原则（方案 B：LWW 真双向同步）：
 
-1. 字段命名：业务字段中文与飞书 100% 一致，系统字段英文（record_id/is_deleted/synced 等）
-2. 冲突解决：人工字段（等级/标签/备注/启用/采集类型/已同步）飞书赢，API 字段（昵称/粉丝数/作品数/签名/头像/sec_user_id/链接）本地赢
+1. 字段命名：业务字段中文与飞书 100% 一致，系统字段英文（record_id/is_deleted/synced/local_updated_at 等）
+2. 冲突解决（LWW）：人工字段（等级/标签/备注/启用/采集类型/状态）两端都能改，比较最后修改时间，谁新谁赢
+   API 字段（昵称/粉丝数/作品数/签名/头像/sec_user_id/链接）仍为本地赢（DoukHub 是权威源）
 3. 业务唯一键去重：采集表=分享码，账号表=sec_user_id，Cookie表=Cookie
 4. 删除同步：
    - 飞书端直接删，本地通过差集反推感知（依赖 synced=1 标记）
    - 本地端软删除（is_deleted=1），推送墓碑到飞书，飞书删除后清本地墓碑
    - 删除优先：删除冲突时删除胜出
-5. 增量同步：基于字段值差异比对（不依赖时间戳）
+5. 增量同步：LWW 字段比较两端时间戳，其他字段基于值差异比对
 6. 全盘同步：以一端为基准清空+重建
 7. 安全保护：synced 过滤 + 空结果保护 + 50% 比例保护
 """
@@ -37,41 +38,34 @@ class FeishuSyncer:
     }
 
     # 业务字段（与飞书同步的字段，排除系统字段）
-    # 按字段归属分组：feishu_wins=人工字段（飞书赢），local_wins=API 字段（本地赢）
-    # 设计原则（方案 A：字段级单向）：
-    # - 人工字段：用户在飞书端手动修改的（等级、标签、备注、账号名称等）→ 飞书赢
-    # - API 字段：DoukHub 通过 TTD API 采集的（粉丝数、作品数、昵称等）→ 本地赢
-    # - 状态字段：DoukHub 内部状态（已同步、Cookie 状态等）→ 本地赢
-    # - 元数据：创建后不变的（分享码、平台、Cookie 字符串）→ 不参与冲突
+    # 按字段归属分组（方案 B：LWW 真双向同步）：
+    # - lww：两端都能改，比较最后修改时间，谁新谁赢（原方案 A 的 feishu_wins 字段全部改为此类型）
+    # - local_wins：DoukHub 是权威源，总是推送（API 字段、状态字段）
+    # - immutable：创建后不变，不参与冲突
+    # - sync_generated：同步动作产生的字段（同步时间等）
     #
-    # ⚠️ 方案 A 是「字段级单向同步」，不是真正的双向同步。
-    # 用户在「错的端」修改会被覆盖：
-    #   - 在本地改人工字段 → 不会被推送到飞书（飞书是权威源）
-    #   - 在飞书改 API 字段 → 不会被同步到本地（DoukHub 是权威源）
-    # 方案 B（计划在 feature/sync-v3-lww 分支实施）会改为真正的 LWW 双向同步。
+    # 方案 B 取消了「feishu_wins」类型，原 feishu_wins 字段全部改为 lww。
+    # Cookie 表的「状态」字段从 local_wins 改为 lww（两端都可能修改）。
     FIELD_OWNERSHIP = {
         "collection_cache": {
-            # 人工字段：用户在飞书端修改的
-            "feishu_wins": ["等级", "标签", "备注", "账号名称", "昵称", "粉丝数", "作品数", "签名", "头像"],
-            # API 字段 + 状态字段：DoukHub 写入的（sec_user_id 由步骤2 解析，已同步由步骤3 写入）
+            # LWW 字段：两端都能改，比较时间戳谁新谁赢
+            "lww": ["等级", "标签", "备注", "账号名称", "昵称", "粉丝数", "作品数", "签名", "头像"],
+            # 本地赢字段：DoukHub 是权威源
             "local_wins": ["sec_user_id", "已同步"],
             # 元数据：创建后不变
             "immutable": ["分享码", "平台"],
-            # 同步动作产生：同步器写回，不算业务字段冲突
+            # 同步产生
             "sync_generated": ["同步错误", "同步时间"],
         },
         "account_cache": {
-            # 人工字段：用户在飞书端修改的
-            "feishu_wins": ["等级", "标签", "备注", "启用", "采集类型", "账号名称"],
-            # API 字段：DoukHub 通过 API 采集的
+            "lww": ["等级", "标签", "备注", "启用", "采集类型", "账号名称"],
             "local_wins": ["sec_user_id", "昵称", "粉丝数", "作品数", "签名", "头像", "链接", "已获取信息"],
             "immutable": ["平台"],
             "sync_generated": ["同步时间"],
         },
         "cookie_cache": {
-            "feishu_wins": ["启用", "备注"],
-            # 状态字段：DoukHub 验证后写入（标记 Cookie 失效）
-            "local_wins": ["状态", "验证时间"],
+            "lww": ["启用", "备注", "状态"],
+            "local_wins": ["验证时间"],
             "immutable": ["Cookie", "平台"],
             "sync_generated": ["同步时间"],
         },
@@ -219,6 +213,59 @@ class FeishuSyncer:
             if ck.get("Cookie") == cookie_value:
                 return ck
         return None
+
+    # ========== 方案 B：LWW 时间戳辅助方法 ==========
+
+    @staticmethod
+    def _parse_local_timestamp(ts) -> int:
+        """本地时间戳（字符串）转毫秒 int
+
+        用于 LWW 比较：将本地的 local_updated_at（秒级字符串）
+        转换为毫秒级 int，与飞书的「最后更新时间」（毫秒）比较。
+        """
+        if not ts:
+            return 0
+        try:
+            if isinstance(ts, (int, float)):
+                return int(ts)
+            dt = datetime.strptime(str(ts), "%Y-%m-%d %H:%M:%S")
+            return int(dt.timestamp() * 1000)
+        except Exception:
+            return 0
+
+    def _get_feishu_timestamp(self, feishu_record: dict) -> int:
+        """从飞书记录提取「最后更新时间」（毫秒）
+
+        注意：飞书可能没建此字段（首次部署），返回 0。
+        """
+        fields = feishu_record.get("fields", {})
+        ts = fields.get("最后更新时间", 0)
+        try:
+            return int(ts) if ts else 0
+        except (TypeError, ValueError):
+            return 0
+
+    def _extract_field_value(self, field: str, feishu_val):
+        """从飞书值提取并转换为本地格式
+
+        用于 LWW 飞书赢时，将飞书值解析为本地可存储的格式。
+        """
+        if feishu_val is None:
+            return None
+        if field == "标签":
+            parsed = self._normalize_tags(feishu_val)
+            return json.dumps(parsed, ensure_ascii=False) if parsed else None
+        if field in ("等级", "粉丝数", "作品数"):
+            v = self._safe_int(feishu_val)
+            return v if v > 0 else None
+        if field in ("已同步", "已获取信息", "启用"):
+            return self._safe_bool(feishu_val)
+        if field == "状态":
+            v = self._parse_text_value(feishu_val)
+            return v if v else None
+        # 默认文本
+        v = self._parse_text_value(feishu_val)
+        return v if v else None
 
     @staticmethod
     def _merge_results(*results: dict) -> dict:
@@ -457,11 +504,19 @@ class FeishuSyncer:
         return local_str == feishu_str
 
     def _compute_field_updates(self, db_table: str, local_record: dict, feishu_record: dict) -> tuple[dict, dict]:
-        """按字段归属计算需要更新到两端的数据。
+        """按字段归属计算需要更新到两端的数据（方案 B：LWW）
 
         返回 (to_feishu_updates, to_local_updates)
-        - to_feishu_updates: 本地赢的字段，需要推送到飞书
-        - to_local_updates: 飞书赢的字段，需要更新到本地
+        - to_feishu_updates: 需要推送到飞书的字段（本地赢 + LWW 本地后改）
+        - to_local_updates: 需要更新到本地的字段（LWW 飞书后改）
+
+        LWW 逻辑：
+        1. local_wins 字段：总是推送本地值到飞书（不变）
+        2. lww 字段：比较两端最后修改时间，谁新谁赢
+           - 本地后改 → 推送本地值到飞书
+           - 飞书后改 → 更新本地
+           - 时间戳都缺失 → 默认飞书赢（保守）
+        3. 值相同时跳过（不比较时间戳）
         """
         ownership = self.FIELD_OWNERSHIP.get(db_table, {})
         feishu_fields = feishu_record.get("fields", {})
@@ -469,7 +524,7 @@ class FeishuSyncer:
         to_feishu = {}
         to_local = {}
 
-        # 本地赢的字段：值不同 → 推送到飞书
+        # === Step 1: 本地赢字段（不变，总是推送） ===
         for field in ownership.get("local_wins", []):
             local_val = local_record.get(field)
             feishu_val = feishu_fields.get(field)
@@ -478,26 +533,42 @@ class FeishuSyncer:
                 if local_val not in (None, "", 0) or feishu_val in (None, "", 0):
                     to_feishu[field] = local_val
 
-        # 飞书赢的字段：值不同 → 更新本地
-        for field in ownership.get("feishu_wins", []):
+        # === Step 2: LWW 字段（按时间戳判断） ===
+        local_ts = self._parse_local_timestamp(local_record.get("local_updated_at"))
+        feishu_ts = self._get_feishu_timestamp(feishu_record)
+
+        for field in ownership.get("lww", []):
             local_val = local_record.get(field)
             feishu_val = feishu_fields.get(field)
-            if not self._values_equal(field, local_val, feishu_val):
-                # 提取飞书的值
-                if field == "标签":
-                    parsed = self._normalize_tags(feishu_val)
-                    if parsed:
-                        to_local[field] = json.dumps(parsed, ensure_ascii=False)
-                elif field in ("等级",):
-                    pv = self._safe_int(feishu_val)
-                    if pv > 0:
-                        to_local[field] = pv
-                elif field in ("已同步", "已获取信息", "启用"):
-                    to_local[field] = self._safe_bool(feishu_val)
-                else:
-                    pv = self._parse_text_value(feishu_val)
-                    if pv:
-                        to_local[field] = pv
+            if self._values_equal(field, local_val, feishu_val):
+                continue  # 值相同，跳过
+
+            # 时间戳缺失时的兜底处理
+            # 飞书时间戳缺失时默认飞书赢（保守）：无法确定飞书最后修改时间，
+            # 不应覆盖飞书的值（PLAN_B_LWW.md 第六节场景1）
+            if local_ts == 0 and feishu_ts == 0:
+                # 两端都没时间戳（首次部署或字段未建），默认飞书赢
+                winner = "feishu"
+            elif local_ts == 0:
+                # 本地无时间戳（旧记录），飞书赢
+                winner = "feishu"
+            elif feishu_ts == 0:
+                # 飞书无时间戳（字段未建），保守选择飞书赢
+                winner = "feishu"
+            elif local_ts > feishu_ts:
+                winner = "local"
+            else:
+                winner = "feishu"  # 包括相等的情况（保守选择）
+
+            if winner == "local":
+                # 本地赢，推送本地值到飞书
+                if local_val not in (None, "", 0):
+                    to_feishu[field] = local_val
+            else:
+                # 飞书赢，更新本地
+                parsed = self._extract_field_value(field, feishu_val)
+                if parsed is not None:
+                    to_local[field] = parsed
 
         return to_feishu, to_local
 
@@ -609,7 +680,11 @@ class FeishuSyncer:
                         # 如果之前是按业务键匹配但 record_id 不一样，更新本地 record_id
                         if match_by == "key" and local.get("record_id") != matched_feishu["record_id"]:
                             try:
-                                update_fn(local["record_id"], {"record_id": matched_feishu["record_id"]})
+                                _sync_data = {"record_id": matched_feishu["record_id"]}
+                                _existing_ts = local.get("local_updated_at")
+                                if _existing_ts:
+                                    _sync_data["local_updated_at"] = _existing_ts
+                                update_fn(local["record_id"], _sync_data)
                             except Exception:
                                 pass
                     else:
@@ -617,7 +692,11 @@ class FeishuSyncer:
                         # 如果是按业务键匹配但 record_id 不一样，仍然更新本地 record_id
                         if match_by == "key" and local.get("record_id") != matched_feishu["record_id"]:
                             try:
-                                update_fn(local["record_id"], {"record_id": matched_feishu["record_id"], "synced": True})
+                                _sync_data = {"record_id": matched_feishu["record_id"], "synced": True}
+                                _existing_ts = local.get("local_updated_at")
+                                if _existing_ts:
+                                    _sync_data["local_updated_at"] = _existing_ts
+                                update_fn(local["record_id"], _sync_data)
                             except Exception:
                                 pass
 
@@ -637,13 +716,21 @@ class FeishuSyncer:
                                 oid = batch[j]["local"].get("record_id", "")
                                 if nid and oid:
                                     try:
-                                        update_fn(oid, {"record_id": nid, "synced": True})
+                                        _sync_data = {"record_id": nid, "synced": True}
+                                        _existing_ts = batch[j]["local"].get("local_updated_at")
+                                        if _existing_ts:
+                                            _sync_data["local_updated_at"] = _existing_ts
+                                        update_fn(oid, _sync_data)
                                     except Exception as e:
                                         logger.warning(f"更新 record_id 失败 {oid}→{nid}: {e}")
                                 elif nid:
                                     # 本地没 record_id，直接更新
                                     try:
-                                        update_fn(oid, {"synced": True})
+                                        _sync_data = {"synced": True}
+                                        _existing_ts = batch[j]["local"].get("local_updated_at")
+                                        if _existing_ts:
+                                            _sync_data["local_updated_at"] = _existing_ts
+                                        update_fn(oid, _sync_data)
                                     except Exception:
                                         pass
                     else:
@@ -666,7 +753,11 @@ class FeishuSyncer:
                             oid = b["local"].get("record_id", "")
                             if oid:
                                 try:
-                                    update_fn(oid, {"synced": True})
+                                    _sync_data = {"synced": True}
+                                    _existing_ts = b["local"].get("local_updated_at")
+                                    if _existing_ts:
+                                        _sync_data["local_updated_at"] = _existing_ts
+                                    update_fn(oid, _sync_data)
                                 except Exception:
                                     pass
                     else:
@@ -752,7 +843,11 @@ class FeishuSyncer:
                             # 否则正常合并 + 更新 record_id
                             if existing_rid and existing_rid != rid:
                                 try:
-                                    update_fn(existing_rid, {"record_id": rid, "synced": True})
+                                    _sync_data = {"record_id": rid, "synced": True}
+                                    _existing_ts = existing.get("local_updated_at")
+                                    if _existing_ts:
+                                        _sync_data["local_updated_at"] = _existing_ts
+                                    update_fn(existing_rid, _sync_data)
                                     existing["record_id"] = rid
                                 except Exception:
                                     pass
@@ -761,6 +856,13 @@ class FeishuSyncer:
                     # 都有 → 按字段归属合并
                     _, to_local_updates = self._compute_field_updates(db_table, existing, record)
                     if to_local_updates:
+                        # 方案 B：用飞书的最后更新时间作为本地的 local_updated_at，
+                        # 避免下次同步误判为"本地后改"。
+                        feishu_ts = self._get_feishu_timestamp(record)
+                        if feishu_ts:
+                            to_local_updates["local_updated_at"] = datetime.fromtimestamp(
+                                feishu_ts / 1000
+                            ).strftime("%Y-%m-%d %H:%M:%S")
                         to_local_updates["synced"] = True
                         try:
                             update_fn(rid or existing["record_id"], to_local_updates)
@@ -772,7 +874,11 @@ class FeishuSyncer:
                         # 字段相同，但可能需要补 synced 标记
                         if not existing.get("synced"):
                             try:
-                                update_fn(rid or existing["record_id"], {"synced": True})
+                                _sync_data = {"synced": True}
+                                _existing_ts = existing.get("local_updated_at")
+                                if _existing_ts:
+                                    _sync_data["local_updated_at"] = _existing_ts
+                                update_fn(rid or existing["record_id"], _sync_data)
                             except Exception:
                                 pass
                         result["skipped_uptodate"] += 1
@@ -1059,7 +1165,11 @@ class FeishuSyncer:
                                 oid = batch[j]["local"].get("record_id", "")
                                 if nid and oid:
                                     try:
-                                        update_fn(oid, {"record_id": nid, "synced": True})
+                                        _sync_data = {"record_id": nid, "synced": True}
+                                        _existing_ts = batch[j]["local"].get("local_updated_at")
+                                        if _existing_ts:
+                                            _sync_data["local_updated_at"] = _existing_ts
+                                        update_fn(oid, _sync_data)
                                     except Exception as e:
                                         logger.warning(f"更新 record_id 失败 {oid}→{nid}: {e}")
                     else:

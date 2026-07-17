@@ -46,7 +46,8 @@ class Database:
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     is_deleted BOOLEAN DEFAULT 0,
                     deleted_at DATETIME,
-                    synced BOOLEAN DEFAULT 0
+                    synced BOOLEAN DEFAULT 0,
+                    local_updated_at DATETIME
                 )
             """)
 
@@ -73,7 +74,8 @@ class Database:
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     is_deleted BOOLEAN DEFAULT 0,
                     deleted_at DATETIME,
-                    synced BOOLEAN DEFAULT 0
+                    synced BOOLEAN DEFAULT 0,
+                    local_updated_at DATETIME
                 )
             """)
 
@@ -91,7 +93,8 @@ class Database:
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     is_deleted BOOLEAN DEFAULT 0,
                     deleted_at DATETIME,
-                    synced BOOLEAN DEFAULT 0
+                    synced BOOLEAN DEFAULT 0,
+                    local_updated_at DATETIME
                 )
             """)
 
@@ -218,6 +221,11 @@ class Database:
             add_columns.setdefault(_tbl, []).append(
                 ("synced", "BOOLEAN DEFAULT 0"),
             )
+        # 方案 B：LWW 时间戳（本地最后修改时间，用于与飞书「最后更新时间」比较）
+        for _tbl in ("collection_cache", "account_cache", "cookie_cache"):
+            add_columns.setdefault(_tbl, []).append(
+                ("local_updated_at", "DATETIME"),
+            )
 
         # 执行 v1 业务字段重命名
         for table, renames in rename_map.items():
@@ -288,8 +296,14 @@ class Database:
             return True
 
     def update_collection(self, record_id: str, data: dict) -> bool:
-        """更新采集表记录"""
+        """更新采集表记录
+
+        方案 B：自动维护 local_updated_at（用于 LWW 比较）。
+        如果 data 中已显式传入 local_updated_at（如同步流程），则用传入值。
+        """
         with self._connect() as conn:
+            if "local_updated_at" not in data:
+                data["local_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE collection_cache SET {set_clause} WHERE record_id = ?", list(data.values()) + [record_id])
             conn.commit()
@@ -342,8 +356,14 @@ class Database:
             return True
 
     def update_account(self, record_id: str, data: dict) -> bool:
-        """更新账号表记录"""
+        """更新账号表记录
+
+        方案 B：自动维护 local_updated_at（用于 LWW 比较）。
+        如果 data 中已显式传入 local_updated_at（如同步流程），则用传入值。
+        """
         with self._connect() as conn:
+            if "local_updated_at" not in data:
+                data["local_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE account_cache SET {set_clause} WHERE record_id = ?", list(data.values()) + [record_id])
             conn.commit()
@@ -390,8 +410,14 @@ class Database:
             return True
 
     def update_cookie(self, record_id: str, data: dict) -> bool:
-        """更新 Cookie 记录"""
+        """更新 Cookie 记录
+
+        方案 B：自动维护 local_updated_at（用于 LWW 比较）。
+        如果 data 中已显式传入 local_updated_at（如同步流程），则用传入值。
+        """
         with self._connect() as conn:
+            if "local_updated_at" not in data:
+                data["local_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
             conn.execute(f"UPDATE cookie_cache SET {set_clause} WHERE record_id = ?", list(data.values()) + [record_id])
             conn.commit()
@@ -641,6 +667,10 @@ class Database:
             params: list[Any] = [value]
             if "同步时间" in col_names and field != "同步时间":
                 set_clause += ', "同步时间" = ?'
+                params.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            # 方案 B：同步表自动维护 local_updated_at（用于 LWW 比较）
+            if "local_updated_at" in col_names and field != "local_updated_at":
+                set_clause += ', "local_updated_at" = ?'
                 params.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             params.append(record_id)
             cursor = conn.execute(
