@@ -143,8 +143,33 @@
             <span id="incr-sync-status" style="font-size:13px;color:#888;"></span>
         </div>
         <div style="font-size:12px;color:#888;margin-bottom:12px;">
-            双向同步采集表、账号表、Cookie表：人工字段（等级/标签/备注）云端赢，API 字段（粉丝数/作品数）本地赢；云端删除会自动同步到本地，本地删除会同步到云端
+            双向同步采集表、账号表、Cookie表。<strong>注意：当前为「字段级单向同步」（方案 A）</strong>：
+            在云端改人工字段会同步到本地，在本地改 API 字段会同步到云端；反向修改会被覆盖。
         </div>
+        <details style="margin-bottom:12px;font-size:12px;color:#666;">
+            <summary style="cursor:pointer;color:#3498db;">📋 字段归属规则（点击展开）</summary>
+            <div style="margin-top:8px;padding:12px;background:#f8f9fa;border-radius:6px;font-size:11px;line-height:1.7;">
+                <div style="margin-bottom:8px;"><strong>☁️ 云端赢（在云端修改有效）：</strong></div>
+                <div style="margin-left:12px;margin-bottom:8px;">
+                    采集表：等级、标签、备注、账号名称、昵称、粉丝数、作品数、签名、头像<br>
+                    账号表：等级、标签、备注、启用、采集类型、账号名称<br>
+                    Cookie表：启用、备注
+                </div>
+                <div style="margin-bottom:8px;"><strong>💻 本地赢（在本地修改有效）：</strong></div>
+                <div style="margin-left:12px;margin-bottom:8px;">
+                    采集表：sec_user_id、已同步<br>
+                    账号表：sec_user_id、链接、昵称、粉丝数、作品数、签名、头像、已获取信息<br>
+                    Cookie表：状态、验证时间
+                </div>
+                <div style="margin-bottom:8px;"><strong>🔒 元数据（创建后不变）：</strong></div>
+                <div style="margin-left:12px;">
+                    分享码、平台、Cookie 字符串
+                </div>
+                <div style="margin-top:10px;padding:8px;background:#fff3e0;border-radius:4px;color:#a66;">
+                    ⚠️ 反向修改无效：在本地改「云端赢」字段、在云端改「本地赢」字段都会被覆盖。
+                </div>
+            </div>
+        </details>
         
         <!-- 进度区域 -->
         <div id="incr-progress-area" style="display:none;margin-top:16px;padding:16px;background:#e3f2fd;border-left:4px solid #2196f3;border-radius:6px;">

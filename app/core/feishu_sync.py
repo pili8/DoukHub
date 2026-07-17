@@ -38,16 +38,23 @@ class FeishuSyncer:
 
     # 业务字段（与飞书同步的字段，排除系统字段）
     # 按字段归属分组：feishu_wins=人工字段（飞书赢），local_wins=API 字段（本地赢）
-    # 设计原则：
+    # 设计原则（方案 A：字段级单向）：
     # - 人工字段：用户在飞书端手动修改的（等级、标签、备注、账号名称等）→ 飞书赢
     # - API 字段：DoukHub 通过 TTD API 采集的（粉丝数、作品数、昵称等）→ 本地赢
-    # - 元数据：创建后不变的（分享码、平台、Cookie、状态等）→ 不参与冲突
+    # - 状态字段：DoukHub 内部状态（已同步、Cookie 状态等）→ 本地赢
+    # - 元数据：创建后不变的（分享码、平台、Cookie 字符串）→ 不参与冲突
+    #
+    # ⚠️ 方案 A 是「字段级单向同步」，不是真正的双向同步。
+    # 用户在「错的端」修改会被覆盖：
+    #   - 在本地改人工字段 → 不会被推送到飞书（飞书是权威源）
+    #   - 在飞书改 API 字段 → 不会被同步到本地（DoukHub 是权威源）
+    # 方案 B（计划在 feature/sync-v3-lww 分支实施）会改为真正的 LWW 双向同步。
     FIELD_OWNERSHIP = {
         "collection_cache": {
             # 人工字段：用户在飞书端修改的
-            "feishu_wins": ["等级", "标签", "备注", "已同步", "账号名称", "昵称", "粉丝数", "作品数", "签名", "头像"],
-            # API 字段：DoukHub 通过 API 解析/写入的
-            "local_wins": ["sec_user_id"],
+            "feishu_wins": ["等级", "标签", "备注", "账号名称", "昵称", "粉丝数", "作品数", "签名", "头像"],
+            # API 字段 + 状态字段：DoukHub 写入的（sec_user_id 由步骤2 解析，已同步由步骤3 写入）
+            "local_wins": ["sec_user_id", "已同步"],
             # 元数据：创建后不变
             "immutable": ["分享码", "平台"],
             # 同步动作产生：同步器写回，不算业务字段冲突
@@ -63,8 +70,9 @@ class FeishuSyncer:
         },
         "cookie_cache": {
             "feishu_wins": ["启用", "备注"],
-            "local_wins": ["验证时间"],
-            "immutable": ["Cookie", "平台", "状态"],
+            # 状态字段：DoukHub 验证后写入（标记 Cookie 失效）
+            "local_wins": ["状态", "验证时间"],
+            "immutable": ["Cookie", "平台"],
             "sync_generated": ["同步时间"],
         },
     }

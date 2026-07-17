@@ -556,6 +556,26 @@ def test_sync_propagates_feishu_account_name_change(syncer, db, monkeypatch):
     assert acc["账号名称"] == "new_name", f"飞书改的账号名称应同步到本地，实际 {acc['账号名称']}"
 
 
+def test_field_ownership_cookie_status_is_local_wins():
+    """Cookie 表「状态」字段应归本地赢（DoukHub 验证后写入）
+
+    修正原因：之前归 immutable 导致飞书改状态不同步、本地改状态不推送
+    """
+    ownership = FeishuSyncer.FIELD_OWNERSHIP["cookie_cache"]
+    assert "状态" in ownership["local_wins"]
+    assert "状态" not in ownership["immutable"]
+
+
+def test_field_ownership_collection_synced_is_local_wins():
+    """采集表「已同步」字段应归本地赢（步骤3 写入的状态字段）
+
+    修正原因：之前归 feishu_wins 会导致步骤3 写入后被飞书覆盖
+    """
+    ownership = FeishuSyncer.FIELD_OWNERSHIP["collection_cache"]
+    assert "已同步" in ownership["local_wins"]
+    assert "已同步" not in ownership["feishu_wins"]
+
+
 # ========== sync_incremental 入口（mock 网络） ==========
 
 def test_sync_incremental_handles_empty_tables(syncer, monkeypatch):
