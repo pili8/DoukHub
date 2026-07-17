@@ -525,6 +525,7 @@ class FeishuSyncer:
 
             # Step 4: 建立飞书索引（按 record_id 和业务键）
             feishu_by_id = {r["record_id"]: r for r in feishu_records}
+            feishu_ids_set = set(feishu_by_id.keys())  # 用于检测飞书端重复业务键
             business_key = self.BUSINESS_KEYS.get(db_table)
             feishu_by_key = {}
             for r in feishu_records:
@@ -541,6 +542,7 @@ class FeishuSyncer:
 
             for local in local_records:
                 rid = local.get("record_id", "")
+                is_synced = bool(local.get("synced", False))
                 matched_feishu = None
                 match_by = None  # "id" or "key"
 
@@ -556,7 +558,15 @@ class FeishuSyncer:
                         match_by = "key"
 
                 if matched_feishu is None:
-                    # 本地有飞书没有 → 创建到飞书
+                    # 本地有飞书没有
+                    # 关键保护：如果本地 synced=1（曾同步过），说明飞书删了它
+                    # 即使删除检测被空结果/比例保护跳过，也不能推回去（会撤销用户删除）
+                    # 只有 synced=0 才是真正的本地新建未推送
+                    if is_synced:
+                        result["skipped_invalid"] += 1
+                        logger.info(f"{db_table} 跳过 synced=1 孤儿记录 {rid}（飞书已删但被保护未同步删除）")
+                        continue
+                    # synced=0 才推送到飞书
                     fields = build_fn(local)
                     if fields:
                         to_create.append({"fields": fields, "local": local})
@@ -690,6 +700,7 @@ class FeishuSyncer:
 
             # Step 2: 拉取飞书全表
             feishu_records = self.feishu.get_all_records(self.app_token, table_id)
+            feishu_ids_set = {r["record_id"] for r in feishu_records}  # 用于检测飞书端重复业务键
 
             # Step 3: 遍历飞书记录，比对并更新/创建本地
             for record in feishu_records:
@@ -710,13 +721,25 @@ class FeishuSyncer:
                     key_val = local_data.get(business_key, "")
                     if key_val:
                         existing = get_by_key_fn(key_val)
-                        # 如果按 key 找到了但 record_id 不同，更新 record_id
-                        if existing and existing.get("record_id") and existing["record_id"] != rid:
-                            try:
-                                update_fn(existing["record_id"], {"record_id": rid, "synced": True})
-                                existing["record_id"] = rid
-                            except Exception:
-                                pass
+                        # 检测飞书端重复业务键
+                        if existing and existing.get("record_id"):
+                            existing_rid = existing["record_id"]
+                            if existing_rid != rid and existing_rid in feishu_ids_set:
+                                # 飞书端有重复业务键（existing.record_id 也在飞书）
+                                # 这条 record 是冗余的，跳过避免 record_id 反复横跳
+                                result["skipped_duplicate"] += 1
+                                logger.warning(
+                                    f"{db_table} 飞书端检测到重复业务键 {business_key}={key_val}，"
+                                    f"已有 {existing_rid}，跳过冗余记录 {rid}（请去飞书清理）"
+                                )
+                                continue
+                            # 否则正常合并 + 更新 record_id
+                            if existing_rid and existing_rid != rid:
+                                try:
+                                    update_fn(existing_rid, {"record_id": rid, "synced": True})
+                                    existing["record_id"] = rid
+                                except Exception:
+                                    pass
 
                 if existing:
                     # 都有 → 按字段归属合并

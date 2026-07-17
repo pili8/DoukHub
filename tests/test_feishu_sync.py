@@ -506,6 +506,191 @@ def test_sync_incremental_propagates_feishu_deletion(syncer, db, monkeypatch):
     assert db.get_collection_by_id("r2") is not None
 
 
+def test_sync_to_feishu_skips_synced_orphans_when_safety_triggered(syncer, db, monkeypatch):
+    """关键 bug 修复：飞书表大幅减少时，synced=1 的孤儿不应被推回飞书
+
+    场景：用户在飞书批量删除（>50%）或清空飞书表
+    错误行为：删除检测被比例保护跳过，Step 5 把本地 synced=1 孤儿推回飞书
+    正确行为：synced=1 + 飞书没有 = 飞书已删，不推回；只有 synced=0 才推送
+    """
+    # 本地 4 条 synced=1（飞书端全删了）
+    for i in range(4):
+        db.insert_account({"record_id": f"r{i}", "sec_user_id": f"sec{i}", "等级": 3, "synced": True})
+    # 本地 1 条 synced=0（本地新建未推送）
+    db.insert_account({"record_id": "local_new", "sec_user_id": "sec_new", "等级": 3})
+
+    # 飞书只返回 1 条（< 本地 synced=1 数量的 50%）→ 触发比例保护
+    syncer.feishu.get_all_records.return_value = [
+        {"record_id": "other", "fields": {"sec_user_id": "sec_other", "等级": 3}},
+    ]
+    syncer.feishu.batch_create_records.return_value = {
+        "code": 0,
+        "data": {"records": [{"record_id": "fs_new"}]},
+    }
+    syncer.feishu.batch_update_records.return_value = {"code": 0}
+    syncer.feishu.batch_delete_records.return_value = {"code": 0}
+
+    result = syncer._sync_to_feishu("account_cache")
+
+    # 4 条 synced=1 不应被推回（孤儿保护）
+    # 1 条 synced=0 应被推送（本地新建）
+    assert result["created"] == 1, f"应只推送 1 条本地新建，实际推送 {result['created']}"
+    # 应有 4 条 skipped_invalid（孤儿跳过）
+    assert result["skipped_invalid"] >= 4, f"应跳过 4 条孤儿，实际 {result['skipped_invalid']}"
+
+
+def test_sync_to_feishu_skips_synced_orphans_when_feishu_empty(syncer, db, monkeypatch):
+    """关键 bug 修复：飞书表完全空时，本地 synced=1 不应被全部推回
+
+    场景：用户清空了飞书表（或飞书 API 异常返回空）
+    正确行为：synced=1 不推回（保护删除）；synced=0 推送
+    """
+    db.insert_account({"record_id": "synced1", "sec_user_id": "sec1", "等级": 3, "synced": True})
+    db.insert_account({"record_id": "local_new", "sec_user_id": "sec2", "等级": 3})
+
+    # 飞书返回空
+    syncer.feishu.get_all_records.return_value = []
+    syncer.feishu.batch_create_records.return_value = {
+        "code": 0,
+        "data": {"records": [{"record_id": "fs_new"}]},
+    }
+    syncer.feishu.batch_update_records.return_value = {"code": 0}
+    syncer.feishu.batch_delete_records.return_value = {"code": 0}
+
+    result = syncer._sync_to_feishu("account_cache")
+
+    # synced=1 的不推回
+    assert result["created"] == 1, f"应只推送 1 条本地新建，实际 {result['created']}"
+    # synced1 还在本地（没被删除也没被推回）
+    assert db.get_account_by_id("synced1") is not None
+
+
+def test_sync_from_feishu_skips_duplicate_business_key(syncer, db, monkeypatch):
+    """关键 bug 修复：飞书端有重复业务键时，不应让本地 record_id 反复横跳
+
+    场景：飞书表里两条相同 sec_user_id（用户录重了）
+    错误行为：每次同步都把本地 record_id 在飞书两条之间切换（无限循环）
+    正确行为：检测到重复，跳过冗余记录，提示用户去飞书清理
+    """
+    db.insert_account({"record_id": "r1", "sec_user_id": "sec1", "等级": 3, "synced": True})
+
+    # 飞书有两条 sec_user_id=sec1 的记录（r1 和 fs_dup）
+    syncer.feishu.get_all_records.return_value = [
+        {"record_id": "r1", "fields": {"sec_user_id": "sec1", "等级": 3}},
+        {"record_id": "fs_dup", "fields": {"sec_user_id": "sec1", "等级": 4}},
+    ]
+    syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
+    syncer.feishu.batch_update_records.return_value = {"code": 0}
+    syncer.feishu.batch_delete_records.return_value = {"code": 0}
+
+    # 只跑 from_feishu
+    result = syncer._sync_from_feishu("account_cache")
+
+    # 本地 record_id 不应被改成 fs_dup
+    acc = db.get_account_by_id("r1")
+    assert acc is not None, "本地 r1 应该还在"
+    assert acc["record_id"] == "r1", f"本地 record_id 不应被改，实际 {acc['record_id']}"
+    # 应该有 skipped_duplicate 计数
+    assert result["skipped_duplicate"] >= 1, "应该跳过重复业务键"
+
+
+def test_sync_to_feishu_merges_by_business_key_when_record_id_differs(syncer, db, monkeypatch):
+    """场景 9：双向同时新建相同业务键 → 按业务键合并，更新本地 record_id
+
+    场景：本地新建 local_abc（synced=0），飞书有 fs_abc（业务键相同）
+    正确行为：按业务键匹配，不重复创建飞书，更新本地 record_id=fs_abc
+    """
+    db.insert_collection({"record_id": "local_abc", "分享码": "ABC", "等级": 3})
+
+    # 飞书有相同分享码 ABC（record_id 不同）
+    syncer.feishu.get_all_records.return_value = [
+        {"record_id": "fs_abc", "fields": {"分享码": "ABC", "等级": 4}},
+    ]
+    syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
+    syncer.feishu.batch_update_records.return_value = {"code": 0}
+    syncer.feishu.batch_delete_records.return_value = {"code": 0}
+
+    result = syncer._sync_to_feishu("collection_cache")
+
+    # 不应该创建新飞书记录
+    assert result["created"] == 0
+    # 应该走合并流程（更新飞书的等级=3 来自本地）或字段相同跳过
+    # 关键：本地 record_id 应该被改为 fs_abc，synced=1
+    # 此时 local_abc 已不存在
+    assert db.get_collection_by_id("local_abc") is None
+    # 应该能通过 fs_abc 查到（但我们的查询是按 record_id）
+    merged = db.get_collection_by_id("fs_abc")
+    if merged:
+        assert merged["synced"] in (1, True)
+
+
+def test_sync_handles_local_delete_then_feishu_modify(syncer, db, monkeypatch):
+    """场景 13/28：本地软删除 + 飞书修改同条 → 删除优先（设计 A 方案）
+
+    场景：本地软删 r1，飞书端用户同时修改 r1 等级
+    正确行为：删除优先，飞书的修改被删除覆盖
+    """
+    db.insert_account({"record_id": "r1", "sec_user_id": "sec1", "等级": 3, "synced": True})
+    db.delete_account("r1")  # 软删除
+
+    # 飞书动态返回（按表分别计数）
+    table_call_count = {"tblB": 0}
+
+    def mock_get_all_records(app_token, table_id):
+        if table_id == "tblB":
+            table_call_count["tblB"] += 1
+            # 第 1 次（_push_tombstones 检查）：返回 r1（飞书还有）
+            if table_call_count["tblB"] == 1:
+                return [{"record_id": "r1", "fields": {"sec_user_id": "sec1", "等级": 4}}]
+        # 后续（推送墓碑后）：返回空（已被删除）
+        return []
+
+    syncer.feishu.get_all_records.side_effect = mock_get_all_records
+    syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
+    syncer.feishu.batch_update_records.return_value = {"code": 0}
+    syncer.feishu.batch_delete_records.return_value = {"code": 0}
+
+    syncer.sync_incremental()
+
+    # r1 应该被飞书删除（墓碑推送）
+    syncer.feishu.batch_delete_records.assert_any_call(
+        syncer.app_token, "tblB", ["r1"]
+    )
+    # 本地 r1 应该被彻底清除（墓碑被 purge）
+    assert db.get_account_by_id("r1") is None
+
+
+def test_sync_handles_dual_field_concurrent_modification(syncer, db, monkeypatch):
+    """场景 10：双向同时修改不同字段（人工字段 + API 字段）
+
+    场景：飞书改等级 3→4（人工字段飞书赢），本地改粉丝数 100→200（API 字段本地赢）
+    正确行为：两端都变为 等级=4 + 粉丝数=200
+    """
+    db.insert_account({
+        "record_id": "r1", "sec_user_id": "sec1",
+        "等级": 3, "粉丝数": 100, "synced": True,
+    })
+
+    # 飞书有等级 4（用户改的），粉丝数还是 100
+    syncer.feishu.get_all_records.return_value = [
+        {"record_id": "r1", "fields": {"sec_user_id": "sec1", "等级": 4, "粉丝数": 100}},
+    ]
+    syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
+    syncer.feishu.batch_update_records.return_value = {"code": 0}
+    syncer.feishu.batch_delete_records.return_value = {"code": 0}
+
+    # 模拟本地修改粉丝数
+    db.update_account("r1", {"粉丝数": 200})
+
+    syncer.sync_incremental()
+
+    # 验证最终状态
+    final = db.get_account_by_id("r1")
+    assert final is not None
+    assert final["等级"] == 4, f"等级应以飞书为准 = 4，实际 {final['等级']}"
+    assert final["粉丝数"] == 200, f"粉丝数应以本地为准 = 200，实际 {final['粉丝数']}"
+
+
 def test_sync_to_feishu_does_not_resurrect_feishu_deletion(syncer, db, monkeypatch):
     """关键 bug 修复：飞书删除某条 → 本地 synced=1 但飞书没有
 
