@@ -506,6 +506,38 @@ def test_sync_incremental_propagates_feishu_deletion(syncer, db, monkeypatch):
     assert db.get_collection_by_id("r2") is not None
 
 
+def test_sync_to_feishu_does_not_resurrect_feishu_deletion(syncer, db, monkeypatch):
+    """关键 bug 修复：飞书删除某条 → 本地 synced=1 但飞书没有
+
+    错误行为（v1）：本地→云端步骤把记录推回去，删除被恢复
+    正确行为（v2）：本地→云端步骤先检测飞书删除，删本地，不再推送
+
+    测试场景：本地有 r1（synced=1）和 r2（synced=1），飞书只剩 r2（r1 被用户删了）
+    """
+    db.insert_account({"record_id": "r1", "sec_user_id": "sec1", "等级": 3, "synced": True})
+    db.insert_account({"record_id": "r2", "sec_user_id": "sec2", "等级": 3, "synced": True})
+
+    # 飞书只剩 r2（r1 被用户删除）
+    syncer.feishu.get_all_records.return_value = [
+        {"record_id": "r2", "fields": {"sec_user_id": "sec2", "等级": 3}},
+    ]
+    syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
+    syncer.feishu.batch_update_records.return_value = {"code": 0}
+    syncer.feishu.batch_delete_records.return_value = {"code": 0}
+
+    # 只调用 _sync_to_feishu（不调用 sync_incremental 的 from_feishu 步骤）
+    result = syncer._sync_to_feishu("account_cache")
+
+    # r1 应该被本地删除（飞书→本地反推）
+    assert db.get_account_by_id("r1") is None
+    # r2 应该还在
+    assert db.get_account_by_id("r2") is not None
+    # 不应该把 r1 推回飞书（created 应该是 0）
+    assert result["created"] == 0
+    # 应该有删除计数
+    assert result["deleted"] >= 1
+
+
 def test_sync_incremental_skips_unsynced_local_records(syncer, db, monkeypatch):
     """本地新建未同步（synced=0）的记录，即使飞书空，也不会被误删"""
     db.insert_collection({"record_id": "local1", "分享码": "abc", "等级": 3})  # synced=0 默认

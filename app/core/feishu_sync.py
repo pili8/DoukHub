@@ -488,7 +488,15 @@ class FeishuSyncer:
     # ========== 同步核心：本地 → 飞书（增量） ==========
 
     def _sync_to_feishu(self, db_table: str) -> dict:
-        """本地 → 飞书 增量同步（含墓碑推送 + 字段差异更新）"""
+        """本地 → 飞书 增量同步（含飞书删除检测 + 墓碑推送 + 字段差异更新）
+
+        关键顺序（防止删除被恢复）：
+        1. 推送本地墓碑 → 删飞书（先传播本地删除）
+        2. 拉取飞书全表
+        3. 检测飞书删除 → 删本地（避免下面把已删记录推回去）
+        4. 重新拉取本地记录（删除检测后可能少了记录）
+        5. 比对推送（创建/更新）
+        """
         result = {"created": 0, "updated": 0, "deleted": 0,
                   "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0,
                   "failed": 0, "errors": []}
@@ -510,6 +518,12 @@ class FeishuSyncer:
 
             # Step 2: 拉取飞书全表，建立索引（按 record_id 和业务键）
             feishu_records = self.feishu.get_all_records(self.app_token, table_id)
+
+            # Step 3: 检测飞书端删除 → 删本地（关键：防止后续步骤把已删记录推回去）
+            deletion_result = self._detect_feishu_deletions(table_id, db_table, feishu_records)
+            result = self._merge_results(result, deletion_result)
+
+            # Step 4: 建立飞书索引（按 record_id 和业务键）
             feishu_by_id = {r["record_id"]: r for r in feishu_records}
             business_key = self.BUSINESS_KEYS.get(db_table)
             feishu_by_key = {}
@@ -518,7 +532,7 @@ class FeishuSyncer:
                 if key_val:
                     feishu_by_key[key_val] = r
 
-            # Step 3: 遍历本地记录，比对并推送
+            # Step 5: 遍历本地记录（删除检测后重新拉取），比对并推送
             get_all_fn = getattr(self.db, cfg["get_all_local"])
             local_records = get_all_fn()
 
@@ -784,19 +798,23 @@ class FeishuSyncer:
             logger.exception(f"{db_table} 墓碑推送失败")
         return result
 
-    def _detect_feishu_deletions(self, table_id: str, db_table: str) -> dict:
+    def _detect_feishu_deletions(self, table_id: str, db_table: str, feishu_records: list = None) -> dict:
         """飞书删除 → 删本地：飞书有、本地没有（且 synced=1）说明飞书删了
 
         安全保护：
         - synced=1 过滤：本地新建未同步的不会被误删
         - 空结果保护：飞书返回 0 条直接跳过
         - 比例保护：飞书返回 < 本地 50% 时跳过
+
+        参数：
+        - feishu_records: 可选，预查询的飞书记录列表（避免重复拉取）
         """
         result = {"created": 0, "updated": 0, "deleted": 0,
                   "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0,
                   "failed": 0, "errors": []}
         try:
-            feishu_records = self.feishu.get_all_records(self.app_token, table_id)
+            if feishu_records is None:
+                feishu_records = self.feishu.get_all_records(self.app_token, table_id)
             # 空结果保护
             if not feishu_records:
                 result["skipped_invalid"] += 1
