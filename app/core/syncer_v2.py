@@ -163,7 +163,7 @@ class Syncer:
                     existing_tags = json.loads(existing.get("标签", "[]")) if existing.get("标签") else []
                     new_tags = self.merge_tags(existing_tags, tags)
 
-                    self.db.update_collection(existing["记录ID"], {
+                    self.db.update_collection(existing["record_id"], {
                         "等级": new_level,
                         "标签": json.dumps(new_tags),
                     })
@@ -172,7 +172,7 @@ class Syncer:
                     # 新增
                     record_id = f"rec_{datetime.now().strftime('%Y%m%d%H%M%S')}_{result.total}"
                     self.db.insert_collection({
-                        "记录ID": record_id,
+                        "record_id": record_id,
                         "分享码": share,
                         "平台": "抖音",  # 默认
                         "等级": level,
@@ -222,30 +222,30 @@ class Syncer:
                 if not sec_user_id:
                     result.failed += 1
                     result.errors.append(f"{share}: 无法提取 sec_user_id")
-                    self.db.update_collection(collection["记录ID"], {
+                    self.db.update_collection(collection["record_id"], {
                         "同步错误": "无法提取 sec_user_id",
                     })
                     continue
 
                 # 检查是否已存在
                 existing = self.db.get_collection_by_sec_user_id(sec_user_id)
-                if existing and existing["记录ID"] != collection["记录ID"]:
+                if existing and existing["record_id"] != collection["record_id"]:
                     # 去重：等级取高的，标签合并
                     new_level = self.merge_level(existing.get("等级"), collection.get("等级"))
                     existing_tags = json.loads(existing.get("标签", "[]")) if existing.get("标签") else []
                     new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
                     merged_tags = self.merge_tags(existing_tags, new_tags)
 
-                    self.db.update_collection(existing["记录ID"], {
+                    self.db.update_collection(existing["record_id"], {
                         "等级": new_level,
                         "标签": json.dumps(merged_tags),
                     })
                     # 删除重复记录
-                    self.db.delete_collection(collection["记录ID"])
+                    self.db.delete_collection(collection["record_id"])
                     result.success += 1
                 else:
                     # 更新 sec_user_id
-                    self.db.update_collection(collection["记录ID"], {
+                    self.db.update_collection(collection["record_id"], {
                         "sec_user_id": sec_user_id,
                         "已同步": True,
                         "同步错误": None,
@@ -255,7 +255,7 @@ class Syncer:
             except Exception as e:
                 result.failed += 1
                 result.errors.append(f"{collection.get('分享码')}: {str(e)}")
-                self.db.update_collection(collection["记录ID"], {
+                self.db.update_collection(collection["record_id"], {
                     "同步错误": str(e),
                 })
 
@@ -296,17 +296,17 @@ class Syncer:
                     merged_tags = self.merge_tags(existing_tags, new_tags)
 
                     # 先更新等级/标签（不碰 已获取信息）
-                    self.db.update_account(existing_account["记录ID"], {
+                    self.db.update_account(existing_account["record_id"], {
                         "等级": new_level,
                         "标签": json.dumps(merged_tags),
                     })
-                    account_id = existing_account["记录ID"]
+                    account_id = existing_account["record_id"]
                     need_fetch = not existing_account.get("已获取信息")
                 else:
                     # 创建账号记录（已获取信息=False）
                     record_id = f"acc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{result.total}"
                     self.db.insert_account({
-                        "记录ID": record_id,
+                        "record_id": record_id,
                         "账号名称": "",
                         "平台": platform,
                         "链接": f"https://www.douyin.com/user/{sec_user_id}",

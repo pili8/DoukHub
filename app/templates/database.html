@@ -33,24 +33,26 @@
     </div>
 </div>
 
-<!-- 飞书同步 -->
+<!-- 云端同步 -->
 <div class="card">
-    <h3>🔗 飞书同步</h3>
+    <h3>🔗 云端同步</h3>
 
-    <!-- 全盘同步 -->
+    <!-- 增量同步（日常使用） -->
     <div style="margin-bottom:16px;">
-        <p style="font-size:13px;color:#888;margin-bottom:8px;">全盘同步：选择一方作为基准覆盖另一方，用于数据整理和全量对齐</p>
+        <p style="font-size:13px;color:#888;margin-bottom:8px;">增量同步：双向同步本地 ↔ 云端，按字段归属自动合并冲突（人工字段云端赢，API 字段本地赢）</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="btn btn-secondary btn-sm" onclick="feishuSyncSSE('/api/feishu/sync/full/from-feishu', '飞书 → 本地')" id="btn-full-from">飞书 → 本地</button>
-            <button class="btn btn-secondary btn-sm" onclick="feishuSyncSSE('/api/feishu/sync/full/to-feishu', '本地 → 飞书')" id="btn-full-to">本地 → 飞书</button>
+            <button class="btn btn-primary" onclick="feishuSyncSSE('/api/feishu/sync', '增量同步（本地 ↔ 云端）')" id="btn-incremental">⚡ 增量同步</button>
         </div>
     </div>
 
-    <!-- 增量同步 -->
-    <div style="margin-bottom:12px;">
-        <p style="font-size:13px;color:#888;margin-bottom:8px;">增量同步：双向仅同步新增和变更记录，已最新的自动跳过</p>
+    <!-- 全盘同步（核武器，数据混乱时托底用） -->
+    <div style="margin-bottom:12px;padding:12px;background:#fff3e0;border-radius:6px;border-left:4px solid #ff9800;">
+        <p style="font-size:13px;color:#a66;margin-bottom:8px;">
+            ⚠️ <strong>全盘同步（核武器）</strong>：选择一方作为基准强制覆盖另一方，目标端数据会被全部清空后重建。<strong>使用前务必备份数据</strong>，仅用于数据混乱时托底。
+        </p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="btn btn-primary" onclick="feishuSyncSSE('/api/feishu/sync/incremental', '增量同步')" id="btn-incremental">⚡ 增量同步</button>
+            <button class="btn btn-warning btn-sm" onclick="fullSyncConfirm('to-feishu')" id="btn-full-to">☁️ 以本地覆盖云端</button>
+            <button class="btn btn-warning btn-sm" onclick="fullSyncConfirm('from-feishu')" id="btn-full-from">💻 以云端覆盖本地</button>
         </div>
     </div>
 
@@ -256,12 +258,12 @@
             return;
         }
 
-        // 列顺序：记录ID移到末尾
+        // 列顺序：record_id / ID 移到末尾
         let columns = Object.keys(records[0]);
-        const idIdx = columns.indexOf('记录ID');
+        const idIdx = columns.indexOf('record_id');
         if (idIdx >= 0) {
             columns.splice(idIdx, 1);
-            columns.push('记录ID');
+            columns.push('record_id');
         }
 
         // schema 类型映射（用于识别布尔字段）
@@ -291,7 +293,7 @@
                 // 布尔字段渲染为复选框
                 if (isBool) {
                     const checked = value === true || value === 1 ? 'checked' : '';
-                    const rid = row['记录ID'] || row['ID'] || '';
+                    const rid = row['record_id'] || row['ID'] || '';
                     // 只对有主键的行可切换
                     if (rid && col === '启用') {
                         html += `<td style="padding:8px;border:1px solid #ddd;text-align:center;"><input type="checkbox" ${checked} onchange="toggleEnabled('${rid}', '${col}', this.checked)" title="启用/禁用"></td>`;
@@ -313,7 +315,7 @@
                 html += `<td style="padding:8px;border:1px solid #ddd;font-size:12px;white-space:nowrap;">${value}</td>`;
             });
 
-            const recordId = row['记录ID'] || row['ID'] || '';
+            const recordId = row['record_id'] || row['ID'] || '';
             if (recordId && currentTable !== 'collection_history' && currentTable !== 'scheduled_tasks') {
                 html += `<td style="padding:8px;border:1px solid #ddd;"><button class="btn btn-danger btn-sm" onclick="deleteRecord('${currentTable}', '${recordId}')">删除</button></td>`;
             } else {
@@ -607,7 +609,7 @@
 
     async function feishuSyncSSE(url, title) {
         if (!confirm('确定要执行' + title + '吗？')) return;
-        const btns = document.querySelectorAll('[onclick*="feishuSyncSSE"]');
+        const btns = document.querySelectorAll('[onclick*="feishuSyncSSE"], [onclick*="fullSyncConfirm"]');
         btns.forEach(b => b.disabled = true);
         const status = document.getElementById('feishu-sync-status');
         const result = document.getElementById('feishu-sync-result');
@@ -738,6 +740,139 @@
             status.textContent = '同步失败: ' + e.message;
             status.style.color = '#e74c3c';
             barDiv.style.background = '#e74c3c';
+            addLog('请求失败: ' + e.message, 'error');
+        } finally {
+            btns.forEach(b => b.disabled = false);
+        }
+    }
+
+    // 全盘同步：二次确认 + 警告提示
+    async function fullSyncConfirm(direction) {
+        const isToFeishu = direction === 'to-feishu';
+        const actionText = isToFeishu ? '以本地覆盖云端' : '以云端覆盖本地';
+        const targetText = isToFeishu ? '云端（飞书）表的所有数据' : '本地数据库的所有数据';
+        const sourceText = isToFeishu ? '本地数据库' : '云端（飞书）';
+
+        // 第一层确认：警告
+        const msg1 = `⚠️ 危险操作：${actionText}\n\n这将会：\n1. 清空 ${targetText}\n2. 用 ${sourceText} 的数据完全覆盖\n\n此操作不可逆！请确认你已备份重要数据。`;
+        if (!confirm(msg1)) return;
+
+        // 第二层确认：输入"确认"二次验证
+        const confirmText = prompt(`请输入"确认"以执行${actionText}（核武器操作）：`);
+        if (confirmText !== '确认') {
+            if (confirmText !== null) {
+                showToast('已取消：未输入"确认"', 'info');
+            }
+            return;
+        }
+
+        // 执行
+        const url = '/api/feishu/sync/full';
+        const btns = document.querySelectorAll('[onclick*="feishuSyncSSE"], [onclick*="fullSyncConfirm"]');
+        btns.forEach(b => b.disabled = true);
+        const status = document.getElementById('feishu-sync-status');
+        const result = document.getElementById('feishu-sync-result');
+        const resultContent = document.getElementById('feishu-sync-result-content');
+        const progressDiv = document.getElementById('feishu-sync-progress');
+        const barDiv = document.getElementById('feishu-sync-bar');
+        const logDiv = document.getElementById('feishu-sync-log');
+        status.textContent = '正在执行' + actionText + '...';
+        status.style.color = '#ff9800';
+        result.style.display = 'none';
+        progressDiv.style.display = 'block';
+        logDiv.style.display = 'block';
+        logDiv.innerHTML = '';
+        barDiv.style.width = '0%';
+        barDiv.style.background = '#ff9800';
+
+        function addLog(text, level) {
+            const colors = {ok: '#27ae60', error: '#e74c3c', info: '#3498db'};
+            const div = document.createElement('div');
+            div.style.color = colors[level] || '#666';
+            div.style.padding = '3px 0';
+            div.textContent = text;
+            logDiv.appendChild(div);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        try {
+            addLog(actionText + '（核武器）', 'info');
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({direction: direction}),
+            });
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, {stream: true});
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    let data;
+                    try { data = JSON.parse(line.slice(6)); } catch { continue; }
+                    if (data.type === 'start') {
+                        addLog(data.message, 'info');
+                    } else if (data.type === 'progress') {
+                        status.textContent = data.message;
+                        addLog('→ ' + data.message, 'info');
+                    } else if (data.type === 'log') {
+                        addLog(data.message, data.level);
+                    } else if (data.type === 'stats') {
+                        const pct = (data.step / data.total) * 100;
+                        barDiv.style.width = pct + '%';
+                    } else if (data.type === 'complete') {
+                        barDiv.style.width = '100%';
+                        barDiv.style.background = data.success ? '#27ae60' : '#e74c3c';
+                        status.textContent = data.message;
+                        status.style.color = data.success ? '#27ae60' : '#e74c3c';
+                        addLog(data.message, data.success ? 'ok' : 'error');
+                        if (data.results) {
+                            let totalCreated = 0, totalUpdated = 0, totalDeleted = 0, totalSkipped = 0, totalFailed = 0;
+                            for (const [, vals] of Object.entries(data.results)) {
+                                totalCreated += vals.created || 0;
+                                totalUpdated += vals.updated || 0;
+                                totalDeleted += vals.deleted || 0;
+                                totalSkipped += (vals.uptodate || 0) + (vals.duplicate || 0) + (vals.invalid || 0);
+                                totalFailed += vals.failed || 0;
+                            }
+                            let summary = '本次同步：';
+                            const parts = [];
+                            if (totalCreated > 0) parts.push(`<span style="color:#4caf50;font-weight:600;">新增 ${totalCreated} 条</span>`);
+                            if (totalUpdated > 0) parts.push(`<span style="color:#2196f3;font-weight:600;">更新 ${totalUpdated} 条</span>`);
+                            if (totalDeleted > 0) parts.push(`<span style="color:#f44336;font-weight:600;">删除 ${totalDeleted} 条</span>`);
+                            if (totalSkipped > 0) parts.push(`<span style="color:#888;">跳过 ${totalSkipped} 条</span>`);
+                            if (totalFailed > 0) parts.push(`<span style="color:#f44336;">失败 ${totalFailed} 条</span>`);
+                            summary += parts.length > 0 ? parts.join('，') : '<span style="color:#888;">无变化</span>';
+                            let html = `<div style="padding:12px;background:#fff;border-radius:6px;margin-bottom:12px;font-size:14px;">${summary}</div>`;
+                            html += '<div style="font-size:13px;color:#666;">详细分解：</div>';
+                            html += '<div style="margin-top:8px;">';
+                            for (const [label, vals] of Object.entries(data.results)) {
+                                const subParts = [];
+                                if (vals.created) subParts.push(`新增 ${vals.created}`);
+                                if (vals.updated) subParts.push(`更新 ${vals.updated}`);
+                                if (vals.deleted) subParts.push(`删除 ${vals.deleted}`);
+                                if (vals.failed) subParts.push(`失败 ${vals.failed}`);
+                                html += `<div style="padding:6px 0;border-bottom:1px solid #e0e0e0;"><span style="font-weight:600;">${label}</span>：${subParts.length > 0 ? subParts.join('，') : '<span style="color:#888;">无变化</span>'}</div>`;
+                            }
+                            html += '</div>';
+                            if (data.errors && data.errors.length > 0) {
+                                html += '<div style="margin-top:12px;padding:10px;background:#ffebee;border-radius:6px;font-size:12px;color:#c62828;"><div style="font-weight:600;margin-bottom:6px;">❌ 错误详情:</div>' + data.errors.slice(0, 5).map(e => '<div style="margin-top:4px;">• ' + e + '</div>').join('') + '</div>';
+                            }
+                            resultContent.innerHTML = html;
+                            result.style.display = 'block';
+                        }
+                        refreshStats();
+                    }
+                }
+            }
+        } catch (e) {
+            status.textContent = '全盘同步失败: ' + e.message;
+            status.style.color = '#e74c3c';
             addLog('请求失败: ' + e.message, 'error');
         } finally {
             btns.forEach(b => b.disabled = false);

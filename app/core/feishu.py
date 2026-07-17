@@ -1,10 +1,12 @@
 """飞书开放 API 交互模块"""
+import logging
 import time
 from typing import Any
 
 import httpx
 
 FEISHU_BASE = "https://open.feishu.cn/open-apis"
+logger = logging.getLogger("doukhub.feishu")
 
 
 class FeishuClient:
@@ -211,28 +213,58 @@ class FeishuClient:
         resp.raise_for_status()
         return resp.json()
 
+    def update_field(self, app_token: str, table_id: str, field_id: str, body: dict) -> dict:
+        """更新多维表格字段定义（可用于重命名字段）"""
+        resp = self._client.put(
+            f"{FEISHU_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/fields/{field_id}",
+            headers=self._headers(),
+            json=body,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    @staticmethod
+    def _get_legacy_field_renames(table_type: str) -> list[tuple]:
+        """获取旧字段名 → 新字段名的映射（v2 字段对齐）。
+        返回 [(old_name, new_name), ...]
+        """
+        legacy_map = {
+            "collection": [
+                ("Share", "分享码"),
+                ("地址", "分享码"),
+                ("同步状态", "已同步"),  # 旧版叫「同步状态」单选，v2 改为「已同步」复选框
+            ],
+            "account": [],  # 账号表 v1 已迁移过
+            "cookie": [
+                ("最后验证时间", "验证时间"),  # 旧版叫「最后验证时间」，v2 改为「验证时间」
+            ],
+        }
+        return legacy_map.get(table_type, [])
+
     @staticmethod
     def _get_required_fields(table_type: str) -> list[tuple]:
         """获取不同表类型的必需字段定义
 
         field_type: 1=文本, 2=数字, 3=单选, 4=多选, 5=日期, 7=复选框, 15=URL
+        业务字段名与本地数据库 100% 一致（v2）
         """
         if table_type == "collection":
             # 采集表：原始数据源
             return [
-                ("地址", 1, None),             # 文本，可能是短链缩略路径如 m3HL2u1R1YM
+                ("分享码", 1, None),             # 文本，抖音分享码（如 iMLuCKjq）
+                ("平台", 3, {"options": [{"name": "抖音"}, {"name": "TikTok"}, {"name": "小红书"}]}),
                 ("等级", 2, None),             # 数字 1-4
                 ("标签", 4, None),             # 多选标签
-                ("账号名称", 1, None),         # 可选，不填则自动获取
-                ("平台", 3, {"options": [{"name": "抖音"}, {"name": "TikTok"}, {"name": "小红书"}]}),
-                ("备注", 1, None),
                 ("sec_user_id", 1, None),      # 自动回填
+                ("已同步", 7, None),            # 复选框：是否已同步到账号表
+                ("同步错误", 1, None),          # 失败原因
+                ("备注", 1, None),             # 用户备注 + 合并信息
                 ("昵称", 1, None),             # 自动回填
                 ("粉丝数", 2, None),           # 自动回填
                 ("作品数", 2, None),           # 自动回填
+                ("账号名称", 1, None),         # 可选，不填则自动获取
                 ("签名", 1, None),             # 自动回填
                 ("头像", 1, None),             # 自动回填（文本存 URL）
-                ("同步状态", 3, {"options": [{"name": "待同步"}, {"name": "已同步"}, {"name": "失败"}]}),
                 ("同步时间", 5, None),         # 自动回填
             ]
         elif table_type == "cookie":
@@ -243,7 +275,8 @@ class FeishuClient:
                 ("状态", 3, {"options": [{"name": "正常"}, {"name": "失效"}]}),
                 ("启用", 7, None),             # 是否参与轮换
                 ("备注", 1, None),
-                ("最后验证时间", 5, None),
+                ("验证时间", 5, None),         # 上次验证时间
+                ("同步时间", 5, None),         # 自动回填
             ]
         else:
             # 账号表（默认）
@@ -251,31 +284,61 @@ class FeishuClient:
                 ("账号名称", 1, None),
                 ("平台", 3, {"options": [{"name": "抖音"}, {"name": "TikTok"}, {"name": "小红书"}]}),
                 ("链接", 15, None),
+                ("sec_user_id", 1, None),
                 ("等级", 2, None),             # 数字 1-4
                 ("标签", 4, None),
                 ("启用", 7, None),
                 ("采集类型", 3, {"options": [{"name": "发布"}, {"name": "喜欢"}, {"name": "收藏"}]}),
                 ("备注", 1, None),
-                ("sec_user_id", 1, None),
                 ("昵称", 1, None),
                 ("粉丝数", 2, None),
                 ("作品数", 2, None),
                 ("签名", 1, None),
                 ("头像", 15, None),
+                ("已获取信息", 7, None),       # 复选框：是否已获取账号基本信息
                 ("同步时间", 5, None),
-                ("已获取信息", 7, None),     # 复选框：是否已获取账号基本信息
             ]
 
     def ensure_fields(self, app_token: str, table_id: str, table_type: str = "account") -> dict:
-        """确保表格有所有必需字段，缺少的自动创建
+        """确保表格有所有必需字段，缺少的自动创建，旧名自动重命名。
 
         table_type: "account" | "collection" | "cookie"
+
+        步骤：
+        1. 检查并重命名旧字段（如 Share → 分享码，同步状态 → 已同步）
+        2. 创建缺失的必需字段
         """
         required_fields = self._get_required_fields(table_type)
 
         existing = self.list_fields(app_token, table_id)
-        existing_names = {f["field_name"] for f in existing}
+        existing_names = {f["field_name"]: f for f in existing}
 
+        # v2 字段重命名：把旧名改成新名
+        renamed = []
+        for old_name, new_name in self._get_legacy_field_renames(table_type):
+            if old_name in existing_names and new_name not in existing_names:
+                field_id = existing_names[old_name]["field_id"]
+                try:
+                    self.update_field(app_token, table_id, field_id, {"field_name": new_name})
+                    renamed.append(f"{old_name}→{new_name}")
+                    # 更新本地索引
+                    existing_names[new_name] = existing_names.pop(old_name)
+                    existing_names[new_name]["field_name"] = new_name
+                except Exception as e:
+                    # 重命名失败不阻断，继续创建新字段
+                    logger.warning(f"重命名字段 {old_name}→{new_name} 失败: {e}")
+            elif old_name in existing_names and new_name in existing_names:
+                # 新旧字段都存在（异常情况），把旧字段重命名为带 _legacy 后缀避免冲突
+                field_id = existing_names[old_name]["field_id"]
+                try:
+                    legacy_name = f"{old_name}_legacy"
+                    self.update_field(app_token, table_id, field_id, {"field_name": legacy_name})
+                    renamed.append(f"{old_name}→{legacy_name}（新字段已存在）")
+                    existing_names.pop(old_name)
+                except Exception as e:
+                    logger.warning(f"处理冲突字段 {old_name} 失败: {e}")
+
+        # 创建缺失字段
         created = []
         skipped = []
         for name, ftype, opts in required_fields:
@@ -288,9 +351,18 @@ class FeishuClient:
                 except Exception as e:
                     return {"success": False, "message": f"创建字段 {name} 失败: {e}"}
 
+        msg_parts = []
+        if created:
+            msg_parts.append(f"创建 {len(created)} 个字段")
+        if skipped:
+            msg_parts.append(f"跳过 {len(skipped)} 个已存在")
+        if renamed:
+            msg_parts.append(f"重命名 {len(renamed)} 个")
+
         return {
             "success": True,
-            "message": f"已创建 {len(created)} 个字段，跳过 {len(skipped)} 个已存在字段",
+            "message": "，".join(msg_parts) if msg_parts else "字段齐全",
             "created": created,
             "skipped": skipped,
+            "renamed": renamed,
         }

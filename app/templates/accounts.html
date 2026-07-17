@@ -4,7 +4,7 @@
 <div class="page-header">
     <h2>账号管理</h2>
     <div>
-        <button class="btn btn-secondary" onclick="syncFeishu()">🔄 同步飞书</button>
+        <button class="btn btn-secondary" onclick="syncFeishu()">🔄 同步云端</button>
     </div>
 </div>
 
@@ -61,7 +61,7 @@
         </tbody>
     </table>
     {% if not accounts %}
-    <div class="empty-state">暂无账号数据，请先同步飞书配置</div>
+    <div class="empty-state">暂无账号数据，请先同步云端配置</div>
     {% endif %}
 </div>
 {% endblock %}
@@ -77,7 +77,7 @@
         });
     }
     async function syncFeishu() {
-        showToast('正在同步飞书...');
+        showToast('正在同步云端...');
         const data = await apiCall('/api/sync', 'POST');
         if (data.success) {
             showToast(data.message);

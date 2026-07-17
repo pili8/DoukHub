@@ -154,6 +154,18 @@ async def lifespan(app: FastAPI):
     sched = get_scheduler()
     sched.start()
 
+    # 启动后自动增量同步（不阻塞 UI）
+    fs = get_feishu_syncer()
+    if fs:
+        def _bg_sync():
+            try:
+                logger.info("启动时自动增量同步开始...")
+                fs.sync_incremental()
+                logger.info("启动时自动增量同步完成")
+            except Exception as e:
+                logger.warning(f"启动时自动增量同步失败（不影响使用）: {e}")
+        threading.Thread(target=_bg_sync, daemon=True).start()
+
     yield
 
     # 关闭
@@ -337,7 +349,7 @@ async def api_status():
     sched = get_scheduler()
 
     # 检测飞书连通性
-    feishu_status = {"connected": False, "message": "未配置"}
+    feishu_status = {"connected": False, "message": "云端未配置"}
     if feishu:
         try:
             result = feishu.test_connection()
@@ -394,10 +406,10 @@ async def api_status():
 
 @app.post("/api/status/test/feishu")
 async def api_test_feishu_status():
-    """测试飞书 API 连通性"""
+    """测试云端 API 连通性"""
     feishu = get_feishu()
     if not feishu:
-        return {"success": False, "message": "飞书未配置"}
+        return {"success": False, "message": "云端未配置"}
     try:
         result = feishu.test_connection()
         return {
@@ -496,7 +508,7 @@ async def api_validate_cookies():
 
             for i, ck in enumerate(cookies):
                 cookie_str = ck.get("Cookie", "")
-                record_id = ck.get("记录ID", "")
+                record_id = ck.get("record_id", "")
                 label = ck.get("备注", "") or (cookie_str[:24] + "..." if cookie_str else "空Cookie")
 
                 yield f"data: {json.dumps({'type': 'progress', 'message': f'验证 [{i+1}/{total}]: {label}'})}\n\n"
@@ -544,7 +556,7 @@ async def api_sync():
     s = get_syncer()
     if not s:
         return JSONResponse(
-            {"success": False, "message": "飞书未配置，请先在设置中填写飞书信息"},
+            {"success": False, "message": "云端未配置，请先在设置中填写云端信息"},
             status_code=400,
         )
     # 同步前自动检测并创建缺失字段（三张表都检查）
@@ -812,7 +824,7 @@ async def api_sync_v2_update_collection():
                     if not sec_user_id:
                         failed += 1
                         errors.append(f"{share}: 无法提取 sec_user_id")
-                        s.db.update_collection(collection["记录ID"], {
+                        s.db.update_collection(collection["record_id"], {
                             "同步错误": "无法提取 sec_user_id",
                         })
                         yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {share}: 无法提取 sec_user_id'})}\n\n"
@@ -820,24 +832,24 @@ async def api_sync_v2_update_collection():
                     
                     # 检查是否已存在
                     existing = s.db.get_collection_by_sec_user_id(sec_user_id)
-                    if existing and existing["记录ID"] != collection["记录ID"]:
+                    if existing and existing["record_id"] != collection["record_id"]:
                         # 去重：等级取高的，标签合并
                         new_level = s.merge_level(existing.get("等级"), collection.get("等级"))
                         existing_tags = json.loads(existing.get("标签", "[]")) if existing.get("标签") else []
                         new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
                         merged_tags = s.merge_tags(existing_tags, new_tags)
                         
-                        s.db.update_collection(existing["记录ID"], {
+                        s.db.update_collection(existing["record_id"], {
                             "等级": new_level,
                             "标签": json.dumps(merged_tags),
                         })
                         # 删除重复记录
-                        s.db.delete_collection(collection["记录ID"])
+                        s.db.delete_collection(collection["record_id"])
                         success += 1
                         yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ 合并重复记录'})}\n\n"
                     else:
                         # 更新 sec_user_id
-                        s.db.update_collection(collection["记录ID"], {
+                        s.db.update_collection(collection["record_id"], {
                             "sec_user_id": sec_user_id,
                             "已同步": True,
                             "同步错误": None,
@@ -851,7 +863,7 @@ async def api_sync_v2_update_collection():
                 except Exception as e:
                     failed += 1
                     errors.append(f"{collection.get('分享码')}: {str(e)}")
-                    s.db.update_collection(collection["记录ID"], {
+                    s.db.update_collection(collection["record_id"], {
                         "同步错误": str(e),
                     })
                     yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {collection.get('分享码')}: {e}'})}\n\n"
@@ -920,7 +932,7 @@ async def api_sync_v2_sync_account():
                         merged_tags = s.merge_tags(existing_tags, new_tags)
                         
                         # 更新账号表
-                        s.db.update_account(existing_account["记录ID"], {
+                        s.db.update_account(existing_account["record_id"], {
                             "等级": new_level,
                             "标签": json.dumps(merged_tags),
                             "已获取信息": True,
@@ -940,7 +952,7 @@ async def api_sync_v2_sync_account():
                         # 创建账号记录
                         record_id = f"acc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{success}"
                         s.db.insert_account({
-                            "记录ID": record_id,
+                            "record_id": record_id,
                             "账号名称": info.get("nickname", ""),
                             "平台": platform,
                             "链接": f"https://www.douyin.com/user/{sec_user_id}",
@@ -1459,112 +1471,15 @@ async def api_database_clear_table(table_name: str):
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 
-# --- 飞书同步 ---
-
-@app.post("/api/feishu/sync")
-async def api_feishu_sync():
-    """飞书双向同步 - SSE 实时进度"""
-    fs = get_feishu_syncer()
-    if not fs:
-        return JSONResponse(
-            {"success": False, "message": "飞书未配置"},
-            status_code=400,
-        )
-
-    import json
-    import asyncio
-
-    async def sync_stream():
-        try:
-            yield f"data: {json.dumps({'type': 'start', 'message': '开始双向同步'})}\n\n"
-
-            steps = [
-                ('采集表 → 飞书', fs.sync_collection_to_feishu),
-                ('账号表 → 飞书', fs.sync_account_to_feishu),
-                ('飞书 → 采集表', fs.sync_collection_from_feishu),
-                ('飞书 → 账号表', fs.sync_account_from_feishu),
-            ]
-
-            total = len(steps)
-            all_errors = []
-            results = {}
-
-            for i, (label, fn) in enumerate(steps):
-                yield f"data: {json.dumps({'type': 'progress', 'message': f'[{i+1}/{total}] {label}...'})}\n\n"
-                try:
-                    r = await asyncio.to_thread(fn)
-                    created = r.get("created", 0)
-                    updated = r.get("updated", 0)
-                    failed = r.get("failed", 0)
-                    all_errors.extend(r.get("errors", []))
-                    results[label] = {"created": created, "updated": updated, "failed": failed}
-                    level = "ok" if failed == 0 else "error"
-                    icon = "✅" if failed == 0 else "⚠️"
-                    msg = f"{icon} {label}: 新增 {created}, 更新 {updated}" + (f", 失败 {failed}" if failed else "")
-                    yield f"data: {json.dumps({'type': 'log', 'level': level, 'message': msg})}\n\n"
-                    yield f"data: {json.dumps({'type': 'stats', 'step': i+1, 'total': total})}\n\n"
-                except Exception as e:
-                    all_errors.append(f"{label}: {e}")
-                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {label}: {e}'})}\n\n"
-
-            summary = "双向同步完成" + (f", {len(all_errors)} 个错误" if all_errors else "")
-            yield f"data: {json.dumps({'type': 'complete', 'success': len(all_errors) == 0, 'message': summary, 'results': results, 'errors': all_errors[:5]})}\n\n"
-
-        except Exception as e:
-            logger.error(f"飞书同步失败: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'同步失败: {str(e)}'})}\n\n"
-
-    return StreamingResponse(sync_stream(), media_type="text/event-stream")
+# --- 云端同步（v2 路由定义在文件后面）---
 
 
-@app.post("/api/feishu/sync/to-feishu")
-async def api_feishu_sync_to():
-    """本地 → 飞书"""
-    fs = get_feishu_syncer()
-    if not fs:
-        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
+# --- 云端同步（v2）---
 
-    try:
-        coll_result = fs.sync_collection_to_feishu()
-        acc_result = fs.sync_account_to_feishu()
-        cookie_result = fs.sync_cookie_to_feishu()
-        return {
-            "success": True,
-            "message": f"同步到飞书完成: 采集表 {coll_result['created']}新增 {coll_result['updated']}更新, 账号表 {acc_result['created']}新增 {acc_result['updated']}更新, Cookie表 {cookie_result['created']}新增 {cookie_result['updated']}更新",
-            "collection": coll_result,
-            "account": acc_result,
-            "cookie": cookie_result,
-        }
-    except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
-
-
-@app.post("/api/feishu/sync/from-feishu")
-async def api_feishu_sync_from():
-    """飞书 → 本地"""
-    fs = get_feishu_syncer()
-    if not fs:
-        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
-
-    try:
-        coll_result = fs.sync_collection_from_feishu()
-        acc_result = fs.sync_account_from_feishu()
-        cookie_result = fs.sync_cookie_from_feishu()
-        return {
-            "success": True,
-            "message": f"从飞书同步完成: 采集表 {coll_result['created']}新增 {coll_result['updated']}更新, 账号表 {acc_result['created']}新增 {acc_result['updated']}更新, Cookie表 {cookie_result['created']}新增 {cookie_result['updated']}更新",
-            "collection": coll_result,
-            "account": acc_result,
-            "cookie": cookie_result,
-        }
-    except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
-
-
-# --- 飞书同步（全盘/增量）---
-
-def _run_feishu_sync_sse(fs, steps):
-    """通用飞书同步 SSE 生成器"""
+def _run_feishu_sync_sse(steps):
+    """通用云端同步 SSE 生成器。
+    steps: [(label, callable), ...] - callable 返回 dict（单步）或 dict[str, dict]（多步合并）
+    """
     import json, asyncio
 
     async def stream():
@@ -1572,86 +1487,128 @@ def _run_feishu_sync_sse(fs, steps):
             total = len(steps)
             all_errors = []
             results = {}
-            yield f"data: {json.dumps({'type': 'start', 'message': '开始同步', 'total': total})}\n\n"
+            yield f"data: {json.dumps({'type': 'start', 'message': '开始同步', 'total': total}, ensure_ascii=False)}\n\n"
 
             for i, (label, fn) in enumerate(steps):
-                yield f"data: {json.dumps({'type': 'progress', 'message': f'[{i+1}/{total}] {label}...'})}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'message': f'[{i+1}/{total}] {label}...'}, ensure_ascii=False)}\n\n"
                 try:
                     r = await asyncio.to_thread(fn)
-                    created = r.get("created", 0)
-                    updated = r.get("updated", 0)
-                    uptodate = r.get("skipped_uptodate", 0)
-                    duplicate = r.get("skipped_duplicate", 0)
-                    invalid = r.get("skipped_invalid", 0)
-                    failed = r.get("failed", 0)
-                    all_errors.extend(r.get("errors", []))
-                    results[label] = {"created": created, "updated": updated, "uptodate": uptodate, "duplicate": duplicate, "invalid": invalid, "failed": failed}
-                    if failed > 0:
-                        msg = f"⚠️ {label}: 新增 {created}, 更新 {updated}, 已最新 {uptodate}, 重复 {duplicate}, 无效 {invalid}, 失败 {failed}"
-                        yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': msg})}\n\n"
+                    # r 可能是单步 dict 或 {label: dict} 形式的多步结果
+                    if r and all(isinstance(v, dict) and not any(k in v for k in ("created", "updated", "failed")) for v in r.values()):
+                        # 多步结果（sync_incremental / sync_full_*）
+                        step_errors = []
+                        for sub_label, sub_r in r.items():
+                            sub_created = sub_r.get("created", 0)
+                            sub_updated = sub_r.get("updated", 0)
+                            sub_deleted = sub_r.get("deleted", 0)
+                            sub_uptodate = sub_r.get("skipped_uptodate", 0)
+                            sub_duplicate = sub_r.get("skipped_duplicate", 0)
+                            sub_invalid = sub_r.get("skipped_invalid", 0)
+                            sub_failed = sub_r.get("failed", 0)
+                            sub_errs = sub_r.get("errors", [])
+                            all_errors.extend(sub_errs)
+                            results[sub_label] = {
+                                "created": sub_created, "updated": sub_updated, "deleted": sub_deleted,
+                                "uptodate": sub_uptodate, "duplicate": sub_duplicate,
+                                "invalid": sub_invalid, "failed": sub_failed,
+                            }
+                            parts = []
+                            if sub_created: parts.append(f"新增 {sub_created}")
+                            if sub_updated: parts.append(f"更新 {sub_updated}")
+                            if sub_deleted: parts.append(f"删除 {sub_deleted}")
+                            if sub_uptodate: parts.append(f"已最新 {sub_uptodate}")
+                            if sub_duplicate: parts.append(f"重复 {sub_duplicate}")
+                            if sub_invalid: parts.append(f"无效 {sub_invalid}")
+                            if sub_failed: parts.append(f"失败 {sub_failed}")
+                            msg_text = "，".join(parts) if parts else "无变化"
+                            level = "error" if sub_failed > 0 else "ok"
+                            icon = "⚠️" if sub_failed > 0 else "✅"
+                            yield f"data: {json.dumps({'type': 'log', 'level': level, 'message': f'{icon} {sub_label}: {msg_text}'}, ensure_ascii=False)}\n\n"
                     else:
-                        parts = []
-                        if created: parts.append(f"新增 {created}")
-                        if updated: parts.append(f"更新 {updated}")
-                        if uptodate: parts.append(f"已最新 {uptodate}")
-                        if duplicate: parts.append(f"重复 {duplicate}")
-                        if invalid: parts.append(f"无效 {invalid}")
-                        msg = f"✅ {label}: " + (", ".join(parts) if parts else "无变化")
-                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': msg})}\n\n"
+                        # 单步结果
+                        created = r.get("created", 0)
+                        updated = r.get("updated", 0)
+                        deleted = r.get("deleted", 0)
+                        uptodate = r.get("skipped_uptodate", 0)
+                        duplicate = r.get("skipped_duplicate", 0)
+                        invalid = r.get("skipped_invalid", 0)
+                        failed = r.get("failed", 0)
+                        all_errors.extend(r.get("errors", []))
+                        results[label] = {
+                            "created": created, "updated": updated, "deleted": deleted,
+                            "uptodate": uptodate, "duplicate": duplicate,
+                            "invalid": invalid, "failed": failed,
+                        }
+                        if failed > 0:
+                            parts = []
+                            if created: parts.append(f"新增 {created}")
+                            if updated: parts.append(f"更新 {updated}")
+                            if deleted: parts.append(f"删除 {deleted}")
+                            if uptodate: parts.append(f"已最新 {uptodate}")
+                            if duplicate: parts.append(f"重复 {duplicate}")
+                            if invalid: parts.append(f"无效 {invalid}")
+                            if failed: parts.append(f"失败 {failed}")
+                            msg_text = "，".join(parts)
+                            yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'⚠️ {label}: {msg_text}'}, ensure_ascii=False)}\n\n"
+                        else:
+                            parts = []
+                            if created: parts.append(f"新增 {created}")
+                            if updated: parts.append(f"更新 {updated}")
+                            if deleted: parts.append(f"删除 {deleted}")
+                            if uptodate: parts.append(f"已最新 {uptodate}")
+                            if duplicate: parts.append(f"重复 {duplicate}")
+                            if invalid: parts.append(f"无效 {invalid}")
+                            msg_text = "，".join(parts) if parts else "无变化"
+                            yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ {label}: {msg_text}'}, ensure_ascii=False)}\n\n"
                     yield f"data: {json.dumps({'type': 'stats', 'step': i+1, 'total': total})}\n\n"
                 except Exception as e:
                     all_errors.append(f"{label}: {e}")
-                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {label}: {e}'})}\n\n"
+                    logger.exception(f"同步步骤失败: {label}")
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {label}: {e}'}, ensure_ascii=False)}\n\n"
 
-            summary = "同步完成" + (f", {len(all_errors)} 个错误" if all_errors else "")
-            yield f"data: {json.dumps({'type': 'complete', 'success': len(all_errors) == 0, 'message': summary, 'results': results, 'errors': all_errors[:5]})}\n\n"
+            summary = "同步完成" + (f"，{len(all_errors)} 个错误" if all_errors else "")
+            yield f"data: {json.dumps({'type': 'complete', 'success': len(all_errors) == 0, 'message': summary, 'results': results, 'errors': all_errors[:10]}, ensure_ascii=False)}\n\n"
         except Exception as e:
-            logger.error(f"飞书同步失败: {e}")
+            logger.error(f"云端同步失败: {e}")
             yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'同步失败: {str(e)}'})}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 
-@app.post("/api/feishu/sync/full/to-feishu")
-async def api_feishu_full_to_feishu():
-    """全盘同步：本地 → 飞书（覆盖）"""
+@app.post("/api/feishu/sync")
+async def api_feishu_sync():
+    """增量同步：本地 ↔ 云端 双向 6 步（采集/账号/Cookie × 2 方向）"""
     fs = get_feishu_syncer()
     if not fs:
-        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
-    return _run_feishu_sync_sse(fs, [
-        ("采集表 → 飞书", fs.sync_collection_to_feishu),
-        ("账号表 → 飞书", fs.sync_account_to_feishu),
-        ("Cookie表 → 飞书", fs.sync_cookie_to_feishu),
-    ])
+        return JSONResponse({"success": False, "message": "云端未配置"}, status_code=400)
+    return _run_feishu_sync_sse([("增量同步", fs.sync_incremental)])
 
 
-@app.post("/api/feishu/sync/full/from-feishu")
-async def api_feishu_full_from_feishu():
-    """全盘同步：飞书 → 本地（覆盖）"""
+@app.post("/api/feishu/sync/full")
+async def api_feishu_sync_full(request: Request):
+    """全盘同步：以一端为基准覆盖另一端（核武器，需二次确认）
+
+    Body: {"direction": "to-feishu" | "from-feishu"}
+    """
     fs = get_feishu_syncer()
     if not fs:
-        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
-    return _run_feishu_sync_sse(fs, [
-        ("飞书 → 采集表", fs.sync_collection_from_feishu),
-        ("飞书 → 账号表", fs.sync_account_from_feishu),
-        ("飞书 → Cookie表", fs.sync_cookie_from_feishu),
-    ])
+        return JSONResponse({"success": False, "message": "云端未配置"}, status_code=400)
 
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    direction = data.get("direction", "")
 
-@app.post("/api/feishu/sync/incremental")
-async def api_feishu_incremental_sync():
-    """增量同步：双向仅新增，不更新已有记录"""
-    fs = get_feishu_syncer()
-    if not fs:
-        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
-    return _run_feishu_sync_sse(fs, [
-        ("本地 → 飞书：采集表", fs._incremental_collection_to_feishu),
-        ("本地 → 飞书：账号表", fs._incremental_account_to_feishu),
-        ("本地 → 飞书：Cookie表", fs._incremental_cookie_to_feishu),
-        ("飞书 → 本地：采集表", fs._incremental_collection_from_feishu),
-        ("飞书 → 本地：账号表", fs._incremental_account_from_feishu),
-        ("飞书 → 本地：Cookie表", fs._incremental_cookie_from_feishu),
-    ])
+    if direction == "to-feishu":
+        return _run_feishu_sync_sse([("以本地覆盖云端", fs.sync_full_to_feishu)])
+    elif direction == "from-feishu":
+        return _run_feishu_sync_sse([("以云端覆盖本地", fs.sync_full_from_feishu)])
+    else:
+        return JSONResponse({
+            "success": False,
+            "message": "参数 direction 必须是 to-feishu 或 from-feishu",
+        }, status_code=400)
 
 
 # --- 采集（使用新数据库）---
@@ -2022,10 +1979,10 @@ async def api_get_tags():
 
 @app.post("/api/ensure-fields")
 async def api_ensure_fields(request: Request):
-    """检测并创建缺失的飞书表格字段，支持指定表类型"""
+    """检测并创建缺失的云端表格字段，支持指定表类型"""
     f = get_feishu()
     if not f:
-        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
+        return JSONResponse({"success": False, "message": "云端未配置"}, status_code=400)
 
     try:
         data = await request.json()
@@ -2063,7 +2020,7 @@ async def api_ensure_fields(request: Request):
 async def api_test_feishu():
     f = get_feishu()
     if not f:
-        return {"success": False, "message": "飞书未配置，请先填写 App ID 和 App Secret"}
+        return {"success": False, "message": "云端未配置，请先填写 App ID 和 App Secret"}
     return f.test_connection()
 
 

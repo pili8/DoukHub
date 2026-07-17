@@ -13,7 +13,7 @@
 
 <div class="card">
     <div class="empty-state" id="dup-empty">
-        点击"同步并检测重复"按钮开始检测飞书表中的重复账号
+        点击"同步并检测重复"按钮开始检测云端表中的重复账号
     </div>
     <div id="dup-list"></div>
 </div>
@@ -23,7 +23,7 @@
     let duplicatesData = [];
 
     async function syncAndCheck() {
-        showToast('正在同步飞书...');
+        showToast('正在同步云端...');
         const data = await apiCall('/api/sync', 'POST');
         if (!data.success) {
             showToast(data.message, 'error');

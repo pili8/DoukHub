@@ -17,12 +17,17 @@ class Database:
         self._init_database()
 
     def _init_database(self):
-        """初始化数据库表结构"""
+        """初始化数据库表结构
+
+        字段命名规范（v2）：
+        - 业务字段：中文，与飞书表 100% 一致（分享码/平台/等级/标签/已同步/...）
+        - 系统字段：英文，本地专用不进飞书（record_id/is_deleted/deleted_at/synced/created_at）
+        """
         with self._connect() as conn:
             # 表1：采集表缓存
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS collection_cache (
-                    记录ID TEXT PRIMARY KEY,
+                    record_id TEXT PRIMARY KEY,
                     分享码 TEXT UNIQUE NOT NULL,
                     平台 TEXT,
                     等级 INTEGER,
@@ -34,53 +39,59 @@ class Database:
                     昵称 TEXT,
                     粉丝数 INTEGER,
                     作品数 INTEGER,
-                    创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    账号名称 TEXT,
+                    签名 TEXT,
+                    头像 TEXT,
                     同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     is_deleted BOOLEAN DEFAULT 0,
-                    deleted_at DATETIME
+                    deleted_at DATETIME,
+                    synced BOOLEAN DEFAULT 0
                 )
             """)
 
             # 表2：账号表缓存（字段名对齐飞书）
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS account_cache (
-                    记录ID TEXT PRIMARY KEY,
+                    record_id TEXT PRIMARY KEY,
                     账号名称 TEXT,
                     平台 TEXT,
                     链接 TEXT,
                     sec_user_id TEXT UNIQUE NOT NULL,
                     等级 INTEGER,
                     标签 TEXT,
+                    启用 BOOLEAN DEFAULT 1,
+                    采集类型 TEXT DEFAULT '发布',
+                    备注 TEXT,
                     昵称 TEXT,
                     粉丝数 INTEGER,
                     作品数 INTEGER,
                     签名 TEXT,
                     头像 TEXT,
                     已获取信息 BOOLEAN DEFAULT 0,
-                    备注 TEXT,
-                    启用 BOOLEAN DEFAULT 1,
-                    采集类型 TEXT DEFAULT '发布',
-                    创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
                     同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     is_deleted BOOLEAN DEFAULT 0,
-                    deleted_at DATETIME
+                    deleted_at DATETIME,
+                    synced BOOLEAN DEFAULT 0
                 )
             """)
 
             # 表3：Cookie表缓存
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS cookie_cache (
-                    记录ID TEXT PRIMARY KEY,
+                    record_id TEXT PRIMARY KEY,
                     Cookie TEXT NOT NULL,
                     平台 TEXT,
                     状态 TEXT DEFAULT '正常',
                     启用 BOOLEAN DEFAULT 1,
                     备注 TEXT,
                     验证时间 DATETIME,
-                    创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
                     同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     is_deleted BOOLEAN DEFAULT 0,
-                    deleted_at DATETIME
+                    deleted_at DATETIME,
+                    synced BOOLEAN DEFAULT 0
                 )
             """)
 
@@ -100,7 +111,7 @@ class Database:
                     结束时间 DATETIME,
                     耗时秒数 REAL,
                     错误信息 TEXT,
-                    创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
@@ -114,7 +125,7 @@ class Database:
                     启用 BOOLEAN DEFAULT 1,
                     上次运行 DATETIME,
                     下次运行 DATETIME,
-                    创建时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -124,20 +135,42 @@ class Database:
             self._migrate_legacy_columns(conn)
 
             # 创建索引（依赖字段名，必须在迁移之后）
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_collection_share ON collection_cache(分享码)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_collection_sec_user_id ON collection_cache(sec_user_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_account_sec_user_id ON account_cache(sec_user_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_history_sec_user_id ON collection_history(sec_user_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_history_created_at ON collection_history(创建时间)")
+            # 用 try/except 容错：旧库迁移后字段可能仍缺失（如 sec_user_id）
+            for sql in [
+                "CREATE INDEX IF NOT EXISTS idx_collection_share ON collection_cache(分享码)",
+                "CREATE INDEX IF NOT EXISTS idx_collection_sec_user_id ON collection_cache(sec_user_id)",
+                "CREATE INDEX IF NOT EXISTS idx_account_sec_user_id ON account_cache(sec_user_id)",
+                "CREATE INDEX IF NOT EXISTS idx_history_sec_user_id ON collection_history(sec_user_id)",
+                "CREATE INDEX IF NOT EXISTS idx_history_created_at ON collection_history(created_at)",
+            ]:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass
 
     def _migrate_legacy_columns(self, conn):
-        """迁移旧库字段名，使其对齐飞书。
+        """迁移旧库字段，使其对齐飞书 + 系统字段英文化（v2）。
+
+        v2 重命名：
+        - 记录ID → record_id（三张同步表）
+        - 创建时间 → created_at（三张同步表 + collection_history + scheduled_tasks）
+
+        v1 历史迁移（保留兼容）：
         - account_cache: 账号标识→sec_user_id, 更新错误→备注, 更新时间→同步时间, 已更新→已获取信息
         - collection_cache: 账号标识→sec_user_id, 更新时间→同步时间
         - collection_history: 账号标识→sec_user_id
-        - 其他表: 更新时间→同步时间
+        - cookie_cache: 更新时间→同步时间
+        - scheduled_tasks: 更新时间→同步时间
         - 删除 account_cache.代理（如存在）
+
+        v2 新增字段：
+        - 三张同步表：is_deleted / deleted_at / synced（如缺失则添加）
+        - 旧 synced 字段首次添加时把现有记录全部标记为已同步
+
+        v2 废弃字段（不主动删除，保留兼容）：
+        - 最后更新时间（旧增量同步遗留，新方案不再使用）
         """
+        # v1 历史重命名（业务字段对齐飞书）
         rename_map = {
             "collection_cache": [
                 ("账号标识", "sec_user_id"),
@@ -159,7 +192,15 @@ class Database:
                 ("更新时间", "同步时间"),
             ],
         }
-        # 新增字段（旧库可能缺）
+        # v2 系统字段英文化（三张同步表）
+        v2_renames = {
+            "collection_cache": [("记录ID", "record_id"), ("创建时间", "created_at")],
+            "account_cache": [("记录ID", "record_id"), ("创建时间", "created_at")],
+            "cookie_cache": [("记录ID", "record_id"), ("创建时间", "created_at")],
+            "collection_history": [("创建时间", "created_at")],
+            "scheduled_tasks": [("创建时间", "created_at")],
+        }
+        # v2 新增字段
         add_columns = {
             "account_cache": [
                 ("启用", "BOOLEAN DEFAULT 1"),
@@ -177,11 +218,8 @@ class Database:
             add_columns.setdefault(_tbl, []).append(
                 ("synced", "BOOLEAN DEFAULT 0"),
             )
-        # 最后更新时间：用于增量同步检测数据变化
-        for _tbl in ("collection_cache", "account_cache", "cookie_cache"):
-            add_columns.setdefault(_tbl, []).append(
-                ("最后更新时间", "DATETIME"),
-            )
+
+        # 执行 v1 业务字段重命名
         for table, renames in rename_map.items():
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
             for old, new in renames:
@@ -190,6 +228,15 @@ class Database:
                 elif old in cols and new in cols:
                     # 两个都存在（异常情况），保留新字段
                     pass
+
+        # 执行 v2 系统字段英文化重命名
+        for table, renames in v2_renames.items():
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            for old, new in renames:
+                if old in cols and new not in cols:
+                    conn.execute(f'ALTER TABLE {table} RENAME COLUMN "{old}" TO "{new}"')
+
+        # 添加缺失字段
         for table, additions in add_columns.items():
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
             for col, ddl in additions:
@@ -210,7 +257,7 @@ class Database:
     def get_all_collections(self) -> list[dict]:
         """获取所有采集表记录"""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM collection_cache WHERE is_deleted = 0 ORDER BY 创建时间 DESC").fetchall()
+            rows = conn.execute("SELECT * FROM collection_cache WHERE is_deleted = 0 ORDER BY created_at DESC").fetchall()
             return [dict(row) for row in rows]
 
     def get_collection_by_share(self, share: str) -> Optional[dict]:
@@ -222,7 +269,7 @@ class Database:
     def get_collection_by_id(self, record_id: str) -> Optional[dict]:
         """根据记录ID获取采集表记录"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM collection_cache WHERE 记录ID = ?", (record_id,)).fetchone()
+            row = conn.execute("SELECT * FROM collection_cache WHERE record_id = ?", (record_id,)).fetchone()
             return dict(row) if row else None
 
     def get_collection_by_sec_user_id(self, sec_user_id: str) -> Optional[dict]:
@@ -243,19 +290,16 @@ class Database:
     def update_collection(self, record_id: str, data: dict) -> bool:
         """更新采集表记录"""
         with self._connect() as conn:
-            # 自动更新「最后更新时间」字段
-            if "最后更新时间" not in data:
-                data["最后更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
-            conn.execute(f"UPDATE collection_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
+            conn.execute(f"UPDATE collection_cache SET {set_clause} WHERE record_id = ?", list(data.values()) + [record_id])
             conn.commit()
             return True
 
     def delete_collection(self, record_id: str) -> bool:
-        """删除采集表记录"""
+        """软删除采集表记录（打墓碑）"""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE collection_cache SET is_deleted = 1, deleted_at = ? WHERE 记录ID = ?",
+                "UPDATE collection_cache SET is_deleted = 1, deleted_at = ? WHERE record_id = ?",
                 (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id),
             )
             conn.commit()
@@ -273,7 +317,7 @@ class Database:
     def get_all_accounts(self) -> list[dict]:
         """获取所有账号表记录"""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM account_cache WHERE is_deleted = 0 ORDER BY 创建时间 DESC").fetchall()
+            rows = conn.execute("SELECT * FROM account_cache WHERE is_deleted = 0 ORDER BY created_at DESC").fetchall()
             return [dict(row) for row in rows]
 
     def get_account_by_sec_user_id(self, sec_user_id: str) -> Optional[dict]:
@@ -285,7 +329,7 @@ class Database:
     def get_account_by_id(self, record_id: str) -> Optional[dict]:
         """根据记录ID获取账号表记录"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM account_cache WHERE 记录ID = ?", (record_id,)).fetchone()
+            row = conn.execute("SELECT * FROM account_cache WHERE record_id = ?", (record_id,)).fetchone()
             return dict(row) if row else None
 
     def insert_account(self, data: dict) -> bool:
@@ -300,19 +344,16 @@ class Database:
     def update_account(self, record_id: str, data: dict) -> bool:
         """更新账号表记录"""
         with self._connect() as conn:
-            # 自动更新「最后更新时间」字段
-            if "最后更新时间" not in data:
-                data["最后更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
-            conn.execute(f"UPDATE account_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
+            conn.execute(f"UPDATE account_cache SET {set_clause} WHERE record_id = ?", list(data.values()) + [record_id])
             conn.commit()
             return True
 
     def delete_account(self, record_id: str) -> bool:
-        """删除账号表记录"""
+        """软删除账号表记录（打墓碑）"""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE account_cache SET is_deleted = 1, deleted_at = ? WHERE 记录ID = ?",
+                "UPDATE account_cache SET is_deleted = 1, deleted_at = ? WHERE record_id = ?",
                 (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id),
             )
             conn.commit()
@@ -330,7 +371,7 @@ class Database:
     def get_all_cookies(self) -> list[dict]:
         """获取所有 Cookie 记录"""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM cookie_cache WHERE is_deleted = 0 ORDER BY 创建时间 DESC").fetchall()
+            rows = conn.execute("SELECT * FROM cookie_cache WHERE is_deleted = 0 ORDER BY created_at DESC").fetchall()
             return [dict(row) for row in rows]
 
     def get_enabled_cookies(self) -> list[dict]:
@@ -351,11 +392,8 @@ class Database:
     def update_cookie(self, record_id: str, data: dict) -> bool:
         """更新 Cookie 记录"""
         with self._connect() as conn:
-            # 自动更新「最后更新时间」字段
-            if "最后更新时间" not in data:
-                data["最后更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
-            conn.execute(f"UPDATE cookie_cache SET {set_clause} WHERE 记录ID = ?", list(data.values()) + [record_id])
+            conn.execute(f"UPDATE cookie_cache SET {set_clause} WHERE record_id = ?", list(data.values()) + [record_id])
             conn.commit()
             return True
 
@@ -366,14 +404,14 @@ class Database:
     def get_cookie_by_id(self, record_id: str) -> Optional[dict]:
         """根据记录ID获取 Cookie 记录"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM cookie_cache WHERE 记录ID = ?", (record_id,)).fetchone()
+            row = conn.execute("SELECT * FROM cookie_cache WHERE record_id = ?", (record_id,)).fetchone()
             return dict(row) if row else None
 
     def delete_cookie(self, record_id: str) -> bool:
-        """删除 Cookie 记录"""
+        """软删除 Cookie 记录（打墓碑）"""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE cookie_cache SET is_deleted = 1, deleted_at = ? WHERE 记录ID = ?",
+                "UPDATE cookie_cache SET is_deleted = 1, deleted_at = ? WHERE record_id = ?",
                 (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id),
             )
             conn.commit()
@@ -394,7 +432,7 @@ class Database:
         """获取采集历史记录"""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM collection_history ORDER BY 创建时间 DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM collection_history ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 (limit, offset)
             ).fetchall()
             return [dict(row) for row in rows]
@@ -447,31 +485,31 @@ class Database:
         if table not in self._SYNC_TABLES:
             return []
         with self._connect() as conn:
-            rows = conn.execute(f"SELECT 记录ID FROM {table} WHERE is_deleted = 1").fetchall()
-            return [row["记录ID"] for row in rows]
+            rows = conn.execute(f"SELECT record_id FROM {table} WHERE is_deleted = 1").fetchall()
+            return [row["record_id"] for row in rows]
 
     def get_active_ids(self, table: str) -> list[str]:
         """获取正常记录（is_deleted=0）的 record_id 列表"""
         if table not in self._SYNC_TABLES:
             return []
         with self._connect() as conn:
-            rows = conn.execute(f"SELECT 记录ID FROM {table} WHERE is_deleted = 0").fetchall()
-            return [row["记录ID"] for row in rows]
+            rows = conn.execute(f"SELECT record_id FROM {table} WHERE is_deleted = 0").fetchall()
+            return [row["record_id"] for row in rows]
 
     def get_synced_active_ids(self, table: str) -> list[str]:
         """获取已同步且未删除的 record_id 列表（删除检测专用）"""
         if table not in self._SYNC_TABLES:
             return []
         with self._connect() as conn:
-            rows = conn.execute(f"SELECT 记录ID FROM {table} WHERE is_deleted = 0 AND synced = 1").fetchall()
-            return [row["记录ID"] for row in rows]
+            rows = conn.execute(f"SELECT record_id FROM {table} WHERE is_deleted = 0 AND synced = 1").fetchall()
+            return [row["record_id"] for row in rows]
 
     def hard_delete(self, table: str, record_id: str) -> bool:
         """硬删除（真删），用于飞书→本地方向清理孤儿记录"""
         if table not in self._SYNC_TABLES:
             return False
         with self._connect() as conn:
-            conn.execute(f"DELETE FROM {table} WHERE 记录ID = ?", (record_id,))
+            conn.execute(f"DELETE FROM {table} WHERE record_id = ?", (record_id,))
             conn.commit()
             return True
 
@@ -480,7 +518,7 @@ class Database:
         if table not in self._SYNC_TABLES:
             return False
         with self._connect() as conn:
-            conn.execute(f"DELETE FROM {table} WHERE 记录ID = ? AND is_deleted = 1", (record_id,))
+            conn.execute(f"DELETE FROM {table} WHERE record_id = ? AND is_deleted = 1", (record_id,))
             conn.commit()
             return True
 

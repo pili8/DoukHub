@@ -61,7 +61,7 @@ def test_cookie_cache_has_enabled_field(db):
 def test_schema_contains_pk_info(db):
     schema = db.get_table_schema("cookie_cache")
     pk_cols = [c["name"] for c in schema if c["pk"]]
-    assert "记录ID" in pk_cols
+    assert "record_id" in pk_cols
 
 
 def test_schema_invalid_table_raises():
@@ -75,26 +75,26 @@ def test_schema_invalid_table_raises():
 # ========== query_table 排序 ==========
 
 def test_query_table_default_order(db):
-    db.insert_cookie({"记录ID": "c1", "Cookie": "aaa"})
-    db.insert_cookie({"记录ID": "c2", "Cookie": "bbb"})
+    db.insert_cookie({"record_id": "c1", "Cookie": "aaa"})
+    db.insert_cookie({"record_id": "c2", "Cookie": "bbb"})
     r = db.query_table("cookie_cache", limit=10)
     assert r["total"] == 2
     assert len(r["records"]) == 2
 
 
 def test_query_table_sort_asc(db):
-    db.insert_cookie({"记录ID": "c1", "Cookie": "ccc"})
-    db.insert_cookie({"记录ID": "c2", "Cookie": "aaa"})
-    db.insert_cookie({"记录ID": "c3", "Cookie": "bbb"})
+    db.insert_cookie({"record_id": "c1", "Cookie": "ccc"})
+    db.insert_cookie({"record_id": "c2", "Cookie": "aaa"})
+    db.insert_cookie({"record_id": "c3", "Cookie": "bbb"})
     r = db.query_table("cookie_cache", sort_field="Cookie", sort_order="asc")
     cookies = [x["Cookie"] for x in r["records"]]
     assert cookies == ["aaa", "bbb", "ccc"]
 
 
 def test_query_table_sort_desc(db):
-    db.insert_cookie({"记录ID": "c1", "Cookie": "aaa"})
-    db.insert_cookie({"记录ID": "c2", "Cookie": "ccc"})
-    db.insert_cookie({"记录ID": "c3", "Cookie": "bbb"})
+    db.insert_cookie({"record_id": "c1", "Cookie": "aaa"})
+    db.insert_cookie({"record_id": "c2", "Cookie": "ccc"})
+    db.insert_cookie({"record_id": "c3", "Cookie": "bbb"})
     r = db.query_table("cookie_cache", sort_field="Cookie", sort_order="desc")
     cookies = [x["Cookie"] for x in r["records"]]
     assert cookies == ["ccc", "bbb", "aaa"]
@@ -102,22 +102,22 @@ def test_query_table_sort_desc(db):
 
 def test_query_table_sort_invalid_field_ignored(db):
     """排序字段不存在时，应回退到默认排序（不报错）"""
-    db.insert_cookie({"记录ID": "c1", "Cookie": "aaa"})
+    db.insert_cookie({"record_id": "c1", "Cookie": "aaa"})
     r = db.query_table("cookie_cache", sort_field="不存在的字段", sort_order="asc")
     assert r["total"] == 1
 
 
 def test_query_table_search(db):
-    db.insert_cookie({"记录ID": "c1", "Cookie": "aaa", "备注": "测试1"})
-    db.insert_cookie({"记录ID": "c2", "Cookie": "bbb", "备注": "其他"})
+    db.insert_cookie({"record_id": "c1", "Cookie": "aaa", "备注": "测试1"})
+    db.insert_cookie({"record_id": "c2", "Cookie": "bbb", "备注": "其他"})
     r = db.query_table("cookie_cache", search="测试")
     assert r["total"] == 1
-    assert r["records"][0]["记录ID"] == "c1"
+    assert r["records"][0]["record_id"] == "c1"
 
 
 def test_query_table_pagination(db):
     for i in range(5):
-        db.insert_cookie({"记录ID": f"c{i}", "Cookie": f"cookie_{i}"})
+        db.insert_cookie({"record_id": f"c{i}", "Cookie": f"cookie_{i}"})
     r = db.query_table("cookie_cache", limit=2, offset=0)
     assert len(r["records"]) == 2
     assert r["total"] == 5
@@ -126,7 +126,7 @@ def test_query_table_pagination(db):
 # ========== update_record_field 启用开关 ==========
 
 def test_update_record_field_enable(db):
-    db.insert_cookie({"记录ID": "c1", "Cookie": "aaa", "启用": 0})
+    db.insert_cookie({"record_id": "c1", "Cookie": "aaa", "启用": 0})
     assert db.get_cookie_by_id("c1")["启用"] in (0, False)
 
     ok = db.update_record_field("cookie_cache", "c1", "启用", 1)
@@ -135,27 +135,27 @@ def test_update_record_field_enable(db):
 
 
 def test_update_record_field_disable(db):
-    db.insert_cookie({"记录ID": "c1", "Cookie": "aaa", "启用": 1})
+    db.insert_cookie({"record_id": "c1", "Cookie": "aaa", "启用": 1})
     ok = db.update_record_field("cookie_cache", "c1", "启用", 0)
     assert ok is True
     assert db.get_cookie_by_id("c1")["启用"] in (0, False)
 
 
 def test_update_record_field_unknown_field_raises(db):
-    db.insert_cookie({"记录ID": "c1", "Cookie": "aaa"})
+    db.insert_cookie({"record_id": "c1", "Cookie": "aaa"})
     with pytest.raises(ValueError):
         db.update_record_field("cookie_cache", "c1", "不存在字段", 1)
 
 
 def test_update_record_field_nonexistent_record(db):
-    db.insert_cookie({"记录ID": "c1", "Cookie": "aaa"})
+    db.insert_cookie({"record_id": "c1", "Cookie": "aaa"})
     ok = db.update_record_field("cookie_cache", "不存在", "启用", 1)
     assert ok is False
 
 
 def test_update_record_field_account(db):
     """账号表的启用字段也能正常切换"""
-    db.insert_account({"记录ID": "a1", "sec_user_id": "sec1", "启用": 1})
+    db.insert_account({"record_id": "a1", "sec_user_id": "sec1", "启用": 1})
     ok = db.update_record_field("account_cache", "a1", "启用", 0)
     assert ok is True
     acc = db.get_account_by_id("a1")
@@ -166,8 +166,8 @@ def test_update_record_field_account(db):
 
 def test_import_records_create(db):
     records = [
-        {"记录ID": "c1", "Cookie": "aaa"},
-        {"记录ID": "c2", "Cookie": "bbb"},
+        {"record_id": "c1", "Cookie": "aaa"},
+        {"record_id": "c2", "Cookie": "bbb"},
     ]
     r = db.import_records("cookie_cache", records)
     assert r["created"] == 2
@@ -176,10 +176,10 @@ def test_import_records_create(db):
 
 
 def test_import_records_skip_existing(db):
-    db.insert_cookie({"记录ID": "c1", "Cookie": "old"})
+    db.insert_cookie({"record_id": "c1", "Cookie": "old"})
     records = [
-        {"记录ID": "c1", "Cookie": "old"},   # 已存在，跳过
-        {"记录ID": "c2", "Cookie": "new"},   # 新增
+        {"record_id": "c1", "Cookie": "old"},   # 已存在，跳过
+        {"record_id": "c2", "Cookie": "new"},   # 新增
     ]
     r = db.import_records("cookie_cache", records, skip_existing=True)
     assert r["created"] == 1
@@ -190,7 +190,7 @@ def test_import_records_skip_existing(db):
 def test_import_records_missing_required_fails(db):
     """Cookie 是 NOT NULL，缺失应该报错"""
     records = [
-        {"记录ID": "c1"},  # 缺 Cookie
+        {"record_id": "c1"},  # 缺 Cookie
     ]
     r = db.import_records("cookie_cache", records)
     assert r["created"] == 0
@@ -200,7 +200,7 @@ def test_import_records_missing_required_fails(db):
 
 def test_import_records_unknown_field_fails(db):
     records = [
-        {"记录ID": "c1", "Cookie": "aaa", "不存在字段": "x"},
+        {"record_id": "c1", "Cookie": "aaa", "不存在字段": "x"},
     ]
     r = db.import_records("cookie_cache", records)
     assert r["failed"] == 1
@@ -215,8 +215,8 @@ def test_import_records_empty_records(db):
 def test_import_records_account_with_enabled(db):
     """账号表导入时支持"启用"字段"""
     records = [
-        {"记录ID": "a1", "sec_user_id": "sec1", "启用": 0},
-        {"记录ID": "a2", "sec_user_id": "sec2"},  # 默认启用
+        {"record_id": "a1", "sec_user_id": "sec1", "启用": 0},
+        {"record_id": "a2", "sec_user_id": "sec2"},  # 默认启用
     ]
     r = db.import_records("account_cache", records)
     assert r["created"] == 2
@@ -229,10 +229,10 @@ def test_import_records_account_with_enabled(db):
 # ========== 旧库迁移 ==========
 
 def test_old_db_migration_adds_enabled_column():
-    """旧 account_cache 表（旧字段名）应自动迁移到新字段名"""
+    """旧 account_cache 表（旧字段名）应自动迁移到新字段名（v2 系统字段英文）"""
     p = pathlib.Path(tempfile.mkdtemp()) / "old.db"
     d = Database(db_path=p)
-    # 手动重建为最旧的 schema（账号标识/更新错误/更新时间/已更新）
+    # 手动重建为最旧的 schema（账号标识/更新错误/更新时间/已更新/记录ID/创建时间）
     import sqlite3
     with sqlite3.connect(str(p)) as conn:
         conn.executescript("""

@@ -130,10 +130,10 @@
     </div>
 </div>
 
-<!-- 3. 飞书增量同步 -->
+<!-- 3. 云端增量同步 -->
 <div class="card">
     <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
-        🔄 增量同步 <span style="font-size:13px;color:#888;font-weight:normal;">本地 ↔ 飞书</span>
+        🔄 增量同步 <span style="font-size:13px;color:#888;font-weight:normal;">本地 ↔ 云端</span>
         <span class="collapse-icon">▼</span>
     </h3>
     <div class="card-content">
@@ -143,7 +143,7 @@
             <span id="incr-sync-status" style="font-size:13px;color:#888;"></span>
         </div>
         <div style="font-size:12px;color:#888;margin-bottom:12px;">
-            双向同步采集表、账号表、Cookie表，仅同步新增和更新的记录
+            双向同步采集表、账号表、Cookie表：人工字段（等级/标签/备注）云端赢，API 字段（粉丝数/作品数）本地赢；云端删除会自动同步到本地，本地删除会同步到云端
         </div>
         
         <!-- 进度区域 -->
@@ -178,9 +178,9 @@
         <button class="btn btn-danger" onclick="stopSync()" id="stop-sync-btn" style="display:none;">⏹ 停止</button>
     </div>
     <div style="font-size:12px;color:#888;margin-bottom:12px;">
-        <div>① 导入采集表：解析粘贴的文本（分享码、等级、标签）写入本地，同时拉取飞书采集表</div>
+        <div>① 导入采集表：解析粘贴的文本（分享码、等级、标签）写入本地，同时拉取云端采集表</div>
         <div>② 解析账号标识：调用 TTD API 解析短链接，获取 sec_user_id（账号唯一标识）</div>
-        <div>③ 同步账号表：调用 TTD API 获取账号信息（昵称、粉丝数、作品数），回写飞书账号表</div>
+        <div>③ 同步账号表：调用 TTD API 获取账号信息（昵称、粉丝数、作品数），回写云端账号表</div>
         <div>⚡ 一键执行：依次执行三个步骤</div>
     </div>
 
@@ -192,7 +192,7 @@
             <div class="progress-bar" id="sync-progress-bar" style="width:0%"></div>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:12px;color:#888;">
-            <span id="sync-progress-text">连接飞书...</span>
+            <span id="sync-progress-text">连接云端...</span>
             <span id="sync-progress-count"></span>
         </div>
         <div class="sync-stats-grid">
@@ -491,8 +491,8 @@
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
 
-        progressText.textContent = '连接飞书...';
-        addLog(logBox, '<div class="log-info">→ 正在连接飞书...</div>');
+        progressText.textContent = '连接云端...';
+        addLog(logBox, '<div class="log-info">→ 正在连接云端...</div>');
 
         // 创建 AbortController 用于取消请求
         syncAbortController = new AbortController();
@@ -1050,7 +1050,7 @@
         try {
             await runStep('/api/sync/v2/import', { text }, '步骤1：导入采集表');
             await runStep('/api/sync/v2/update-collection', null, '步骤2：解析短链接');
-            await runStep('/api/sync/v2/sync-account', null, '步骤3：获取详情 + 回写飞书');
+            await runStep('/api/sync/v2/sync-account', null, '步骤3：获取详情 + 回写云端');
 
             progressBar.style.width = '100%';
             progressBar.style.background = '#27ae60';
@@ -1089,31 +1089,9 @@
         }
     }
 
-    // ========== 飞书同步 ==========
-    async function syncFeishu() {
-        const btn = document.getElementById('feishu-sync-btn');
-        if (btn) {
-            btn.disabled = true;
-            btn.textContent = '同步中...';
-        }
-        try {
-            const data = await apiCall('/api/feishu/sync', 'POST');
-            if (data.success) {
-                showToast(data.message || '飞书同步完成', 'success');
-            } else {
-                showToast(data.message || '飞书同步失败', 'error');
-            }
-        } catch (e) {
-            showToast('飞书同步请求失败: ' + e.message, 'error');
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.textContent = '🔄 飞书同步';
-            }
-        }
-    }
+    // ========== 云端同步（已迁移到 /api/feishu/sync） ==========
 
-    // ========== 飞书双向增量同步 ==========
+    // ========== 云端双向增量同步 ==========
     let incrSyncAbortController = null;
 
     async function startIncrementalSync() {
@@ -1122,7 +1100,7 @@
         const status = document.getElementById('incr-sync-status');
         const progressArea = document.getElementById('incr-progress-area');
         const resultArea = document.getElementById('incr-result-area');
-        
+
         btn.disabled = true;
         btn.textContent = '同步中...';
         stopBtn.style.display = 'inline-block';
@@ -1130,11 +1108,11 @@
         status.style.color = '#888';
         progressArea.style.display = 'block';
         resultArea.style.display = 'none';
-        
+
         incrSyncAbortController = new AbortController();
-        
+
         try {
-            const response = await fetch('/api/feishu/sync/incremental', {
+            const response = await fetch('/api/feishu/sync', {
                 method: 'POST',
                 signal: incrSyncAbortController.signal
             });
