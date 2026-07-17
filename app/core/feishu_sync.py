@@ -38,18 +38,26 @@ class FeishuSyncer:
 
     # 业务字段（与飞书同步的字段，排除系统字段）
     # 按字段归属分组：feishu_wins=人工字段（飞书赢），local_wins=API 字段（本地赢）
+    # 设计原则：
+    # - 人工字段：用户在飞书端手动修改的（等级、标签、备注、账号名称等）→ 飞书赢
+    # - API 字段：DoukHub 通过 TTD API 采集的（粉丝数、作品数、昵称等）→ 本地赢
+    # - 元数据：创建后不变的（分享码、平台、Cookie、状态等）→ 不参与冲突
     FIELD_OWNERSHIP = {
         "collection_cache": {
-            "feishu_wins": ["等级", "标签", "备注", "已同步"],
-            "local_wins": ["sec_user_id", "昵称", "粉丝数", "作品数", "账号名称", "签名", "头像"],
-            # 元数据：创建后基本不变，不参与冲突解决
+            # 人工字段：用户在飞书端修改的
+            "feishu_wins": ["等级", "标签", "备注", "已同步", "账号名称", "昵称", "粉丝数", "作品数", "签名", "头像"],
+            # API 字段：DoukHub 通过 API 解析/写入的
+            "local_wins": ["sec_user_id"],
+            # 元数据：创建后不变
             "immutable": ["分享码", "平台"],
             # 同步动作产生：同步器写回，不算业务字段冲突
             "sync_generated": ["同步错误", "同步时间"],
         },
         "account_cache": {
-            "feishu_wins": ["等级", "标签", "备注", "启用", "采集类型"],
-            "local_wins": ["账号名称", "sec_user_id", "昵称", "粉丝数", "作品数", "签名", "头像", "链接", "已获取信息"],
+            # 人工字段：用户在飞书端修改的
+            "feishu_wins": ["等级", "标签", "备注", "启用", "采集类型", "账号名称"],
+            # API 字段：DoukHub 通过 API 采集的
+            "local_wins": ["sec_user_id", "昵称", "粉丝数", "作品数", "签名", "头像", "链接", "已获取信息"],
             "immutable": ["平台"],
             "sync_generated": ["同步时间"],
         },
@@ -869,10 +877,40 @@ class FeishuSyncer:
             logger.exception(f"{db_table} 删除检测失败")
         return result
 
+    # ========== 公开入口：单表单方向同步（供 SSE 进度展示用）==========
+
+    def sync_collection_to_feishu(self) -> dict:
+        """本地 → 云端：采集表"""
+        return self._sync_to_feishu("collection_cache")
+
+    def sync_account_to_feishu(self) -> dict:
+        """本地 → 云端：账号表"""
+        return self._sync_to_feishu("account_cache")
+
+    def sync_cookie_to_feishu(self) -> dict:
+        """本地 → 云端：Cookie表"""
+        return self._sync_to_feishu("cookie_cache")
+
+    def sync_collection_from_feishu(self) -> dict:
+        """云端 → 本地：采集表"""
+        return self._sync_from_feishu("collection_cache")
+
+    def sync_account_from_feishu(self) -> dict:
+        """云端 → 本地：账号表"""
+        return self._sync_from_feishu("account_cache")
+
+    def sync_cookie_from_feishu(self) -> dict:
+        """云端 → 本地：Cookie表"""
+        return self._sync_from_feishu("cookie_cache")
+
     # ========== 公开入口：增量同步（双向 6 步） ==========
 
     def sync_incremental(self) -> dict:
-        """增量双向同步（6 步：3 表 × 2 方向）"""
+        """增量双向同步（6 步：3 表 × 2 方向）
+
+        返回 {label: result} 形式的合并结果（用于启动时自动同步等不显示进度的场景）
+        UI 调用应使用 get_incremental_steps() 拆分为 6 个独立步骤以获得进度展示
+        """
         all_results = {}
         # 本地 → 飞书（3 表）
         for db_table in ("collection_cache", "account_cache", "cookie_cache"):
@@ -892,7 +930,39 @@ class FeishuSyncer:
                 all_results[label] = {"failed": 1, "errors": [str(e)]}
         return all_results
 
-    # ========== 公开入口：全盘同步（清空+重建） ==========
+    def get_incremental_steps(self) -> list:
+        """获取增量同步的 6 个独立步骤（用于 SSE 进度展示）
+
+        返回 [(label, callable), ...]
+        """
+        return [
+            ("本地 → 云端：采集表", self.sync_collection_to_feishu),
+            ("本地 → 云端：账号表", self.sync_account_to_feishu),
+            ("本地 → 云端：Cookie表", self.sync_cookie_to_feishu),
+            ("云端 → 本地：采集表", self.sync_collection_from_feishu),
+            ("云端 → 本地：账号表", self.sync_account_from_feishu),
+            ("云端 → 本地：Cookie表", self.sync_cookie_from_feishu),
+        ]
+
+    def get_full_steps(self, direction: str) -> list:
+        """获取全盘同步的步骤列表（用于 SSE 进度展示）
+
+        direction: "to-feishu"（以本地覆盖云端） | "from-feishu"（以云端覆盖本地）
+        """
+        if direction == "to-feishu":
+            return [
+                ("覆盖云端：采集表", lambda: self._full_to_feishu_single("collection_cache")),
+                ("覆盖云端：账号表", lambda: self._full_to_feishu_single("account_cache")),
+                ("覆盖云端：Cookie表", lambda: self._full_to_feishu_single("cookie_cache")),
+            ]
+        else:
+            return [
+                ("覆盖本地：采集表", lambda: self._full_from_feishu_single("collection_cache")),
+                ("覆盖本地：账号表", lambda: self._full_from_feishu_single("account_cache")),
+                ("覆盖本地：Cookie表", lambda: self._full_from_feishu_single("cookie_cache")),
+            ]
+
+    # ========== 公开入口：全盘同步（清空+重建，整体调用） ==========
 
     def sync_full_to_feishu(self) -> dict:
         """全盘同步：以本地为基准，清空飞书 → 推送本地全部

@@ -1581,7 +1581,7 @@ async def api_feishu_sync():
     fs = get_feishu_syncer()
     if not fs:
         return JSONResponse({"success": False, "message": "云端未配置"}, status_code=400)
-    return _run_feishu_sync_sse([("增量同步", fs.sync_incremental)])
+    return _run_feishu_sync_sse(fs.get_incremental_steps())
 
 
 @app.post("/api/feishu/sync/full")
@@ -1600,15 +1600,13 @@ async def api_feishu_sync_full(request: Request):
         data = {}
     direction = data.get("direction", "")
 
-    if direction == "to-feishu":
-        return _run_feishu_sync_sse([("以本地覆盖云端", fs.sync_full_to_feishu)])
-    elif direction == "from-feishu":
-        return _run_feishu_sync_sse([("以云端覆盖本地", fs.sync_full_from_feishu)])
-    else:
+    if direction not in ("to-feishu", "from-feishu"):
         return JSONResponse({
             "success": False,
             "message": "参数 direction 必须是 to-feishu 或 from-feishu",
         }, status_code=400)
+
+    return _run_feishu_sync_sse(fs.get_full_steps(direction))
 
 
 # --- 采集（使用新数据库）---

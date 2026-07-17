@@ -174,23 +174,59 @@ def test_values_equal_tags_field(syncer):
 # ========== _compute_field_updates：字段归属计算（核心） ==========
 
 def test_compute_field_updates_local_wins(syncer, db):
-    """API 字段（local_wins）：本地值优先，应该推送到飞书"""
-    db.insert_collection({
-        "record_id": "r1", "分享码": "abc", "等级": 3,
+    """API 字段（local_wins）：本地值优先，应该推送到飞书
+
+    注意：账号表的「粉丝数/昵称」是 API 字段（本地赢）
+    """
+    db.insert_account({
+        "record_id": "r1", "sec_user_id": "sec1",
         "粉丝数": 200, "昵称": "new_name",
     })
-    local = db.get_collection_by_id("r1")
+    local = db.get_account_by_id("r1")
     # 飞书：粉丝数=100（旧），本地：粉丝数=200（新）
     feishu_record = {
         "record_id": "r1",
-        "fields": {"分享码": "abc", "等级": 3, "粉丝数": 100, "昵称": "old_name"},
+        "fields": {"sec_user_id": "sec1", "粉丝数": 100, "昵称": "old_name"},
     }
-    to_feishu, to_local = syncer._compute_field_updates("collection_cache", local, feishu_record)
+    to_feishu, to_local = syncer._compute_field_updates("account_cache", local, feishu_record)
     # API 字段（粉丝数、昵称）应该推送本地值到飞书
     assert "粉丝数" in to_feishu
     assert to_feishu["粉丝数"] == 200
     assert "昵称" in to_feishu
     assert to_feishu["昵称"] == "new_name"
+
+
+def test_compute_field_updates_collection_account_name_feishu_wins(syncer, db):
+    """采集表的「账号名称」是人工字段（飞书赢）
+
+    用户在飞书改账号名称 → 应该同步到本地（不会被本地覆盖）
+    """
+    db.insert_collection({"record_id": "r1", "分享码": "abc", "账号名称": "old_name"})
+    local = db.get_collection_by_id("r1")
+    feishu_record = {
+        "record_id": "r1",
+        "fields": {"分享码": "abc", "账号名称": "new_name_from_feishu"},
+    }
+    to_feishu, to_local = syncer._compute_field_updates("collection_cache", local, feishu_record)
+    # 账号名称是飞书赢，应该更新本地
+    assert "账号名称" in to_local
+    assert to_local["账号名称"] == "new_name_from_feishu"
+    # 不应该推送到飞书
+    assert "账号名称" not in to_feishu
+
+
+def test_compute_field_updates_account_account_name_feishu_wins(syncer, db):
+    """账号表的「账号名称」也是人工字段（飞书赢）"""
+    db.insert_account({"record_id": "a1", "sec_user_id": "sec1", "账号名称": "old_name"})
+    local = db.get_account_by_id("a1")
+    feishu_record = {
+        "record_id": "a1",
+        "fields": {"sec_user_id": "sec1", "账号名称": "new_name"},
+    }
+    to_feishu, to_local = syncer._compute_field_updates("account_cache", local, feishu_record)
+    assert "账号名称" in to_local
+    assert to_local["账号名称"] == "new_name"
+    assert "账号名称" not in to_feishu
 
 
 def test_compute_field_updates_feishu_wins(syncer, db):
@@ -444,6 +480,80 @@ def test_get_cookie_by_value_empty(syncer):
 def test_delete_safety_ratio_value():
     """50% 阈值应该在 0~1 之间"""
     assert 0 < FeishuSyncer.DELETE_SAFETY_RATIO < 1
+
+
+def test_field_ownership_collection_account_name_is_feishu_wins():
+    """采集表的「账号名称」应归飞书赢（人工字段）"""
+    ownership = FeishuSyncer.FIELD_OWNERSHIP["collection_cache"]
+    assert "账号名称" in ownership["feishu_wins"]
+    assert "账号名称" not in ownership["local_wins"]
+
+
+def test_field_ownership_account_account_name_is_feishu_wins():
+    """账号表的「账号名称」应归飞书赢（人工字段）"""
+    ownership = FeishuSyncer.FIELD_OWNERSHIP["account_cache"]
+    assert "账号名称" in ownership["feishu_wins"]
+    assert "账号名称" not in ownership["local_wins"]
+
+
+def test_get_incremental_steps_returns_6_steps(syncer):
+    """get_incremental_steps 应返回 6 个独立步骤（3 表 × 2 方向）"""
+    steps = syncer.get_incremental_steps()
+    assert len(steps) == 6
+    labels = [s[0] for s in steps]
+    # 验证包含所有方向
+    assert any("本地 → 云端" in l for l in labels)
+    assert any("云端 → 本地" in l for l in labels)
+    # 验证包含所有表
+    for tbl in ["采集表", "账号表", "Cookie表"]:
+        assert any(tbl in l for l in labels), f"缺少 {tbl} 步骤"
+    # 验证每个 callable 可调用
+    for label, fn in steps:
+        assert callable(fn), f"{label} 的 fn 不是 callable"
+
+
+def test_get_full_steps_to_feishu_returns_3_steps(syncer):
+    """get_full_steps('to-feishu') 应返回 3 个步骤"""
+    steps = syncer.get_full_steps("to-feishu")
+    assert len(steps) == 3
+    for label, fn in steps:
+        assert "覆盖云端" in label
+        assert callable(fn)
+
+
+def test_get_full_steps_from_feishu_returns_3_steps(syncer):
+    """get_full_steps('from-feishu') 应返回 3 个步骤"""
+    steps = syncer.get_full_steps("from-feishu")
+    assert len(steps) == 3
+    for label, fn in steps:
+        assert "覆盖本地" in label
+        assert callable(fn)
+
+
+def test_sync_propagates_feishu_account_name_change(syncer, db, monkeypatch):
+    """端到端：用户在飞书改账号名称 → 增量同步 → 本地账号名称被更新
+
+    验证字段归属：账号名称是人工字段（飞书赢）
+    """
+    db.insert_account({
+        "record_id": "r1", "sec_user_id": "sec1",
+        "账号名称": "old_name", "等级": 3, "synced": True,
+    })
+
+    # 飞书改了账号名称：old_name → new_name
+    syncer.feishu.get_all_records.return_value = [
+        {"record_id": "r1", "fields": {"sec_user_id": "sec1", "账号名称": "new_name", "等级": 3}},
+    ]
+    syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
+    syncer.feishu.batch_update_records.return_value = {"code": 0}
+    syncer.feishu.batch_delete_records.return_value = {"code": 0}
+
+    syncer.sync_incremental()
+
+    # 本地的账号名称应该被更新为 new_name
+    acc = db.get_account_by_id("r1")
+    assert acc is not None
+    assert acc["账号名称"] == "new_name", f"飞书改的账号名称应同步到本地，实际 {acc['账号名称']}"
 
 
 # ========== sync_incremental 入口（mock 网络） ==========
