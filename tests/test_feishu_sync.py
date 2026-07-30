@@ -12,6 +12,7 @@
 import json
 import pathlib
 import tempfile
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -313,16 +314,16 @@ def test_field_ownership_covers_all_tables():
     for table in ("collection_cache", "account_cache", "cookie_cache"):
         assert table in FeishuSyncer.FIELD_OWNERSHIP
         ownership = FeishuSyncer.FIELD_OWNERSHIP[table]
-        assert "feishu_wins" in ownership
+        assert "lww" in ownership
         assert "local_wins" in ownership
 
 
 def test_field_ownership_disjoint():
-    """feishu_wins 和 local_wins 字段不应该重叠"""
+    """lww 和 local_wins 字段不应该重叠"""
     for table, ownership in FeishuSyncer.FIELD_OWNERSHIP.items():
-        fw = set(ownership["feishu_wins"])
+        lww = set(ownership["lww"])
         lw = set(ownership["local_wins"])
-        overlap = fw & lw
+        overlap = lww & lw
         assert not overlap, f"{table} 字段归属冲突: {overlap}"
 
 
@@ -483,16 +484,16 @@ def test_delete_safety_ratio_value():
 
 
 def test_field_ownership_collection_account_name_is_feishu_wins():
-    """采集表的「账号名称」应归飞书赢（人工字段）"""
+    """采集表的「账号名称」应归 LWW（两端都能改）"""
     ownership = FeishuSyncer.FIELD_OWNERSHIP["collection_cache"]
-    assert "账号名称" in ownership["feishu_wins"]
+    assert "账号名称" in ownership["lww"]
     assert "账号名称" not in ownership["local_wins"]
 
 
 def test_field_ownership_account_account_name_is_feishu_wins():
-    """账号表的「账号名称」应归飞书赢（人工字段）"""
+    """账号表的「账号名称」应归 LWW（两端都能改）"""
     ownership = FeishuSyncer.FIELD_OWNERSHIP["account_cache"]
-    assert "账号名称" in ownership["feishu_wins"]
+    assert "账号名称" in ownership["lww"]
     assert "账号名称" not in ownership["local_wins"]
 
 
@@ -557,23 +558,24 @@ def test_sync_propagates_feishu_account_name_change(syncer, db, monkeypatch):
 
 
 def test_field_ownership_cookie_status_is_local_wins():
-    """Cookie 表「状态」字段应归本地赢（DoukHub 验证后写入）
+    """Cookie 表「状态」字段应归 LWW（两端都能改）
 
-    修正原因：之前归 immutable 导致飞书改状态不同步、本地改状态不推送
+    方案 B 修正：从 local_wins 改为 lww，因为用户也可能在飞书端改状态
     """
     ownership = FeishuSyncer.FIELD_OWNERSHIP["cookie_cache"]
-    assert "状态" in ownership["local_wins"]
+    assert "状态" in ownership["lww"]
+    assert "状态" not in ownership["local_wins"]
     assert "状态" not in ownership["immutable"]
 
 
 def test_field_ownership_collection_synced_is_local_wins():
     """采集表「已同步」字段应归本地赢（步骤3 写入的状态字段）
 
-    修正原因：之前归 feishu_wins 会导致步骤3 写入后被飞书覆盖
+    修正原因：之前归 feishu_wins（现 lww）会导致步骤3 写入后被飞书覆盖
     """
     ownership = FeishuSyncer.FIELD_OWNERSHIP["collection_cache"]
     assert "已同步" in ownership["local_wins"]
-    assert "已同步" not in ownership["feishu_wins"]
+    assert "已同步" not in ownership["lww"]
 
 
 # ========== sync_incremental 入口（mock 网络） ==========
@@ -791,26 +793,30 @@ def test_sync_handles_local_delete_then_feishu_modify(syncer, db, monkeypatch):
 
 
 def test_sync_handles_dual_field_concurrent_modification(syncer, db, monkeypatch):
-    """场景 10：双向同时修改不同字段（人工字段 + API 字段）
+    """场景 10：双向同时修改不同字段（LWW 字段 + API 字段）
 
-    场景：飞书改等级 3→4（人工字段飞书赢），本地改粉丝数 100→200（API 字段本地赢）
+    场景：飞书改等级 3→4（LWW 字段，飞书时间戳更新），本地改粉丝数 100→200（API 字段本地赢）
     正确行为：两端都变为 等级=4 + 粉丝数=200
     """
     db.insert_account({
         "record_id": "r1", "sec_user_id": "sec1",
         "等级": 3, "粉丝数": 100, "synced": True,
+        "local_updated_at": "2026-07-17 10:00:00",
     })
 
-    # 飞书有等级 4（用户改的），粉丝数还是 100
+    # 飞书有等级 4（用户改的），粉丝数还是 100，最后更新时间较新
     syncer.feishu.get_all_records.return_value = [
-        {"record_id": "r1", "fields": {"sec_user_id": "sec1", "等级": 4, "粉丝数": 100}},
+        {"record_id": "r1", "fields": {
+            "sec_user_id": "sec1", "等级": 4, "粉丝数": 100,
+            "最后更新时间": int(datetime(2026, 7, 17, 12, 0, 0).timestamp() * 1000),
+        }},
     ]
     syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
     syncer.feishu.batch_update_records.return_value = {"code": 0}
     syncer.feishu.batch_delete_records.return_value = {"code": 0}
 
-    # 模拟本地修改粉丝数
-    db.update_account("r1", {"粉丝数": 200})
+    # 模拟本地修改粉丝数（保持旧时间戳，避免 LWW 误判）
+    db.update_account("r1", {"粉丝数": 200, "local_updated_at": "2026-07-17 10:00:00"})
 
     syncer.sync_incremental()
 
@@ -966,3 +972,184 @@ def test_sync_full_from_feishu_clears_and_inserts(syncer, db, monkeypatch):
     assert len(collections) == 1
     assert collections[0]["record_id"] == "fs1"
     assert collections[0]["分享码"] == "new_share"
+
+
+# ========== 方案 B：LWW 时间戳测试 ==========
+
+def test_lww_local_newer_wins(syncer, db):
+    """LWW：本地时间戳更新 → 本地赢"""
+    db.insert_account({
+        "record_id": "r1", "sec_user_id": "sec1",
+        "等级": 5, "synced": True,
+        "local_updated_at": "2026-07-17 12:00:00",  # 较新
+    })
+    local = db.get_account_by_id("r1")
+    # 飞书的等级=3，最后更新时间较早
+    feishu_record = {
+        "record_id": "r1",
+        "fields": {
+            "sec_user_id": "sec1", "等级": 3,
+            "最后更新时间": int(datetime(2026, 7, 17, 10, 0, 0).timestamp() * 1000),  # 较早
+        },
+    }
+    to_feishu, to_local = syncer._compute_field_updates("account_cache", local, feishu_record)
+    # 本地赢 → 推送等级=5 到飞书
+    assert "等级" in to_feishu
+    assert to_feishu["等级"] == 5
+    # 不应该更新本地
+    assert "等级" not in to_local
+
+
+def test_lww_feishu_newer_wins(syncer, db):
+    """LWW：飞书时间戳更新 → 飞书赢"""
+    db.insert_account({
+        "record_id": "r1", "sec_user_id": "sec1",
+        "等级": 3, "synced": True,
+        "local_updated_at": "2026-07-17 10:00:00",  # 较早
+    })
+    local = db.get_account_by_id("r1")
+    feishu_record = {
+        "record_id": "r1",
+        "fields": {
+            "sec_user_id": "sec1", "等级": 5,
+            "最后更新时间": int(datetime(2026, 7, 17, 12, 0, 0).timestamp() * 1000),  # 较新
+        },
+    }
+    to_feishu, to_local = syncer._compute_field_updates("account_cache", local, feishu_record)
+    # 飞书赢 → 更新本地等级=5
+    assert "等级" in to_local
+    assert to_local["等级"] == 5
+    # 不应该推送飞书
+    assert "等级" not in to_feishu
+
+
+def test_lww_equal_timestamps_feishu_wins(syncer, db):
+    """LWW：时间戳相等 → 默认飞书赢（保守）"""
+    ts_str = "2026-07-17 12:00:00"
+    ts_ms = int(datetime(2026, 7, 17, 12, 0, 0).timestamp() * 1000)
+    db.insert_account({
+        "record_id": "r1", "sec_user_id": "sec1",
+        "等级": 3, "synced": True,
+        "local_updated_at": ts_str,
+    })
+    local = db.get_account_by_id("r1")
+    feishu_record = {
+        "record_id": "r1",
+        "fields": {"sec_user_id": "sec1", "等级": 5, "最后更新时间": ts_ms},
+    }
+    to_feishu, to_local = syncer._compute_field_updates("account_cache", local, feishu_record)
+    # 飞书赢
+    assert "等级" in to_local
+    assert to_local["等级"] == 5
+
+
+def test_lww_missing_feishu_timestamp(syncer, db):
+    """LWW：飞书没有时间戳字段（首次部署）→ 飞书赢（兜底）"""
+    db.insert_account({
+        "record_id": "r1", "sec_user_id": "sec1",
+        "等级": 3, "synced": True,
+        "local_updated_at": "2026-07-17 12:00:00",
+    })
+    local = db.get_account_by_id("r1")
+    # 飞书没有「最后更新时间」字段
+    feishu_record = {
+        "record_id": "r1",
+        "fields": {"sec_user_id": "sec1", "等级": 5},  # 没有时间戳
+    }
+    to_feishu, to_local = syncer._compute_field_updates("account_cache", local, feishu_record)
+    # 默认飞书赢
+    assert "等级" in to_local
+
+
+def test_lww_local_wins_field_still_pushed(syncer, db):
+    """LWW 字段如果本地赢，仍然推送到飞书"""
+    db.insert_collection({
+        "record_id": "r1", "分享码": "abc", "等级": 5,
+        "synced": True,
+        "local_updated_at": "2026-07-17 12:00:00",
+    })
+    local = db.get_collection_by_id("r1")
+    feishu_record = {
+        "record_id": "r1",
+        "fields": {
+            "分享码": "abc", "等级": 3,
+            "最后更新时间": int(datetime(2026, 7, 17, 10, 0, 0).timestamp() * 1000),
+        },
+    }
+    to_feishu, to_local = syncer._compute_field_updates("collection_cache", local, feishu_record)
+    assert "等级" in to_feishu
+    assert to_feishu["等级"] == 5
+
+
+def test_lww_local_wins_fields_not_pushed_when_local_wins_type(syncer, db):
+    """local_wins 字段不受 LWW 影响，总是推送"""
+    db.insert_account({
+        "record_id": "r1", "sec_user_id": "sec1",
+        "粉丝数": 200, "synced": True,
+        "local_updated_at": "2026-07-17 10:00:00",  # 较早
+    })
+    local = db.get_account_by_id("r1")
+    feishu_record = {
+        "record_id": "r1",
+        "fields": {
+            "sec_user_id": "sec1", "粉丝数": 100,
+            "最后更新时间": int(datetime(2026, 7, 17, 12, 0, 0).timestamp() * 1000),  # 较新
+        },
+    }
+    to_feishu, to_local = syncer._compute_field_updates("account_cache", local, feishu_record)
+    # 粉丝数是 local_wins，不参与 LWW，总是推送
+    assert "粉丝数" in to_feishu
+    assert to_feishu["粉丝数"] == 200
+
+
+def test_e2e_feishu_modify_level_syncs_to_local(syncer, db):
+    """端到端：飞书改等级 → 同步 → 本地更新"""
+    db.insert_account({
+        "record_id": "r1", "sec_user_id": "sec1", "等级": 3,
+        "synced": True,
+        "local_updated_at": "2026-07-17 10:00:00",
+    })
+    # 飞书改了等级=5，时间戳较新
+    syncer.feishu.get_all_records.return_value = [{
+        "record_id": "r1",
+        "fields": {
+            "sec_user_id": "sec1", "等级": 5,
+            "最后更新时间": int(datetime(2026, 7, 17, 12, 0, 0).timestamp() * 1000),
+        },
+    }]
+    syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
+    syncer.feishu.batch_update_records.return_value = {"code": 0}
+    syncer.feishu.batch_delete_records.return_value = {"code": 0}
+
+    syncer.sync_incremental()
+
+    acc = db.get_account_by_id("r1")
+    assert acc["等级"] == 5
+
+
+def test_e2e_local_modify_level_syncs_to_feishu(syncer, db):
+    """端到端：本地改等级 → 同步 → 飞书更新"""
+    db.insert_account({
+        "record_id": "r1", "sec_user_id": "sec1", "等级": 3,
+        "synced": True,
+        "local_updated_at": "2026-07-17 10:00:00",
+    })
+    # 本地改等级=5
+    db.update_account("r1", {"等级": 5})  # 这会自动更新 local_updated_at
+
+    # 飞书还是等级=3，时间戳较早
+    syncer.feishu.get_all_records.return_value = [{
+        "record_id": "r1",
+        "fields": {
+            "sec_user_id": "sec1", "等级": 3,
+            "最后更新时间": int(datetime(2026, 7, 17, 10, 0, 0).timestamp() * 1000),
+        },
+    }]
+    syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
+    syncer.feishu.batch_update_records.return_value = {"code": 0}
+    syncer.feishu.batch_delete_records.return_value = {"code": 0}
+
+    syncer.sync_incremental()
+
+    # 应该调用 batch_update_records 把等级=5 推送到飞书
+    syncer.feishu.batch_update_records.assert_called()

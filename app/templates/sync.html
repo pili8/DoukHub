@@ -143,30 +143,22 @@
             <span id="incr-sync-status" style="font-size:13px;color:#888;"></span>
         </div>
         <div style="font-size:12px;color:#888;margin-bottom:12px;">
-            双向同步采集表、账号表、Cookie表。<strong>注意：当前为「字段级单向同步」（方案 A）</strong>：
-            在云端改人工字段会同步到本地，在本地改 API 字段会同步到云端；反向修改会被覆盖。
+            双向同步采集表、账号表、Cookie表。<strong>方案 B（LWW 真双向同步）</strong>：
+            人工字段（等级/标签/备注/启用/采集类型/状态）两端都能改，谁后改谁赢；
+            API 字段（粉丝数/作品数等）以本地采集为准。
         </div>
         <details style="margin-bottom:12px;font-size:12px;color:#666;">
-            <summary style="cursor:pointer;color:#3498db;">📋 字段归属规则（点击展开）</summary>
+            <summary style="cursor:pointer;color:#3498db;">📋 字段同步规则（点击展开）</summary>
             <div style="margin-top:8px;padding:12px;background:#f8f9fa;border-radius:6px;font-size:11px;line-height:1.7;">
-                <div style="margin-bottom:8px;"><strong>☁️ 云端赢（在云端修改有效）：</strong></div>
+                <div style="margin-bottom:8px;"><strong>🔄 双向 LWW 字段（两端都能改）：</strong></div>
                 <div style="margin-left:12px;margin-bottom:8px;">
-                    采集表：等级、标签、备注、账号名称、昵称、粉丝数、作品数、签名、头像<br>
-                    账号表：等级、标签、备注、启用、采集类型、账号名称<br>
-                    Cookie表：启用、备注
+                    等级、标签、备注、启用、采集类型、状态<br>
+                    <span style="color:#888;">比较两端最后修改时间，谁新谁赢</span>
                 </div>
-                <div style="margin-bottom:8px;"><strong>💻 本地赢（在本地修改有效）：</strong></div>
-                <div style="margin-left:12px;margin-bottom:8px;">
-                    采集表：sec_user_id、已同步<br>
-                    账号表：sec_user_id、链接、昵称、粉丝数、作品数、签名、头像、已获取信息<br>
-                    Cookie表：状态、验证时间
-                </div>
-                <div style="margin-bottom:8px;"><strong>🔒 元数据（创建后不变）：</strong></div>
+                <div style="margin-bottom:8px;"><strong>💻 本地优先字段（DoukHub 采集为准）：</strong></div>
                 <div style="margin-left:12px;">
-                    分享码、平台、Cookie 字符串
-                </div>
-                <div style="margin-top:10px;padding:8px;background:#fff3e0;border-radius:4px;color:#a66;">
-                    ⚠️ 反向修改无效：在本地改「云端赢」字段、在云端改「本地赢」字段都会被覆盖。
+                    sec_user_id、链接、昵称、粉丝数、作品数、签名、头像、已获取信息、验证时间<br>
+                    <span style="color:#888;">在云端改这些字段无效，会被本地覆盖</span>
                 </div>
             </div>
         </details>

@@ -245,9 +245,15 @@ class FeishuClient:
     def _get_required_fields(table_type: str) -> list[tuple]:
         """获取不同表类型的必需字段定义
 
-        field_type: 1=文本, 2=数字, 3=单选, 4=多选, 5=日期, 7=复选框, 15=URL
+        field_type: 1=文本, 2=数字, 3=单选, 4=多选, 5=日期, 7=复选框, 15=URL, 1001=最后更新时间
         业务字段名与本地数据库 100% 一致（v2）
+
+        方案 B：三张表都加「最后更新时间」字段（飞书系统字段，类型 1001，自动维护）。
+        用于 LWW 双向同步的时间戳比较。
         """
+        # 飞书「最后更新时间」系统字段，自动记录记录的最后修改时间（毫秒级）
+        common_lww_field = ("最后更新时间", 1001, None)
+
         if table_type == "collection":
             # 采集表：原始数据源
             return [
@@ -266,6 +272,7 @@ class FeishuClient:
                 ("签名", 1, None),             # 自动回填
                 ("头像", 1, None),             # 自动回填（文本存 URL）
                 ("同步时间", 5, None),         # 自动回填
+                common_lww_field,             # 方案 B：LWW 时间戳
             ]
         elif table_type == "cookie":
             # Cookie 表
@@ -277,6 +284,7 @@ class FeishuClient:
                 ("备注", 1, None),
                 ("验证时间", 5, None),         # 上次验证时间
                 ("同步时间", 5, None),         # 自动回填
+                common_lww_field,             # 方案 B：LWW 时间戳
             ]
         else:
             # 账号表（默认）
@@ -297,6 +305,7 @@ class FeishuClient:
                 ("头像", 15, None),
                 ("已获取信息", 7, None),       # 复选框：是否已获取账号基本信息
                 ("同步时间", 5, None),
+                common_lww_field,             # 方案 B：LWW 时间戳
             ]
 
     def ensure_fields(self, app_token: str, table_id: str, table_type: str = "account") -> dict:
@@ -341,6 +350,7 @@ class FeishuClient:
         # 创建缺失字段
         created = []
         skipped = []
+        lww_field_warning = ""
         for name, ftype, opts in required_fields:
             if name in existing_names:
                 skipped.append(name)
@@ -349,7 +359,18 @@ class FeishuClient:
                     self.create_field(app_token, table_id, name, ftype, opts)
                     created.append(name)
                 except Exception as e:
-                    return {"success": False, "message": f"创建字段 {name} 失败: {e}"}
+                    # 方案 B：「最后更新时间」（类型 1001）是飞书系统字段，
+                    # API 可能不支持通过 create_field 创建。失败时不阻断同步，
+                    # 提示用户手动在飞书表里添加。
+                    if ftype == 1001:
+                        lww_field_warning = (
+                            f"⚠️ 无法自动创建「最后更新时间」字段（飞书 API 可能不支持创建系统字段）。"
+                            f"请手动在飞书表里添加「最后更新时间」字段（类型：最后更新时间），"
+                            f"否则 LWW 双向同步将默认以飞书端为准。"
+                        )
+                        logger.warning(lww_field_warning)
+                    else:
+                        return {"success": False, "message": f"创建字段 {name} 失败: {e}"}
 
         msg_parts = []
         if created:
@@ -358,6 +379,8 @@ class FeishuClient:
             msg_parts.append(f"跳过 {len(skipped)} 个已存在")
         if renamed:
             msg_parts.append(f"重命名 {len(renamed)} 个")
+        if lww_field_warning:
+            msg_parts.append(lww_field_warning)
 
         return {
             "success": True,
