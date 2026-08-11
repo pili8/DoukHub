@@ -53,32 +53,32 @@
 
 ## 4. 技术方案
 
-### 4.1 前端:自定义表头组件
+### 4.1 前端:自定义表头组件 + 自写菜单(DOM)
 
-用 AG Grid 自定义 header component 替换默认表头:
+**主方案:完全自写菜单 DOM**,不依赖 AG Grid 默认列菜单:
 
-- `headerComponent` 渲染:列名 + 排序指示 + 竖点按钮。
-- 竖点按钮点击 → 弹出自写菜单 DOM(绝对定位,floating 容器)。
-- 菜单点击外部区域关闭。
+- 用 AG Grid 自定义 `headerComponent` 替换默认表头,渲染:列名 + 排序指示 + 竖点按钮。
+- 竖点按钮点击 → 程序化创建自写菜单 DOM(绝对定位 floating 容器,`z-index` 高于表格)。
+- 菜单点击外部区域 / Esc 关闭。
 - 菜单项动作:
   - 排序:调 `showTable()` 带 `sort_field`/`sort_order` 参数(服务端排序)。
   - 筛选:展开输入区,应用后调 `showTable()` 带 `filter_*` 参数。
 
-替代方案:不启用 AG Grid 自带 menu(`suppressMenu: false` 不动),通过 `getMainMenuItems` 定制菜单项。若定制能力不足,则完全自写菜单 DOM(推荐,样式可控)。
+不用 AG Grid 的 `getMainMenuItems`(其菜单容器样式仍受 AG Grid 内部类控制,定制受限)。
 
 ### 4.2 前端:主题通用化
 
 - `table.html` 中所有 `var(--md-*)` 引用改为通用变量。
-- 需要新增的通用变量(在 4 套主题中补齐):
+- 经核实:**4 套主题均未定义**以下通用变量,需在全部 4 套主题中新增(映射到各自设计语义):
 
-| 变量 | 用途 | obsidian/material 现有来源 | glass/slate 需补充 |
-|------|------|---------------------------|-------------------|
-| `--surface-overlay` | 菜单/浮层背景 | `--md-surface-container-high` | 补齐 |
-| `--surface-raised` | 悬浮卡片背景 | `--md-surface-container` | 补齐 |
-| `--menu-hover` | 菜单项 hover | `--md-primary-container` | 补齐 |
-| `--text-tertiary` | 次要文字 | `--md-on-surface-variant` | 补齐 |
+| 变量 | 用途 | obsidian/material 建议映射 | glass/slate 建议映射 |
+|------|------|---------------------------|---------------------|
+| `--surface-overlay` | 菜单/浮层背景 | `--md-surface-container-high` | 自研 overlay 色 |
+| `--surface-raised` | 悬浮卡片背景 | `--md-surface-container` | 自研 raised 色 |
+| `--menu-hover` | 菜单项 hover | `--md-primary-container` | 自研 hover 色 |
+| `--text-tertiary` | 次要文字 | `--md-on-surface-variant` | 自研 muted 色 |
 
-- 每套主题各补 3~5 行变量,保持既有设计语义。
+- 每套主题各补 4 行变量,保持既有设计语义。
 - 校验:4 套主题下菜单观感一致。
 
 ### 4.3 后端:筛选支持
