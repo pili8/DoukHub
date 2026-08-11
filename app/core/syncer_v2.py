@@ -7,6 +7,7 @@ import logging
 
 from .database import Database
 from .collector import Collector
+from .link_resolver import build_profile_url
 from .feishu import FeishuClient
 from .feishu_sync import FeishuSyncer
 
@@ -173,7 +174,7 @@ class Syncer:
                     record_id = f"rec_{datetime.now().strftime('%Y%m%d%H%M%S')}_{result.total}"
                     self.db.insert_collection({
                         "record_id": record_id,
-                        "分享码": share,
+                        "share_code": share,
                         "平台": "抖音",  # 默认
                         "等级": level,
                         "标签": json.dumps(tags),
@@ -184,17 +185,6 @@ class Syncer:
             except Exception as e:
                 result.failed += 1
                 result.errors.append(f"{line}: {str(e)}")
-
-        # 自动从飞书拉取新增记录（合并到本地 DB）
-        if self.feishu_syncer and self.feishu_syncer.collection_table_id:
-            try:
-                fs_result = self.feishu_syncer.sync_collection_from_feishu()
-                pulled_created = fs_result.get("created", 0)
-                pulled_updated = fs_result.get("updated", 0)
-                if pulled_created or pulled_updated:
-                    logger.info(f"飞书拉取: 新增 {pulled_created}, 更新 {pulled_updated}")
-            except Exception as e:
-                logger.warning(f"飞书拉取失败（不影响导入）: {e}")
 
         return result
 
@@ -212,7 +202,7 @@ class Syncer:
 
         for collection in to_process:
             try:
-                share = collection["分享码"]
+                share = collection["share_code"]
                 platform = collection.get("平台") or "抖音"
 
                 # 调用 TTD API 解析短链接
@@ -254,7 +244,7 @@ class Syncer:
 
             except Exception as e:
                 result.failed += 1
-                result.errors.append(f"{collection.get('分享码')}: {str(e)}")
+                result.errors.append(f"{collection.get('share_code')}: {str(e)}")
                 self.db.update_collection(collection["record_id"], {
                     "同步错误": str(e),
                 })
@@ -279,6 +269,17 @@ class Syncer:
         to_process = [c for c in collections if c.get("已同步") and c.get("sec_user_id")]
 
         result.total = len(to_process)
+
+        # 预检 TTD 服务是否可用（避免逐条等 15s 超时）
+        ttd_available = False
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=3) as client:
+                resp = await client.get(f"{self.collector.ttd_url}/")
+                if resp.status_code in (200, 307, 404):
+                    ttd_available = True
+        except Exception:
+            ttd_available = False
 
         for collection in to_process:
             try:
@@ -309,7 +310,7 @@ class Syncer:
                         "record_id": record_id,
                         "账号名称": "",
                         "平台": platform,
-                        "链接": f"https://www.douyin.com/user/{sec_user_id}",
+                        "链接": build_profile_url(sec_user_id, platform),
                         "sec_user_id": sec_user_id,
                         "等级": collection.get("等级"),
                         "标签": collection.get("标签"),
@@ -320,13 +321,16 @@ class Syncer:
 
                 # 未获取信息的，调 API 补全
                 if need_fetch:
+                    if not ttd_available:
+                        result.failed += 1
+                        result.errors.append(f"{sec_user_id}: TTD 服务未运行，跳过获取详情")
+                        continue
                     cookies = self.db.get_enabled_cookies()
                     cookie = cookies[0].get("Cookie", "") if cookies else ""
                     info = await self.collector.get_account_info(sec_user_id, platform, cookie)
                     if info and info.get("nickname"):
                         self.db.update_account(account_id, {
                             "账号名称": info.get("nickname", ""),
-                            "昵称": info.get("nickname", ""),
                             "粉丝数": info.get("follower_count", 0),
                             "作品数": info.get("aweme_count", 0),
                             "签名": info.get("signature", ""),
@@ -343,16 +347,6 @@ class Syncer:
             except Exception as e:
                 result.failed += 1
                 result.errors.append(f"{collection.get('sec_user_id')}: {str(e)}")
-
-        # 自动回写到飞书账号表
-        if self.feishu_syncer and self.feishu_syncer.account_table_id:
-            try:
-                fs_result = self.feishu_syncer.sync_account_to_feishu()
-                pushed = fs_result.get("created", 0) + fs_result.get("updated", 0)
-                if pushed:
-                    logger.info(f"飞书回写: 新增 {fs_result['created']}, 更新 {fs_result['updated']}")
-            except Exception as e:
-                logger.warning(f"飞书回写失败（不影响同步结果）: {e}")
 
         return result
 

@@ -4,8 +4,8 @@
 
 1. 字段命名：业务字段中文与飞书 100% 一致，系统字段英文（record_id/is_deleted/synced/local_updated_at 等）
 2. 冲突解决（LWW）：人工字段（等级/标签/备注/启用/采集类型/状态）两端都能改，比较最后修改时间，谁新谁赢
-   API 字段（昵称/粉丝数/作品数/签名/头像/sec_user_id/链接）仍为本地赢（DoukHub 是权威源）
-3. 业务唯一键去重：采集表=分享码，账号表=sec_user_id，Cookie表=Cookie
+   API 字段（账号名称/粉丝数/作品数/签名/头像/sec_user_id/链接）仍为本地赢（DoukHub 是权威源）
+3. 业务唯一键去重：采集表=share_code，账号表=sec_user_id，Cookie表=Cookie
 4. 删除同步：
    - 飞书端直接删，本地通过差集反推感知（依赖 synced=1 标记）
    - 本地端软删除（is_deleted=1），推送墓碑到飞书，飞书删除后清本地墓碑
@@ -32,9 +32,14 @@ class FeishuSyncer:
 
     # 业务唯一键（跨端去重用）
     BUSINESS_KEYS = {
-        "collection_cache": "分享码",
+        "collection_cache": "share_code",
         "account_cache": "sec_user_id",
         "cookie_cache": "Cookie",
+    }
+
+    # 飞书表中的业务键名（与本地不同时用此映射）
+    FEISHU_BUSINESS_KEYS = {
+        "collection_cache": "分享码",
     }
 
     # 业务字段（与飞书同步的字段，排除系统字段）
@@ -49,17 +54,17 @@ class FeishuSyncer:
     FIELD_OWNERSHIP = {
         "collection_cache": {
             # LWW 字段：两端都能改，比较时间戳谁新谁赢
-            "lww": ["等级", "标签", "备注", "账号名称", "昵称", "粉丝数", "作品数", "签名", "头像"],
+            "lww": ["等级", "标签", "备注", "账号名称", "粉丝数", "作品数"],
             # 本地赢字段：DoukHub 是权威源
             "local_wins": ["sec_user_id", "已同步"],
             # 元数据：创建后不变
-            "immutable": ["分享码", "平台"],
+            "immutable": ["share_code", "平台"],
             # 同步产生
             "sync_generated": ["同步错误", "同步时间"],
         },
         "account_cache": {
             "lww": ["等级", "标签", "备注", "启用", "采集类型", "账号名称"],
-            "local_wins": ["sec_user_id", "昵称", "粉丝数", "作品数", "签名", "头像", "链接", "已获取信息"],
+            "local_wins": ["sec_user_id", "粉丝数", "作品数", "签名", "头像", "链接", "已获取信息"],
             "immutable": ["平台"],
             "sync_generated": ["同步时间"],
         },
@@ -289,7 +294,7 @@ class FeishuSyncer:
     def _build_collection_fields(self, record: dict) -> dict:
         """本地采集记录 → 飞书字段"""
         fields = {
-            "分享码": record.get("分享码", ""),
+            "分享码": record.get("share_code", ""),
             "平台": record.get("平台", ""),
             "等级": record.get("等级", 3),
             "已同步": bool(record.get("已同步", False)),
@@ -305,16 +310,10 @@ class FeishuSyncer:
             fields["备注"] = record["备注"]
         if record.get("账号名称"):
             fields["账号名称"] = record["账号名称"]
-        if record.get("昵称"):
-            fields["昵称"] = record["昵称"]
         if record.get("粉丝数") is not None:
             fields["粉丝数"] = record["粉丝数"]
         if record.get("作品数") is not None:
             fields["作品数"] = record["作品数"]
-        if record.get("签名"):
-            fields["签名"] = record["签名"]
-        if record.get("头像"):
-            fields["头像"] = {"link": record["头像"], "text": "头像"}
         fields["同步时间"] = int(_time.time() * 1000)
         return fields
 
@@ -340,8 +339,6 @@ class FeishuSyncer:
         ct = record.get("采集类型")
         if ct:
             fields["采集类型"] = ct
-        if record.get("昵称"):
-            fields["昵称"] = record["昵称"]
         if record.get("粉丝数") is not None:
             fields["粉丝数"] = record["粉丝数"]
         if record.get("作品数") is not None:
@@ -392,7 +389,7 @@ class FeishuSyncer:
         if not share.strip():
             return None
         data = {
-            "分享码": share,
+            "share_code": share,
             "平台": self._parse_text_value(fields.get("平台", "")),
             "等级": self._safe_int(fields.get("等级", 3), 3),
             "已同步": self._safe_bool(fields.get("已同步"), False),
@@ -405,17 +402,10 @@ class FeishuSyncer:
             data["备注"] = self._parse_text_value(fields.get("备注"))
         if fields.get("账号名称"):
             data["账号名称"] = self._parse_text_value(fields.get("账号名称"))
-        for k in ("昵称", "签名"):
-            v = fields.get(k)
-            if v:
-                data[k] = self._parse_text_value(v)
         for k in ("粉丝数", "作品数"):
             v = fields.get(k)
             if v is not None:
                 data[k] = self._safe_int(v)
-        avatar = fields.get("头像")
-        if avatar:
-            data["头像"] = self._parse_text_value(avatar)
         tags = self._normalize_tags(fields.get("标签"))
         if tags:
             data["标签"] = json.dumps(tags, ensure_ascii=False)
@@ -436,7 +426,7 @@ class FeishuSyncer:
         tags = self._normalize_tags(fields.get("标签"))
         if tags:
             data["标签"] = json.dumps(tags, ensure_ascii=False)
-        for k in ("昵称", "签名", "备注"):
+        for k in ("签名", "备注"):
             v = fields.get(k)
             if v:
                 data[k] = self._parse_text_value(v)
@@ -614,9 +604,10 @@ class FeishuSyncer:
             feishu_by_id = {r["record_id"]: r for r in feishu_records}
             feishu_ids_set = set(feishu_by_id.keys())  # 用于检测飞书端重复业务键
             business_key = self.BUSINESS_KEYS.get(db_table)
+            feishu_bk = self.FEISHU_BUSINESS_KEYS.get(db_table, business_key)
             feishu_by_key = {}
             for r in feishu_records:
-                key_val = self._parse_text_value(r.get("fields", {}).get(business_key, ""))
+                key_val = self._parse_text_value(r.get("fields", {}).get(feishu_bk, ""))
                 if key_val:
                     feishu_by_key[key_val] = r
 

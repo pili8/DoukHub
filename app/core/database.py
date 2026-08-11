@@ -28,7 +28,7 @@ class Database:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS collection_cache (
                     record_id TEXT PRIMARY KEY,
-                    分享码 TEXT UNIQUE NOT NULL,
+                    share_code TEXT UNIQUE NOT NULL,
                     平台 TEXT,
                     等级 INTEGER,
                     标签 TEXT,
@@ -36,12 +36,9 @@ class Database:
                     已同步 BOOLEAN DEFAULT 0,
                     同步错误 TEXT,
                     备注 TEXT,
-                    昵称 TEXT,
                     粉丝数 INTEGER,
                     作品数 INTEGER,
                     账号名称 TEXT,
-                    签名 TEXT,
-                    头像 TEXT,
                     同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     is_deleted BOOLEAN DEFAULT 0,
@@ -64,7 +61,6 @@ class Database:
                     启用 BOOLEAN DEFAULT 1,
                     采集类型 TEXT DEFAULT '发布',
                     备注 TEXT,
-                    昵称 TEXT,
                     粉丝数 INTEGER,
                     作品数 INTEGER,
                     签名 TEXT,
@@ -140,7 +136,7 @@ class Database:
             # 创建索引（依赖字段名，必须在迁移之后）
             # 用 try/except 容错：旧库迁移后字段可能仍缺失（如 sec_user_id）
             for sql in [
-                "CREATE INDEX IF NOT EXISTS idx_collection_share ON collection_cache(分享码)",
+                "CREATE INDEX IF NOT EXISTS idx_collection_share ON collection_cache(share_code)",
                 "CREATE INDEX IF NOT EXISTS idx_collection_sec_user_id ON collection_cache(sec_user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_account_sec_user_id ON account_cache(sec_user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_history_sec_user_id ON collection_history(sec_user_id)",
@@ -178,6 +174,7 @@ class Database:
             "collection_cache": [
                 ("账号标识", "sec_user_id"),
                 ("更新时间", "同步时间"),
+                ("分享码", "share_code"),
             ],
             "account_cache": [
                 ("账号标识", "sec_user_id"),
@@ -227,6 +224,12 @@ class Database:
                 ("local_updated_at", "DATETIME"),
             )
 
+        # v2.1：删除 account_cache.昵称（与 账号名称 重复，统一用 账号名称）
+        drop_columns = {
+            "account_cache": ["昵称"],
+        "collection_cache": ["昵称", "签名", "头像"],
+        }
+
         # 执行 v1 业务字段重命名
         for table, renames in rename_map.items():
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
@@ -243,6 +246,16 @@ class Database:
             for old, new in renames:
                 if old in cols and new not in cols:
                     conn.execute(f'ALTER TABLE {table} RENAME COLUMN "{old}" TO "{new}"')
+
+        # 执行删除字段（DROP COLUMN，SQLite 3.35.0+）
+        for table, drops in drop_columns.items():
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            for col in drops:
+                if col in cols:
+                    try:
+                        conn.execute(f'ALTER TABLE {table} DROP COLUMN "{col}"')
+                    except Exception:
+                        pass  # 旧版 SQLite 不支持 DROP COLUMN，忽略
 
         # 添加缺失字段
         for table, additions in add_columns.items():
@@ -269,9 +282,9 @@ class Database:
             return [dict(row) for row in rows]
 
     def get_collection_by_share(self, share: str) -> Optional[dict]:
-        """根据分享码获取记录"""
+        """根据 share_code 获取记录"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM collection_cache WHERE 分享码 = ?", (share,)).fetchone()
+            row = conn.execute("SELECT * FROM collection_cache WHERE share_code = ?", (share,)).fetchone()
             return dict(row) if row else None
 
     def get_collection_by_id(self, record_id: str) -> Optional[dict]:
@@ -590,6 +603,21 @@ class Database:
         "collection_history", "scheduled_tasks",
     }
 
+    def get_record_by_id(self, table: str, record_id: str) -> Optional[dict]:
+        """按主键查询单条记录（通用版）。"""
+        if table not in self.VALID_TABLES:
+            return None
+        schema = self.get_table_schema(table)
+        pk_cols = [s["name"] for s in schema if s["pk"]]
+        pk = pk_cols[0] if pk_cols else None
+        if not pk:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                f'SELECT * FROM {table} WHERE "{pk}" = ?', (record_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
     def get_table_schema(self, table: str) -> list[dict]:
         """获取表结构信息。
         返回字段列表，每项: {name, type, pk, notnull, default}
@@ -740,3 +768,242 @@ class Database:
                     result["errors"].append(f"第{idx}行：{str(e)}")
             conn.commit()
         return result
+
+    # ========== Block 2：批量操作与增强统计 ==========
+
+    def batch_update(self, table: str, record_ids: list[str], updates: dict) -> dict:
+        """批量更新多条记录的相同字段。
+
+        Args:
+            table: 表名（必须在 VALID_TABLES 中）
+            record_ids: 要更新的记录 ID 列表
+            updates: {字段名: 值, ...}
+        Returns:
+            {updated, failed, errors[]}
+        """
+        if table not in self.VALID_TABLES:
+            return {"updated": 0, "failed": 0, "errors": [f"无效的表名: {table}"]}
+        schema = self.get_table_schema(table)
+        col_names = [s["name"] for s in schema]
+        pk_cols = [s["name"] for s in schema if s["pk"]]
+        pk = pk_cols[0] if pk_cols else None
+        if not pk:
+            return {"updated": 0, "failed": len(record_ids), "errors": ["表无主键"]}
+
+        # 过滤掉不在 schema 中的字段
+        valid_updates = {k: v for k, v in updates.items() if k in col_names}
+        if not valid_updates:
+            return {"updated": 0, "failed": 0, "errors": ["无有效字段"]}
+
+        # 自动维护 local_updated_at 和 同步时间
+        if "local_updated_at" in col_names and "local_updated_at" not in valid_updates:
+            valid_updates["local_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if "同步时间" in col_names and "同步时间" not in valid_updates:
+            valid_updates["同步时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        set_clause = ", ".join([f'"{k}" = ?' for k in valid_updates.keys()])
+        params_list = list(valid_updates.values())
+        result = {"updated": 0, "failed": 0, "errors": []}
+
+        with self._connect() as conn:
+            for rid in record_ids:
+                try:
+                    cursor = conn.execute(
+                        f'UPDATE {table} SET {set_clause} WHERE "{pk}" = ?',
+                        params_list + [rid],
+                    )
+                    if cursor.rowcount > 0:
+                        result["updated"] += 1
+                    else:
+                        result["failed"] += 1
+                        result["errors"].append(f"{rid}: 记录不存在")
+                except Exception as e:
+                    result["failed"] += 1
+                    result["errors"].append(f"{rid}: {e}")
+            conn.commit()
+        return result
+
+    def batch_delete(self, table: str, record_ids: list[str]) -> dict:
+        """批量删除（软删除）多条记录。
+
+        对于有 is_deleted 字段的表执行软删除，否则硬删除。
+        Returns:
+            {deleted, failed, errors[]}
+        """
+        if table not in self.VALID_TABLES:
+            return {"deleted": 0, "failed": 0, "errors": [f"无效的表名: {table}"]}
+        schema = self.get_table_schema(table)
+        col_names = [s["name"] for s in schema]
+        pk_cols = [s["name"] for s in schema if s["pk"]]
+        pk = pk_cols[0] if pk_cols else None
+        if not pk:
+            return {"deleted": 0, "failed": len(record_ids), "errors": ["表无主键"]}
+
+        is_soft = "is_deleted" in col_names
+        result = {"deleted": 0, "failed": 0, "errors": []}
+
+        with self._connect() as conn:
+            for rid in record_ids:
+                try:
+                    if is_soft:
+                        cursor = conn.execute(
+                            f'UPDATE {table} SET is_deleted = 1, deleted_at = ? WHERE "{pk}" = ?',
+                            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), rid),
+                        )
+                    else:
+                        cursor = conn.execute(
+                            f'DELETE FROM {table} WHERE "{pk}" = ?',
+                            (rid,),
+                        )
+                    if cursor.rowcount > 0:
+                        result["deleted"] += 1
+                    else:
+                        result["failed"] += 1
+                        result["errors"].append(f"{rid}: 记录不存在")
+                except Exception as e:
+                    result["failed"] += 1
+                    result["errors"].append(f"{rid}: {e}")
+            conn.commit()
+        return result
+
+    def insert_single(self, table: str, data: dict) -> dict:
+        """插入单条记录（通用版）。
+
+        Returns:
+            {success, message, record_id?}
+        """
+        if table not in self.VALID_TABLES:
+            return {"success": False, "message": f"无效的表名: {table}"}
+        schema = self.get_table_schema(table)
+        col_names = [s["name"] for s in schema]
+        # 过滤未知字段
+        clean = {k: v for k, v in data.items() if k in col_names and v is not None and v != ""}
+        if not clean:
+            return {"success": False, "message": "无有效字段"}
+        # 自动补充 record_id（如果没有提供且有此字段）
+        if "record_id" in col_names and "record_id" not in clean:
+            clean["record_id"] = f"rec_{datetime.now().strftime('%Y%m%d%H%M%S')}_{id(data) % 10000}"
+        try:
+            with self._connect() as conn:
+                fields = ", ".join([f'"{k}"' for k in clean.keys()])
+                placeholders = ", ".join(["?"] * len(clean))
+                conn.execute(
+                    f'INSERT INTO {table} ({fields}) VALUES ({placeholders})',
+                    list(clean.values()),
+                )
+                conn.commit()
+            return {"success": True, "message": "添加成功", "record_id": clean.get("record_id", "")}
+        except sqlite3.IntegrityError as e:
+            return {"success": False, "message": f"记录已存在或冲突: {e}"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    def update_record(self, table: str, record_id: str, data: dict) -> dict:
+        """更新整条记录的多个字段（通用版，行内编辑保存）。
+
+        Returns:
+            {success, message}
+        """
+        if table not in self.VALID_TABLES:
+            return {"success": False, "message": f"无效的表名: {table}"}
+        schema = self.get_table_schema(table)
+        col_names = [s["name"] for s in schema]
+        pk_cols = [s["name"] for s in schema if s["pk"]]
+        pk = pk_cols[0] if pk_cols else None
+        if not pk:
+            return {"success": False, "message": "表无主键"}
+
+        valid_updates = {k: v for k, v in data.items() if k in col_names and k != pk}
+        if not valid_updates:
+            return {"success": False, "message": "无有效字段"}
+
+        if "local_updated_at" in col_names and "local_updated_at" not in valid_updates:
+            valid_updates["local_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if "同步时间" in col_names and "同步时间" not in valid_updates:
+            valid_updates["同步时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        set_clause = ", ".join([f'"{k}" = ?' for k in valid_updates.keys()])
+        params = list(valid_updates.values()) + [record_id]
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    f'UPDATE {table} SET {set_clause} WHERE "{pk}" = ?',
+                    params,
+                )
+                conn.commit()
+                if cursor.rowcount > 0:
+                    return {"success": True, "message": "更新成功"}
+                return {"success": False, "message": "记录不存在"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    def get_duplicates(self, table: str) -> list[dict]:
+        """检测表中按业务键重复的记录。
+
+        Returns:
+            [{business_key, count, records: [{record_id, ...}]}, ...]
+        """
+        business_keys = {
+            "collection_cache": "share_code",
+            "account_cache": "sec_user_id",
+            "cookie_cache": "Cookie",
+        }
+        bk = business_keys.get(table)
+        if not bk:
+            return []
+
+        with self._connect() as conn:
+            # 找出重复的业务键
+            rows = conn.execute(
+                f'SELECT "{bk}" as bk_val, COUNT(*) as cnt FROM {table} '
+                f'WHERE is_deleted = 0 AND "{bk}" != "" GROUP BY "{bk}" HAVING cnt > 1'
+            ).fetchall()
+            results = []
+            for row in rows:
+                bk_val = row["bk_val"]
+                records = conn.execute(
+                    f'SELECT * FROM {table} WHERE "{bk}" = ? AND is_deleted = 0',
+                    (bk_val,),
+                ).fetchall()
+                results.append({
+                    "business_key": bk_val,
+                    "count": row["cnt"],
+                    "records": [dict(r) for r in records],
+                })
+            return results
+
+    def get_stats_detailed(self) -> dict:
+        """获取各表的详细统计（含同步状态、启用状态等细分）"""
+        stats = {}
+        with self._connect() as conn:
+            # 采集表
+            stats["collection_cache"] = {
+                "total": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0").fetchone()[0],
+                "synced": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND 已同步=1").fetchone()[0],
+                "not_synced": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND (已同步=0 OR 已同步 IS NULL)").fetchone()[0],
+                "has_error": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND 同步错误 IS NOT NULL AND 同步错误 != ''").fetchone()[0],
+            }
+            # 账号表
+            stats["account_cache"] = {
+                "total": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0").fetchone()[0],
+                "enabled": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0 AND 启用=1").fetchone()[0],
+                "disabled": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0 AND (启用=0 OR 启用 IS NULL)").fetchone()[0],
+                "not_fetched": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0 AND (已获取信息=0 OR 已获取信息 IS NULL)").fetchone()[0],
+            }
+            # Cookie表
+            stats["cookie_cache"] = {
+                "total": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE is_deleted=0").fetchone()[0],
+                "normal": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE is_deleted=0 AND 状态='正常'").fetchone()[0],
+                "invalid": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE is_deleted=0 AND 状态='失效'").fetchone()[0],
+                "enabled": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE is_deleted=0 AND 启用=1").fetchone()[0],
+            }
+            # 采集历史
+            stats["collection_history"] = {
+                "total": conn.execute("SELECT COUNT(*) FROM collection_history").fetchone()[0],
+            }
+            # 定时任务
+            stats["scheduled_tasks"] = {
+                "total": conn.execute("SELECT COUNT(*) FROM scheduled_tasks").fetchone()[0],
+                "enabled": conn.execute("SELECT COUNT(*) FROM scheduled_tasks WHERE 启用=1").fetchone()[0],
+            }
+        return stats

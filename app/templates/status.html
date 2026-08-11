@@ -6,143 +6,119 @@
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 16px;
-    background: #f8f9fa;
-    border-radius: 8px;
-    margin-bottom: 12px;
-    transition: all 0.2s;
+    padding: 14px 16px;
+    background: var(--bg-muted);
+    border-radius: var(--radius);
+    margin-bottom: 10px;
+    border: 1px solid var(--border-default);
+    transition: all var(--transition);
 }
 .status-card:hover {
-    background: #e9ecef;
+    border-color: var(--border-strong);
 }
 .status-icon {
-    width: 48px;
-    height: 48px;
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 24px;
+    font-size: 18px;
     flex-shrink: 0;
+    font-weight: 600;
 }
 .status-icon.connected {
-    background: #d4edda;
-    color: #28a745;
+    background: var(--success-light);
+    color: var(--success);
 }
 .status-icon.disconnected {
-    background: #f8d7da;
-    color: #dc3545;
+    background: var(--danger-light);
+    color: var(--danger);
 }
 .status-icon.unknown {
-    background: #fff3cd;
-    color: #ffc107;
+    background: var(--warning-light);
+    color: var(--warning);
 }
 .status-icon.missing {
-    background: #f0f0f0;
-    color: #999;
+    background: var(--bg-hover);
+    color: var(--text-muted);
 }
-.status-info {
-    flex: 1;
-}
-.status-name {
-    font-weight: 600;
-    font-size: 15px;
-    margin-bottom: 4px;
-}
-.status-message {
-    font-size: 13px;
-    color: #666;
-}
-.status-actions {
-    display: flex;
-    gap: 8px;
-}
-.kernel-warn {
-    background: #fff3cd;
-    border: 1px solid #ffe08a;
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 16px;
-}
-.kernel-warn h3 {
-    color: #856404;
-    margin-bottom: 8px;
-}
+.status-info { flex: 1; min-width: 0; }
+.status-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+.status-message { font-size: 13px; color: var(--text-muted); }
+.status-actions { display: flex; gap: 8px; flex-shrink: 0; }
 </style>
 
 <div class="page-header">
     <h2>状态</h2>
-    <button class="btn btn-secondary" onclick="refreshStatus()">刷新状态</button>
+    <div class="page-header-actions">
+        <button class="btn btn-secondary" onclick="refreshStatus()"><i class="ph ph-arrow-clockwise"></i> 刷新状态</button>
+    </div>
 </div>
 
-<!-- 内核检测 -->
 <div class="card">
-    <h3>内核检测</h3>
+    <h3><i class="ph ph-package"></i> 内核检测</h3>
     <div id="kernel-section">
         <div id="kernel-ttd" class="status-card">
-            <div class="status-icon missing" id="kernel-ttd-icon">?</div>
+            <div class="status-icon missing" id="kernel-ttd-icon"><i class="ph ph-question"></i></div>
             <div class="status-info">
                 <div class="status-name">TikTokDownloader 内核</div>
                 <div class="status-message" id="kernel-ttd-msg">检测中...</div>
             </div>
             <div class="status-actions">
-                <button class="btn btn-primary btn-sm" id="kernel-ttd-btn" onclick="installKernel('TikTokDownloader')">从 GitHub 下载</button>
+                <button class="btn btn-primary btn-sm" id="kernel-ttd-btn" onclick="installKernel('TikTokDownloader')"><i class="ph ph-download-simple"></i> 从 GitHub 下载</button>
             </div>
         </div>
         <div id="kernel-xhs" class="status-card">
-            <div class="status-icon missing" id="kernel-xhs-icon">?</div>
+            <div class="status-icon missing" id="kernel-xhs-icon"><i class="ph ph-question"></i></div>
             <div class="status-info">
                 <div class="status-name">XHS-Downloader 内核</div>
                 <div class="status-message" id="kernel-xhs-msg">检测中...</div>
             </div>
             <div class="status-actions">
-                <button class="btn btn-primary btn-sm" id="kernel-xhs-btn" onclick="installKernel('XHS-Downloader')">从 GitHub 下载</button>
+                <button class="btn btn-primary btn-sm" id="kernel-xhs-btn" onclick="installKernel('XHS-Downloader')"><i class="ph ph-download-simple"></i> 从 GitHub 下载</button>
             </div>
         </div>
     </div>
 </div>
 
-<!-- 内核检测 -->
 <div class="card">
-    <h3>内核检测</h3>
+    <h3><i class="ph ph-plug"></i> 服务连接</h3>
 
-    <!-- 云端 API -->
     <div class="status-card" id="feishu-card">
-        <div class="status-icon unknown" id="feishu-icon">?</div>
+        <div class="status-icon unknown" id="feishu-icon"><i class="ph ph-question"></i></div>
         <div class="status-info">
             <div class="status-name">云端 API</div>
             <div class="status-message" id="feishu-message">检测中...</div>
         </div>
         <div class="status-actions">
-            <button class="btn btn-secondary btn-sm" onclick="testFeishu()">测试连接</button>
+            <button class="btn btn-secondary btn-sm" onclick="testFeishu()"><i class="ph ph-plugs-connected"></i> 测试连接</button>
         </div>
     </div>
 
-    <!-- TikTokDownloader -->
     <div class="status-card" id="ttd-card">
-        <div class="status-icon unknown" id="ttd-icon">?</div>
+        <div class="status-icon unknown" id="ttd-icon"><i class="ph ph-question"></i></div>
         <div class="status-info">
             <div class="status-name">TikTokDownloader</div>
             <div class="status-message" id="ttd-message">检测中...</div>
         </div>
         <div class="status-actions">
-            <button class="btn btn-success btn-sm" onclick="controlService('TikTokDownloader', 'start')">启动</button>
-            <button class="btn btn-danger btn-sm" onclick="controlService('TikTokDownloader', 'stop')">停止</button>
-            <button class="btn btn-secondary btn-sm" onclick="testTTD()">测试连接</button>
+            <button class="btn btn-success btn-sm" onclick="controlService('TikTokDownloader', 'start')"><i class="ph ph-play"></i> 启动</button>
+            <button class="btn btn-danger btn-sm" onclick="controlService('TikTokDownloader', 'stop')"><i class="ph ph-stop"></i> 停止</button>
+            <button class="btn btn-secondary btn-sm" onclick="testTTD()"><i class="ph ph-plugs-connected"></i> 测试</button>
         </div>
     </div>
 
-    <!-- XHS-Downloader -->
     <div class="status-card" id="xhs-card">
-        <div class="status-icon unknown" id="xhs-icon">?</div>
+        <div class="status-icon unknown" id="xhs-icon"><i class="ph ph-question"></i></div>
         <div class="status-info">
             <div class="status-name">XHS-Downloader</div>
             <div class="status-message" id="xhs-message">检测中...</div>
         </div>
         <div class="status-actions">
-            <button class="btn btn-success btn-sm" onclick="controlService('XHS-Downloader', 'start')">启动</button>
-            <button class="btn btn-danger btn-sm" onclick="controlService('XHS-Downloader', 'stop')">停止</button>
-            <button class="btn btn-secondary btn-sm" onclick="testXHS()">测试连接</button>
+            <button class="btn btn-success btn-sm" onclick="controlService('XHS-Downloader', 'start')"><i class="ph ph-play"></i> 启动</button>
+            <button class="btn btn-danger btn-sm" onclick="controlService('XHS-Downloader', 'stop')"><i class="ph ph-stop"></i> 停止</button>
+            <button class="btn btn-secondary btn-sm" onclick="testXHS()"><i class="ph ph-plugs-connected"></i> 测试</button>
         </div>
     </div>
 </div>
@@ -177,11 +153,11 @@
 
         if (status.connected) {
             icon.className = 'status-icon connected';
-            icon.textContent = '\u2713';
+            icon.innerHTML = '<i class="ph ph-check"></i>';
             message.textContent = status.message;
         } else {
             icon.className = 'status-icon disconnected';
-            icon.textContent = '\u2717';
+            icon.innerHTML = '<i class="ph ph-x"></i>';
             message.textContent = status.message;
         }
     }
@@ -194,29 +170,26 @@
 
         if (kernel.installed) {
             icon.className = 'status-icon connected';
-            icon.textContent = '\u2713';
+            icon.innerHTML = '<i class="ph ph-check"></i>';
             msg.textContent = '已安装: ' + kernel.path;
             if (btn) btn.style.display = 'none';
         } else {
             icon.className = 'status-icon missing';
-            icon.textContent = '!';
-            msg.textContent = '未安装 - 请点击右侧按钮从 GitHub 下载';
+            icon.innerHTML = '<i class="ph ph-warning"></i>';
+            msg.textContent = '未安装, 请点击右侧按钮从 GitHub 下载';
             if (btn) btn.style.display = '';
         }
     }
 
     async function installKernel(name) {
-        const btn = document.getElementById(`kernel-${name.toLowerCase().replace('-','')}-btn`);
-        const msgEl = document.getElementById(`kernel-${name.toLowerCase().replace('Downloader','')}-msg`);
-        // Use the kernel prefix ttd or xhs
         const prefix = name.startsWith('TikTok') ? 'ttd' : 'xhs';
         const msg = document.getElementById(`kernel-${prefix}-msg`);
         const btnEl = document.getElementById(`kernel-${prefix}-btn`);
 
         if (!confirm(`确定从 GitHub 下载 ${name} 内核源码吗？\n（需要已安装 git）`)) return;
 
-        if (btnEl) { btnEl.disabled = true; btnEl.textContent = '下载中...'; }
-        if (msg) msg.textContent = '正在从 GitHub 克隆源码，请耐心等待...';
+        if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ph ph-spinner"></i> 下载中...'; }
+        if (msg) msg.textContent = '正在从 GitHub 克隆源码, 请耐心等待...';
         showToast('正在下载内核源码...', 'info');
 
         try {
@@ -232,7 +205,7 @@
             showToast('下载失败: ' + e.message, 'error');
             if (msg) msg.textContent = '下载失败: ' + e.message;
         } finally {
-            if (btnEl) { btnEl.disabled = false; btnEl.textContent = '从 GitHub 下载'; }
+            if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ph ph-download-simple"></i> 从 GitHub 下载'; }
         }
     }
 

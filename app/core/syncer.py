@@ -26,7 +26,6 @@ ACCOUNT_FIELD_MAP = {
     "标签": "tags",
     "备注": "note",
     "sec_user_id": "sec_user_id",
-    "昵称": "nickname",
     "粉丝数": "follower_count",
     "作品数": "aweme_count",
     "签名": "signature",

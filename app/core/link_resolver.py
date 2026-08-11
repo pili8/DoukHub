@@ -62,6 +62,22 @@ def extract_sec_user_id(resolved_url: str, platform: str = "") -> str:
     return ""
 
 
+def build_profile_url(sec_user_id: str, platform: str) -> str:
+    """根据平台和 sec_user_id 生成账号主页链接
+
+    - 抖音: https://www.douyin.com/user/{sec_user_id}
+    - 小红书: https://www.xiaohongshu.com/user/profile/{sec_user_id}
+    - TikTok: sec_user_id 不是用户名，无法直接拼 URL，返回空串
+    """
+    if not sec_user_id:
+        return ""
+    if platform == "抖音":
+        return f"https://www.douyin.com/user/{sec_user_id}"
+    elif platform == "小红书":
+        return f"https://www.xiaohongshu.com/user/profile/{sec_user_id}"
+    return ""
+
+
 def extract_detail_id(resolved_url: str) -> str:
     """从解析后的 URL 中提取视频 ID（纯正则）"""
     if not resolved_url:

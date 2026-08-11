@@ -3,24 +3,24 @@
 {% block content %}
 <div class="page-header">
     <h2>设置</h2>
-    <div style="display:flex;gap:8px;">
-        <button type="button" onclick="restartSystem()" style="padding:4px 12px;background:transparent;color:#999;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-size:12px;">🔄 重启</button>
-        <button type="button" onclick="exitSystem()" style="padding:4px 12px;background:transparent;color:#999;border:1px solid #ddd;border-radius:4px;cursor:pointer;font-size:12px;">⏻ 退出</button>
+    <div class="page-header-actions">
+        <button type="button" onclick="restartSystem()" class="btn btn-secondary btn-sm"><i class="ph ph-arrow-clockwise"></i> 重启</button>
+        <button type="button" onclick="exitSystem()" class="btn btn-secondary btn-sm"><i class="ph ph-power"></i> 退出</button>
     </div>
 </div>
 
 <form onsubmit="saveSettings(event)">
     <div class="card">
-        <h3>配置文件路径</h3>
-        <div style="padding:10px;background:#f8f9fa;border-radius:6px;font-family:monospace;font-size:13px;display:flex;justify-content:space-between;align-items:center;">
+        <h3><i class="ph ph-file-text"></i> 配置文件路径</h3>
+        <div style="padding:10px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:13px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border-default);">
             <span>{{ config_path }}</span>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText('{{ config_path }}');showToast('已复制')">复制</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText('{{ config_path }}');showToast('已复制')"><i class="ph ph-copy"></i></button>
         </div>
-        <small style="color:#888;margin-top:6px;display:block;">配置存储在用户目录，更新 DoukHub 不会被覆盖</small>
+        <small style="color:var(--text-muted);margin-top:6px;display:block;">配置存储在用户目录, 更新 DoukHub 不会被覆盖</small>
     </div>
 
     <div class="card">
-        <h3>云端配置（飞书）</h3>
+        <h3><i class="ph ph-cloud"></i> 云端配置（飞书）</h3>
         <div class="form-group">
             <label>App ID</label>
             <input type="text" name="feishu.app_id" value="{{ config.feishu.app_id or '' }}">
@@ -45,9 +45,9 @@
             <label>Cookie 表 Table ID</label>
             <input type="text" name="feishu.cookie_table_id" value="{{ config.feishu.cookie_table_id or '' }}" placeholder="Cookie 池表（可选）">
         </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button type="button" class="btn btn-secondary" onclick="testFeishu()">测试连接</button>
-            <button type="button" class="btn btn-secondary" onclick="ensureFields('all')">一键创建所有表字段</button>
+        <div class="btn-group" style="align-items:center;">
+            <button type="button" class="btn btn-secondary" onclick="testFeishu()"><i class="ph ph-plugs-connected"></i> 测试连接</button>
+            <button type="button" class="btn btn-secondary" onclick="ensureFields('all')"><i class="ph ph-wrench"></i> 一键创建所有表字段</button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('collection')">采集表</button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('account')">账号表</button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('cookie')">Cookie表</button>
@@ -56,16 +56,16 @@
     </div>
 
     <div class="card">
-        <h3>下载设置</h3>
+        <h3><i class="ph ph-folder"></i> 下载设置</h3>
         <div class="form-group">
             <label>下载路径</label>
             <div style="display:flex;gap:8px;">
                 <input type="text" name="local.download_path" id="download_path" value="{{ config.local.download_path or '' }}" style="flex:1;">
-                <button type="button" class="btn btn-secondary" onclick="openDirBrowser()">📁 浏览...</button>
+                <button type="button" class="btn btn-secondary" onclick="openDirBrowser()"><i class="ph ph-folder-open"></i> 浏览</button>
             </div>
-            <small style="color:#888;margin-top:4px;display:block;">默认: DoukHub 文件夹下的 Download 目录</small>
+            <small>默认: DoukHub 文件夹下的 Download 目录</small>
         </div>
-        <div id="dir-browser" style="display:none;max-height:300px;overflow-y:auto;border:1px solid #ddd;border-radius:6px;padding:12px;margin-bottom:16px;background:#fafafa;">
+        <div id="dir-browser" style="display:none;max-height:300px;overflow-y:auto;border:1px solid var(--border-default);border-radius:var(--radius);padding:12px;margin-bottom:16px;background:var(--bg-muted);">
             <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
                 <span id="dir-current" style="font-weight:600;font-size:13px;"></span>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="closeDirBrowser()">关闭</button>
@@ -83,8 +83,8 @@
     </div>
 
     <div class="card">
-        <h3>Downloader 服务</h3>
-        <p style="color:#888;font-size:13px;margin-bottom:16px;">路径留空则默认使用 DoukHub 文件夹内的 TikTokDownloader 和 XHS-Downloader</p>
+        <h3><i class="ph ph-cpu"></i> Downloader 服务</h3>
+        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">路径留空则默认使用 DoukHub 文件夹内的 TikTokDownloader 和 XHS-Downloader</p>
         <div class="form-group">
             <label>TikTokDownloader 路径</label>
             <input type="text" name="downloader.tiktok_downloader_path" value="{{ config.downloader.tiktok_downloader_path or '' }}" placeholder="留空则使用 ./TikTokDownloader">
@@ -94,7 +94,7 @@
             <input type="text" name="downloader.xhs_downloader_path" value="{{ config.downloader.xhs_downloader_path or '' }}" placeholder="留空则使用 ./XHS-Downloader">
         </div>
         <div class="form-group">
-            <button type="button" class="btn btn-secondary" onclick="updateAll()">🔄 一键更新所有 Downloader</button>
+            <button type="button" class="btn btn-secondary" onclick="updateAll()"><i class="ph ph-arrow-clockwise"></i> 一键更新所有 Downloader</button>
             <span id="update-status"></span>
         </div>
         <div class="form-group">
@@ -106,13 +106,15 @@
             <input type="number" name="downloader.xhs_port" value="{{ config.downloader.xhs_port or 5556 }}">
         </div>
         <div class="form-group">
-            <label><input type="checkbox" name="downloader.auto_start_services" {{ 'checked' if config.downloader.auto_start_services != false }}>
-                启动 DoukHub 时自动启动 Downloader 服务</label>
+            <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                <input type="checkbox" name="downloader.auto_start_services" {{ 'checked' if config.downloader.auto_start_services != false }}>
+                启动 DoukHub 时自动启动 Downloader 服务
+            </label>
         </div>
     </div>
 
     <div class="card">
-        <h3>Cookie 轮换</h3>
+        <h3><i class="ph ph-cookie"></i> Cookie 轮换</h3>
         <div class="form-group">
             <label>轮换模式</label>
             <select name="cookie.rotation_mode">
@@ -127,7 +129,7 @@
     </div>
 
     <div class="card">
-        <h3>采集设置</h3>
+        <h3><i class="ph ph-lightning"></i> 采集设置</h3>
         <div class="form-group">
             <label>并发采集账号数</label>
             <input type="number" name="concurrent_accounts" value="{{ config.concurrent_accounts or 3 }}" min="1" max="10">
@@ -135,16 +137,16 @@
     </div>
 
     <div class="card">
-        <h3>标签映射</h3>
-        <p style="color:#888;font-size:13px;margin-bottom:12px;">每行一个映射，格式：缩写=完整标签。未匹配的缩写会作为新标签保留。</p>
+        <h3><i class="ph ph-tag"></i> 标签映射</h3>
+        <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">每行一个映射, 格式: 缩写=完整标签。未匹配的缩写会作为新标签保留。</p>
         <div class="form-group">
-            <textarea name="tags_text" rows="12" style="font-family:monospace;font-size:13px;" placeholder="个=个人&#10;图=图集&#10;分享=分享&#10;街拍=街拍">{% for k, v in config.tags.items() %}{{ k }}={{ v }}
+            <textarea name="tags_text" rows="12" style="font-family:var(--font-mono);font-size:13px;" placeholder="个=个人&#10;图=图集&#10;分享=分享&#10;街拍=街拍">{% for k, v in config.tags.items() %}{{ k }}={{ v }}
 {% endfor %}</textarea>
         </div>
-        <small style="color:#888;">示例：个=个人 | 图=图集 | 街拍=街拍 | 太多=多</small>
+        <small>示例: 个=个人 | 图=图集 | 街拍=街拍 | 太多=多</small>
     </div>
 
-    <button type="submit" class="btn btn-primary">保存设置</button>
+    <button type="submit" class="btn btn-primary"><i class="ph ph-floppy-disk"></i> 保存设置</button>
 </form>
 {% endblock %}
 {% block scripts %}
@@ -158,14 +160,9 @@
             const key = input.name;
             if (!key) return;
             let value;
-            if (input.type === 'checkbox') {
-                value = input.checked;
-            } else if (input.type === 'number') {
-                value = parseInt(input.value) || 0;
-            } else {
-                value = input.value;
-            }
-            // 嵌套 key
+            if (input.type === 'checkbox') value = input.checked;
+            else if (input.type === 'number') value = parseInt(input.value) || 0;
+            else value = input.value;
             const parts = key.split('.');
             let obj = data;
             for (let i = 0; i < parts.length - 1; i++) {
@@ -174,8 +171,6 @@
             }
             obj[parts[parts.length - 1]] = value;
         });
-
-        // 解析标签映射
         const tagsText = form.querySelector('[name="tags_text"]').value;
         data.tags = {};
         tagsText.split('\n').forEach(line => {
@@ -183,12 +178,9 @@
             if (parts.length === 2) {
                 const key = parts[0].trim();
                 const value = parts[1].trim();
-                if (key && value) {
-                    data.tags[key] = value;
-                }
+                if (key && value) data.tags[key] = value;
             }
         });
-
         const resp = await apiCall('/api/settings', 'POST', data);
         showToast(resp.message || '保存成功');
     }
@@ -197,74 +189,62 @@
         status.textContent = '测试中...';
         const data = await apiCall('/api/test-feishu', 'POST');
         status.textContent = data.message;
-        status.style.color = data.success ? '#27ae60' : '#e74c3c';
+        status.style.color = data.success ? 'var(--success)' : 'var(--danger)';
     }
     async function ensureFields(tableType = 'all') {
         const status = document.getElementById('feishu-status');
         const label = tableType === 'all' ? '所有表' : tableType;
         status.textContent = `正在创建 ${label} 字段...`;
-        status.style.color = '#888';
+        status.style.color = 'var(--text-muted)';
         const data = await apiCall('/api/ensure-fields', 'POST', { table_type: tableType });
         if (data.results) {
             const msgs = data.results.map(r => `${r.table}: ${r.message || (r.success ? '完成' : '失败')}`);
             status.textContent = msgs.join(' | ');
-            status.style.color = data.success ? '#27ae60' : '#e74c3c';
+            status.style.color = data.success ? 'var(--success)' : 'var(--danger)';
         } else {
             status.textContent = data.message || '完成';
-            status.style.color = data.success ? '#27ae60' : '#e74c3c';
+            status.style.color = data.success ? 'var(--success)' : 'var(--danger)';
         }
     }
     async function updateAll() {
         const status = document.getElementById('update-status');
         if (!confirm('确定更新所有 Downloader？正在运行的服务会自动重启。')) return;
         status.textContent = '正在更新...';
-        status.style.color = '#888';
+        status.style.color = 'var(--text-muted)';
         const data = await apiCall('/api/services/update-all', 'POST');
         if (data.results) {
             let msg = data.results.map(r => `${r.name}: ${r.message}`).join('\n');
             status.textContent = msg;
             const allOk = data.results.every(r => r.success);
-            status.style.color = allOk ? '#27ae60' : '#e74c3c';
+            status.style.color = allOk ? 'var(--success)' : 'var(--danger)';
         }
     }
-
-    // 目录浏览器
     function openDirBrowser() {
         document.getElementById('dir-browser').style.display = 'block';
         const current = document.getElementById('download_path').value || '';
         loadDirs(current);
     }
-    function closeDirBrowser() {
-        document.getElementById('dir-browser').style.display = 'none';
-    }
+    function closeDirBrowser() { document.getElementById('dir-browser').style.display = 'none'; }
     async function loadDirs(path) {
         const resp = await fetch(`/api/browse-dir?path=${encodeURIComponent(path)}`);
         const data = await resp.json();
         document.getElementById('dir-current').textContent = '当前位置: ' + (data.current || '选择驱动器');
         let html = '';
-        // 顶部快捷按钮
         html += `<div style="display:flex;gap:6px;margin-bottom:8px;">`;
-        if (data.home) {
-            html += `<button class="btn btn-secondary btn-sm" onclick="loadDirs('${data.home.replace(/\\/g, '\\\\')}')" title="回到主目录">🏠 主目录</button>`;
-        }
-        if (data.parent) {
-            html += `<button class="btn btn-secondary btn-sm" onclick="loadDirs('${data.parent.replace(/\\/g, '\\\\')}')" title="上级目录">⬆️ 上级</button>`;
-        }
+        if (data.home) html += `<button class="btn btn-secondary btn-sm" onclick="loadDirs('${data.home.replace(/\\/g, '\\\\')}')" title="回到主目录"><i class="ph ph-house"></i> 主目录</button>`;
+        if (data.parent) html += `<button class="btn btn-secondary btn-sm" onclick="loadDirs('${data.parent.replace(/\\/g, '\\\\')}')" title="上级目录"><i class="ph ph-arrow-up"></i> 上级</button>`;
         html += `</div>`;
-        // 选择当前目录按钮
         if (data.current) {
-            html += `<div style="padding:10px;margin-bottom:8px;background:#e8f5e9;border-radius:6px;display:flex;justify-content:space-between;align-items:center;">
+            html += `<div style="padding:10px;margin-bottom:8px;background:var(--success-light);border-radius:var(--radius-sm);display:flex;justify-content:space-between;align-items:center;border:1px solid var(--success);">
                 <span style="font-size:13px;">选择此文件夹作为下载路径</span>
-                <button class="btn btn-primary btn-sm" onclick="selectDir('${data.current.replace(/\\/g, '\\\\')}')">✅ 选择</button>
+                <button class="btn btn-primary btn-sm" onclick="selectDir('${data.current.replace(/\\/g, '\\\\')}')"><i class="ph ph-check"></i> 选择</button>
             </div>`;
         }
         for (const dir of data.dirs) {
             const name = dir.split(/[/\\]/).pop() || dir;
-            html += `<div style="padding:8px 10px;cursor:pointer;border-radius:4px;font-size:13px;" onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background=''" onclick="loadDirs('${dir.replace(/\\/g, '\\\\')}')">📁 ${name}</div>`;
+            html += `<div style="padding:8px 10px;cursor:pointer;border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:6px;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''" onclick="loadDirs('${dir.replace(/\\/g, '\\\\')}')"><i class="ph ph-folder"></i> ${name}</div>`;
         }
-        if (!data.dirs || data.dirs.length === 0) {
-            html += '<div style="color:#999;padding:8px;font-size:13px;">此目录下没有子文件夹</div>';
-        }
+        if (!data.dirs || data.dirs.length === 0) html += '<div style="color:var(--text-muted);padding:8px;font-size:13px;">此目录下没有子文件夹</div>';
         document.getElementById('dir-list').innerHTML = html;
     }
     function selectDir(path) {

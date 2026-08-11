@@ -1,102 +1,124 @@
 {% extends "base.html" %}
 {% block title %}采集 - DoukHub{% endblock %}
 {% block content %}
+<style>
+.collect-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.mode-card { cursor: pointer; transition: all var(--transition); border: 2px solid transparent; }
+.mode-card:hover { border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.mode-card.selected { border-color: var(--accent); background: var(--accent-light); }
+.mode-card h3 { margin-bottom: 6px; }
+.mode-card p { font-size: 13px; color: var(--text-muted); }
+.progress-step {
+    padding: 12px;
+    margin-bottom: 8px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-muted);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--border-default);
+}
+.progress-step.active { background: var(--info-light); border-left: 3px solid var(--info); }
+.progress-step.done { background: var(--success-light); border-left: 3px solid var(--success); }
+.progress-step.error { background: var(--danger-light); border-left: 3px solid var(--danger); }
+.step-icon { font-size: 20px; }
+.step-text { font-size: 14px; }
+.collect-stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; text-align: center; }
+#task-modal > div { max-width: 90vw; width: 420px; max-height: 90vh; overflow-y: auto; }
+@media (max-width: 768px) {
+    .collect-mode-grid { grid-template-columns: 1fr !important; }
+    .collect-stats-grid { grid-template-columns: repeat(2,1fr) !important; }
+}
+</style>
+
 <div class="page-header">
     <h2>采集</h2>
 </div>
 
-<!-- 采集方式选择 -->
-<div class="collect-mode-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
-<!-- 采集方式选择 -->
-<div class="collect-mode-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
-    <div class="card" style="cursor:pointer;transition:all 0.2s;" onclick="showCollectMode('account')" id="mode-account-btn">
-        <h3 style="margin-bottom:8px;">📥 整号采集</h3>
-        <p style="font-size:13px;color:#666;">按账号批量采集所有作品，支持评级筛选</p>
+<div class="collect-mode-grid">
+    <div class="card mode-card" onclick="showCollectMode('account')" id="mode-account-btn">
+        <h3><i class="ph ph-download"></i> 整号采集</h3>
+        <p>按账号批量采集所有作品, 支持评级筛选</p>
     </div>
-    <div class="card" style="cursor:pointer;transition:all 0.2s;" onclick="showCollectMode('detail')" id="mode-detail-btn">
-        <h3 style="margin-bottom:8px;">🔗 单品采集</h3>
-        <p style="font-size:13px;color:#666;">粘贴作品链接，采集指定作品</p>
+    <div class="card mode-card" onclick="showCollectMode('detail')" id="mode-detail-btn">
+        <h3><i class="ph ph-link"></i> 单品采集</h3>
+        <p>粘贴作品链接, 采集指定作品</p>
     </div>
 </div>
 
-<!-- 整号采集 -->
 <div class="card" id="account-form-card">
-    <h3>📥 整号采集</h3>
+    <h3><i class="ph ph-download"></i> 整号采集</h3>
     <form id="account-form" onsubmit="submitAccountCollect(event)">
         <div class="form-group">
             <label>等级筛选（只采集选中等级以上）</label>
-            <div class="collect-rating-group" style="display:flex;gap:16px;">
-                <label><input type="checkbox" name="rating" value="4" checked> ⭐⭐⭐⭐</label>
-                <label><input type="checkbox" name="rating" value="3" checked> ⭐⭐⭐</label>
-                <label><input type="checkbox" name="rating" value="2"> ⭐⭐</label>
-                <label><input type="checkbox" name="rating" value="1"> ⭐</label>
+            <div class="collect-rating-group" style="display:flex;gap:16px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:4px;font-size:14px;font-weight:normal;"><input type="checkbox" name="rating" value="4" checked> 4星</label>
+                <label style="display:flex;align-items:center;gap:4px;font-size:14px;font-weight:normal;"><input type="checkbox" name="rating" value="3" checked> 3星</label>
+                <label style="display:flex;align-items:center;gap:4px;font-size:14px;font-weight:normal;"><input type="checkbox" name="rating" value="2"> 2星</label>
+                <label style="display:flex;align-items:center;gap:4px;font-size:14px;font-weight:normal;"><input type="checkbox" name="rating" value="1"> 1星</label>
             </div>
         </div>
         <div class="form-group">
             <label>指定账号（留空=采集所有符合条件的账号）</label>
-            <input type="text" name="account_names" placeholder="输入账号名称，多个用逗号分隔">
+            <input type="text" name="account_names" placeholder="输入账号名称, 多个用逗号分隔">
         </div>
-        <button type="submit" class="btn btn-primary" id="account-submit">开始整号采集</button>
+        <button type="submit" class="btn btn-primary" id="account-submit"><i class="ph ph-download-simple"></i> 开始整号采集</button>
     </form>
 </div>
 
-<!-- 单品采集 -->
 <div class="card" id="detail-form-card" style="display:none;">
-    <h3>🔗 单品采集</h3>
+    <h3><i class="ph ph-link"></i> 单品采集</h3>
     <form id="detail-form" onsubmit="submitDetailCollect(event)">
         <div class="form-group">
-            <label>粘贴作品链接（支持多个，一行一个，自动识别平台）</label>
+            <label>粘贴作品链接（支持多个, 一行一个, 自动识别平台）</label>
             <textarea name="links" rows="6" placeholder="https://www.douyin.com/video/...&#10;https://www.xiaohongshu.com/explore/...&#10;m3HL2u1R1YM（短链接也行）"></textarea>
         </div>
-        <button type="submit" class="btn btn-primary" id="detail-submit">开始单品采集</button>
+        <button type="submit" class="btn btn-primary" id="detail-submit"><i class="ph ph-download-simple"></i> 开始单品采集</button>
     </form>
 </div>
 
-<!-- 采集进度 -->
 <div class="card" id="progress-card" style="display:none;">
-    <h3>采集进度</h3>
+    <h3><i class="ph ph-spinner"></i> 采集进度</h3>
     <div id="progress-content">
         <div class="progress-step" id="step-prepare">
-            <span class="step-icon">⏳</span>
+            <span class="step-icon"><i class="ph ph-hourglass"></i></span>
             <span class="step-text">准备中...</span>
         </div>
         <div class="progress-step" id="step-collecting">
-            <span class="step-icon">⏳</span>
+            <span class="step-icon"><i class="ph ph-hourglass"></i></span>
             <span class="step-text">等待开始...</span>
         </div>
         <div class="progress-step" id="step-complete">
-            <span class="step-icon">⏳</span>
+            <span class="step-icon"><i class="ph ph-hourglass"></i></span>
             <span class="step-text">完成</span>
         </div>
     </div>
-    <div id="progress-stats" style="margin-top:16px;padding:12px;background:#f0f8ff;border-radius:6px;display:none;">
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;">
-        <div class="collect-stats-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;">
+    <div id="progress-stats" style="margin-top:16px;padding:12px;background:var(--info-light);border-radius:var(--radius-sm);display:none;">
+        <div class="collect-stats-grid">
             <div>
-                <div style="font-size:24px;font-weight:bold;color:#e94560;" id="stat-accounts">0</div>
-                <div style="font-size:12px;color:#888;">账号数</div>
+                <div style="font-size:24px;font-weight:700;color:var(--accent);" id="stat-accounts">0</div>
+                <div style="font-size:12px;color:var(--text-muted);">账号数</div>
             </div>
             <div>
-                <div style="font-size:24px;font-weight:bold;color:#27ae60;" id="stat-works">0</div>
-                <div style="font-size:12px;color:#888;">作品数</div>
+                <div style="font-size:24px;font-weight:700;color:var(--success);" id="stat-works">0</div>
+                <div style="font-size:12px;color:var(--text-muted);">作品数</div>
             </div>
             <div>
-                <div style="font-size:24px;font-weight:bold;color:#f39c12;" id="stat-api">0</div>
-                <div style="font-size:12px;color:#888;">API 调用</div>
+                <div style="font-size:24px;font-weight:700;color:var(--warning);" id="stat-api">0</div>
+                <div style="font-size:12px;color:var(--text-muted);">API 调用</div>
             </div>
             <div>
-                <div style="font-size:24px;font-weight:bold;color:#e74c3c;" id="stat-failed">0</div>
-                <div style="font-size:12px;color:#888;">失败</div>
+                <div style="font-size:24px;font-weight:700;color:var(--danger);" id="stat-failed">0</div>
+                <div style="font-size:12px;color:var(--text-muted);">失败</div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- 定时任务 -->
 <div class="card">
-    <h3>⏰ 定时任务 <span style="font-size:13px;color:#888;font-weight:normal;">（可选）</span></h3>
-    <div style="display:flex;gap:8px;margin-bottom:16px;">
-        <button class="btn btn-secondary" onclick="showAddTask()">+ 新建定时任务</button>
+    <h3><i class="ph ph-calendar-clock"></i> 定时任务 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;margin-left:8px;">（可选）</span></h3>
+    <div class="btn-group" style="margin-bottom:16px;">
+        <button class="btn btn-secondary" onclick="showAddTask()"><i class="ph ph-plus"></i> 新建定时任务</button>
     </div>
     <div id="task-list">
         {% if tasks %}
@@ -117,104 +139,62 @@
                     <td>{{ task.name }}</td>
                     <td><code>{{ task.cron_expression }}</code></td>
                     <td>{{ task.rating_filter }}</td>
-                    <td>{{ '🟢 启用' if task.enabled else '🔴 禁用' }}</td>
+                    <td>
+                        {% if task.enabled %}
+                        <span class="status-badge running"><span class="status-dot status-running"></span> 启用</span>
+                        {% else %}
+                        <span class="status-badge stopped"><span class="status-dot status-stopped"></span> 禁用</span>
+                        {% endif %}
+                    </td>
                     <td>{{ task.next_run or '-' }}</td>
                     <td>
                         <button class="btn btn-sm btn-secondary" onclick="toggleTask({{ task.id }})">{{ '禁用' if task.enabled else '启用' }}</button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteTask({{ task.id }})">删除</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteTask({{ task.id }})"><i class="ph ph-trash"></i></button>
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table></div>
         {% else %}
-        <div style="color:#999;font-size:13px;">暂无定时任务</div>
+        <div class="empty-state"><i class="ph ph-calendar-x"></i>暂无定时任务</div>
         {% endif %}
     </div>
 </div>
 
-<!-- 新建任务弹窗 -->
-<div id="task-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;">
-    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:24px;border-radius:8px;width:400px;">
-        <h3 style="margin-bottom:16px;">新建定时任务</h3>
+<div id="task-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg-surface);padding:24px;border-radius:var(--radius-lg);width:420px;border:1px solid var(--border-default);box-shadow:var(--shadow-lg);">
+        <h3 style="margin-bottom:16px;"><i class="ph ph-plus-circle"></i> 新建定时任务</h3>
         <form onsubmit="addTask(event)">
             <div class="form-group">
                 <label>任务名称</label>
-                <input type="text" name="name" required placeholder="如：每日采集4星以上账号">
+                <input type="text" name="name" required placeholder="如: 每日采集4星以上账号">
             </div>
             <div class="form-group">
                 <label>Cron 表达式</label>
                 <input type="text" name="cron_expression" required placeholder="0 2 * * *">
-                <small style="color:#888;">格式：分 时 日 月 周 | 示例：0 2 * * * = 每天凌晨2点</small>
+                <small>格式: 分 时 日 月 周 | 示例: 0 2 * * * = 每天凌晨2点</small>
             </div>
             <div class="form-group">
                 <label>等级筛选（逗号分隔）</label>
                 <input type="text" name="rating_filter" value="3,4" placeholder="3,4">
             </div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <div class="btn-group" style="justify-content:flex-end;">
                 <button type="button" class="btn btn-secondary" onclick="hideAddTask()">取消</button>
                 <button type="submit" class="btn btn-primary">创建</button>
             </div>
         </form>
     </div>
 </div>
-
-<style>
-.progress-step {
-    padding: 12px;
-    margin-bottom: 8px;
-    border-radius: 6px;
-    background: #f8f9fa;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-.progress-step.active {
-    background: #e3f2fd;
-    border-left: 3px solid #2196f3;
-}
-.progress-step.done {
-    background: #e8f5e9;
-    border-left: 3px solid #4caf50;
-}
-.progress-step.error {
-    background: #ffebee;
-    border-left: 3px solid #f44336;
-}
-.step-icon {
-    font-size: 20px;
-}
-.step-text {
-    font-size: 14px;
-}
-#mode-account-btn:hover, #mode-detail-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-}
-#task-modal > div {
-    max-width: 90vw;
-    width: 400px;
-    max-height: 90vh;
-    overflow-y: auto;
-}
-.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-@media (max-width: 768px) {
-    .collect-mode-grid { grid-template-columns: 1fr !important; }
-    .collect-rating-group { flex-wrap: wrap; gap: 8px !important; }
-    .collect-stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
-}
-</style>
 {% endblock %}
 {% block scripts %}
 <script>
     function showCollectMode(mode) {
         document.getElementById('account-form-card').style.display = mode === 'account' ? 'block' : 'none';
         document.getElementById('detail-form-card').style.display = mode === 'detail' ? 'block' : 'none';
-        document.getElementById('mode-account-btn').style.border = mode === 'account' ? '2px solid #e94560' : 'none';
-        document.getElementById('mode-detail-btn').style.border = mode === 'detail' ? '2px solid #e94560' : 'none';
+        document.getElementById('mode-account-btn').classList.toggle('selected', mode === 'account');
+        document.getElementById('mode-detail-btn').classList.toggle('selected', mode === 'detail');
     }
-    
-    // 默认显示整号采集
+
     showCollectMode('account');
 
     async function submitAccountCollect(e) {
@@ -224,16 +204,15 @@
         const minRating = ratings.length ? Math.min(...ratings.map(Number)) : 3;
 
         showProgress();
-        updateStep('step-prepare', 'active', '🔄', '准备采集...');
-        
+        updateStep('step-prepare', 'active', 'spinner', '准备采集...');
+
         const btn = document.getElementById('account-submit');
         btn.disabled = true;
-        btn.textContent = '采集中...';
+        btn.innerHTML = '<i class="ph ph-spinner"></i> 采集中...';
 
         try {
-            updateStep('step-collecting', 'active', '🔄', '正在采集...');
-            
-            // 使用新 v2 API（SSE 实时进度）
+            updateStep('step-collecting', 'active', 'spinner', '正在采集...');
+
             const response = await fetch('/api/collect/v2/account', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -245,7 +224,7 @@
 
             if (!response.ok) {
                 const error = await response.json();
-                updateStep('step-collecting', 'error', '❌', error.message);
+                updateStep('step-collecting', 'error', 'x', error.message);
                 showToast(error.message, 'error');
                 return;
             }
@@ -267,10 +246,9 @@
                     if (line.startsWith('data: ')) {
                         try {
                             const data = JSON.parse(line.slice(6));
-                            
                             switch (data.type) {
                                 case 'progress':
-                                    updateStep('step-collecting', 'active', '🔄', data.message);
+                                    updateStep('step-collecting', 'active', 'spinner', data.message);
                                     break;
                                 case 'stats':
                                     document.getElementById('stat-accounts').textContent = data.total || 0;
@@ -278,7 +256,6 @@
                                     document.getElementById('progress-stats').style.display = 'block';
                                     break;
                                 case 'log':
-                                    const logClass = data.level === 'error' ? 'error' : data.level === 'ok' ? 'done' : 'active';
                                     if (data.level === 'ok') {
                                         const match = data.message.match(/(\d+) 个作品/);
                                         if (match) totalWorks += parseInt(match[1]);
@@ -286,14 +263,14 @@
                                     break;
                                 case 'complete':
                                     if (data.success) {
-                                        updateStep('step-prepare', 'done', '✅', '准备完成');
-                                        updateStep('step-collecting', 'done', '✅', data.message);
-                                        updateStep('step-complete', 'done', '✅', '全部完成');
+                                        updateStep('step-prepare', 'done', 'check', '准备完成');
+                                        updateStep('step-collecting', 'done', 'check', data.message);
+                                        updateStep('step-complete', 'done', 'check', '全部完成');
                                         document.getElementById('stat-accounts').textContent = data.total || 0;
                                         document.getElementById('stat-works').textContent = totalWorks;
                                         showToast('采集完成', 'success');
                                     } else {
-                                        updateStep('step-collecting', 'error', '❌', data.message);
+                                        updateStep('step-collecting', 'error', 'x', data.message);
                                         showToast(data.message, 'error');
                                     }
                                     break;
@@ -304,11 +281,11 @@
             }
 
         } catch (e) {
-            updateStep('step-collecting', 'error', '❌', `请求失败: ${e.message}`);
+            updateStep('step-collecting', 'error', 'x', `请求失败: ${e.message}`);
             showToast('采集请求失败', 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = '开始整号采集';
+            btn.innerHTML = '<i class="ph ph-download-simple"></i> 开始整号采集';
         }
     }
 
@@ -319,33 +296,32 @@
         body.append('links', form.get('links'));
 
         showProgress();
-        updateStep('step-prepare', 'active', '🔄', '准备采集...');
-        
+        updateStep('step-prepare', 'active', 'spinner', '准备采集...');
+
         const btn = document.getElementById('detail-submit');
         btn.disabled = true;
-        btn.textContent = '采集中...';
+        btn.innerHTML = '<i class="ph ph-spinner"></i> 采集中...';
 
         try {
-            updateStep('step-collecting', 'active', '🔄', '正在采集...');
+            updateStep('step-collecting', 'active', 'spinner', '正在采集...');
             const data = await apiCall('/api/collect/detail', 'POST', body);
-            
+
             if (data.success) {
-                updateStep('step-prepare', 'done', '✅', '准备完成');
-                updateStep('step-collecting', 'done', '✅', `采集完成: ${data.results?.length || 0} 个作品`);
-                updateStep('step-complete', 'done', '✅', '全部完成');
-                
+                updateStep('step-prepare', 'done', 'check', '准备完成');
+                updateStep('step-collecting', 'done', 'check', `采集完成: ${data.results?.length || 0} 个作品`);
+                updateStep('step-complete', 'done', 'check', '全部完成');
                 showCollectStats(data);
                 showToast('采集完成', 'success');
             } else {
-                updateStep('step-collecting', 'error', '❌', data.message);
+                updateStep('step-collecting', 'error', 'x', data.message);
                 showToast(data.message, 'error');
             }
         } catch (e) {
-            updateStep('step-collecting', 'error', '❌', `请求失败: ${e.message}`);
+            updateStep('step-collecting', 'error', 'x', `请求失败: ${e.message}`);
             showToast('采集请求失败', 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = '开始单品采集';
+            btn.innerHTML = '<i class="ph ph-download-simple"></i> 开始单品采集';
         }
     }
 
@@ -354,7 +330,7 @@
         ['step-prepare', 'step-collecting', 'step-complete'].forEach(id => {
             const el = document.getElementById(id);
             el.className = 'progress-step';
-            el.querySelector('.step-icon').textContent = '⏳';
+            el.querySelector('.step-icon').innerHTML = '<i class="ph ph-hourglass"></i>';
         });
         document.getElementById('progress-stats').style.display = 'none';
     }
@@ -362,14 +338,14 @@
     function updateStep(stepId, status, icon, text) {
         const el = document.getElementById(stepId);
         el.className = `progress-step ${status}`;
-        el.querySelector('.step-icon').textContent = icon;
+        const iconMap = { 'spinner': 'ph-spinner', 'check': 'ph-check', 'x': 'ph-x', 'hourglass': 'ph-hourglass' };
+        el.querySelector('.step-icon').innerHTML = `<i class="ph ${iconMap[icon] || icon}"></i>`;
         el.querySelector('.step-text').textContent = text;
     }
 
     function showCollectStats(data) {
         const statsDiv = document.getElementById('progress-stats');
         statsDiv.style.display = 'block';
-        
         let totalWorks = 0;
         let failedCount = 0;
         if (data.results) {
@@ -378,20 +354,14 @@
                 if (r.status !== 'success') failedCount++;
             });
         }
-        
         document.getElementById('stat-accounts').textContent = data.results?.length || 0;
         document.getElementById('stat-works').textContent = totalWorks;
-        document.getElementById('stat-api').textContent = totalWorks; // 简化：每个作品约1次API调用
+        document.getElementById('stat-api').textContent = totalWorks;
         document.getElementById('stat-failed').textContent = failedCount;
     }
 
-    // 定时任务
-    function showAddTask() {
-        document.getElementById('task-modal').style.display = 'block';
-    }
-    function hideAddTask() {
-        document.getElementById('task-modal').style.display = 'none';
-    }
+    function showAddTask() { document.getElementById('task-modal').style.display = 'flex'; }
+    function hideAddTask() { document.getElementById('task-modal').style.display = 'none'; }
 
     async function addTask(e) {
         e.preventDefault();

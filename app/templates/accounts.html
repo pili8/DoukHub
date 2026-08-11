@@ -3,36 +3,35 @@
 {% block content %}
 <div class="page-header">
     <h2>账号管理</h2>
-    <div>
-        <button class="btn btn-secondary" onclick="syncFeishu()">🔄 同步云端</button>
+    <div class="page-header-actions">
+        <button class="btn btn-secondary" onclick="syncFeishu()"><i class="ph ph-cloud-arrow-up"></i> 同步云端</button>
     </div>
 </div>
 
 <div class="card">
-    <div style="display: flex; gap: 12px; margin-bottom: 16px;">
-        <select id="filter-platform" onchange="filterAccounts()">
+    <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
+        <select id="filter-platform" onchange="filterAccounts()" style="padding:8px 12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-primary);font-size:14px;">
             <option value="">全部平台</option>
             <option value="抖音">抖音</option>
             <option value="TikTok">TikTok</option>
             <option value="小红书">小红书</option>
         </select>
-        <select id="filter-rating" onchange="filterAccounts()">
+        <select id="filter-rating" onchange="filterAccounts()" style="padding:8px 12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-primary);font-size:14px;">
             <option value="">全部评级</option>
-            <option value="5">⭐⭐⭐⭐⭐</option>
-            <option value="4">⭐⭐⭐⭐</option>
-            <option value="3">⭐⭐⭐</option>
-            <option value="2">⭐⭐</option>
-            <option value="1">⭐</option>
+            <option value="5">5星</option>
+            <option value="4">4星以上</option>
+            <option value="3">3星以上</option>
+            <option value="2">2星以上</option>
+            <option value="1">1星以上</option>
         </select>
     </div>
 
-    <table>
+    <div class="table-scroll"><table>
         <thead>
             <tr>
                 <th>名称</th>
                 <th>平台</th>
                 <th>评级</th>
-                <th>昵称</th>
                 <th>粉丝</th>
                 <th>作品</th>
                 <th>标签</th>
@@ -46,7 +45,6 @@
                 <td>{{ acc.name }}</td>
                 <td><span class="platform-tag platform-{{ acc.platform }}">{{ acc.platform }}</span></td>
                 <td class="rating">{{ '⭐' * acc.rating }}</td>
-                <td>{{ acc.nickname or '-' }}</td>
                 <td>{{ acc.follower_count if acc.follower_count else '-' }}</td>
                 <td>{{ acc.aweme_count if acc.aweme_count else '-' }}</td>
                 <td>
@@ -54,14 +52,20 @@
                     <span class="tag">{{ tag }}</span>
                     {% endfor %}
                 </td>
-                <td>{{ '🟢' if acc.enabled else '🔴' }}</td>
-                <td><a href="{{ acc.link }}" target="_blank" class="btn btn-secondary btn-sm">查看</a></td>
+                <td>
+                    {% if acc.enabled %}
+                    <span class="status-badge running"><span class="status-dot status-running"></span></span>
+                    {% else %}
+                    <span class="status-badge stopped"><span class="status-dot status-stopped"></span></span>
+                    {% endif %}
+                </td>
+                <td><a href="{{ acc.link }}" target="_blank" class="btn btn-secondary btn-sm"><i class="ph ph-arrow-square-out"></i></a></td>
             </tr>
             {% endfor %}
         </tbody>
-    </table>
+    </table></div>
     {% if not accounts %}
-    <div class="empty-state">暂无账号数据，请先同步云端配置</div>
+    <div class="empty-state"><i class="ph ph-users"></i>暂无账号数据, 请先同步云端配置</div>
     {% endif %}
 </div>
 {% endblock %}
@@ -77,7 +81,7 @@
         });
     }
     async function syncFeishu() {
-        showToast('正在同步云端...');
+        showToast('正在同步云端...', 'info');
         const data = await apiCall('/api/sync', 'POST');
         if (data.success) {
             showToast(data.message);

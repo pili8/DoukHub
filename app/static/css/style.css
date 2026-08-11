@@ -1,0 +1,947 @@
+/* ==========================================================================
+   DoukHub - Material Design 3 (Material You)
+   Design Read: Internal admin panel for content collection platform
+   Design System: Google Material Design 3 (M3)
+   Dials: VARIANCE=4, MOTION=3, DENSITY=5
+   Primary: Material Blue (#0061A4) - Google Material signature color
+   Font: Roboto (Google's official Material typeface)
+   Icons: Phosphor Icons (via CDN)
+   Shape: M3 shape system (4/8/12/16/28px)
+   Elevation: M3 tonal elevation + shadow system
+   ==========================================================================
+   Backup: style.css.backup (previous Slate/Teal design)
+   Rollback: copy style.css.backup style.css
+   ========================================================================== */
+
+/* ===== 1. M3 Design Tokens ===== */
+:root {
+  /* --- M3 Primary --- */
+  --md-primary: #0061A4;
+  --md-on-primary: #FFFFFF;
+  --md-primary-container: #D1E4FF;
+  --md-on-primary-container: #001D36;
+
+  /* --- M3 Secondary --- */
+  --md-secondary: #535F70;
+  --md-on-secondary: #FFFFFF;
+  --md-secondary-container: #D7E3F7;
+  --md-on-secondary-container: #101C2B;
+
+  /* --- M3 Tertiary --- */
+  --md-tertiary: #6B5778;
+  --md-on-tertiary: #FFFFFF;
+  --md-tertiary-container: #F2D9FF;
+  --md-on-tertiary-container: #251431;
+
+  /* --- M3 Error --- */
+  --md-error: #BA1A1A;
+  --md-on-error: #FFFFFF;
+  --md-error-container: #FFDAD6;
+  --md-on-error-container: #410002;
+
+  /* --- M3 Success (custom role) --- */
+  --md-success: #006E2C;
+  --md-on-success: #FFFFFF;
+  --md-success-container: #8AF8B0;
+  --md-on-success-container: #002107;
+
+  /* --- M3 Warning (custom role) --- */
+  --md-warning: #835400;
+  --md-on-warning: #FFFFFF;
+  --md-warning-container: #FFDDB7;
+  --md-on-warning-container: #2A1700;
+
+  /* --- M3 Info (alias of primary family) --- */
+  --md-info: #0061A4;
+  --md-on-info: #FFFFFF;
+  --md-info-container: #D1E4FF;
+  --md-on-info-container: #001D36;
+
+  /* --- M3 Surface tones --- */
+  --md-background: #FDFCFF;
+  --md-on-background: #1A1C1E;
+  --md-surface: #FDFCFF;
+  --md-on-surface: #1A1C1E;
+  --md-surface-variant: #DFE2EB;
+  --md-on-surface-variant: #42474E;
+  --md-surface-container-lowest: #FFFFFF;
+  --md-surface-container-low: #F7F9FC;
+  --md-surface-container: #F1F4F9;
+  --md-surface-container-high: #EBEEF3;
+  --md-surface-container-highest: #E6E9EE;
+
+  /* --- M3 Outline --- */
+  --md-outline: #73777F;
+  --md-outline-variant: #C3C7CF;
+
+  /* --- M3 Shadow colors --- */
+  --md-shadow-color: rgb(0 50 80);
+  --md-scrim: rgb(0 0 0 / 0.4);
+
+  /* === Legacy variable mapping (template compatibility) === */
+  --bg-base: var(--md-background);
+  --bg-surface: var(--md-surface-container-lowest);
+  --bg-sidebar: var(--md-surface-container-low);
+  --bg-sidebar-hover: var(--md-surface-container-high);
+  --bg-sidebar-active: var(--md-secondary-container);
+  --bg-hover: var(--md-surface-container-high);
+  --bg-muted: var(--md-surface-container);
+  --bg-elevated: var(--md-surface-container-low);
+  --bg-input: var(--md-surface-container-highest);
+
+  --text-primary: var(--md-on-surface);
+  --text-secondary: var(--md-on-surface-variant);
+  --text-muted: var(--md-outline);
+  --text-on-dark: var(--md-on-surface);
+  --text-on-dark-muted: var(--md-on-surface-variant);
+  --text-on-dark-dim: var(--md-outline);
+
+  --border-default: var(--md-outline-variant);
+  --border-strong: var(--md-outline);
+  --border-sidebar: var(--md-outline-variant);
+
+  --accent: var(--md-primary);
+  --accent-hover: #00497D;
+  --accent-active: #003258;
+  --accent-light: var(--md-primary-container);
+  --accent-text: var(--md-primary);
+
+  --success: var(--md-success);
+  --success-light: var(--md-success-container);
+  --success-text: var(--md-on-success-container);
+  --danger: var(--md-error);
+  --danger-light: var(--md-error-container);
+  --danger-text: var(--md-on-error-container);
+  --warning: var(--md-warning);
+  --warning-light: var(--md-warning-container);
+  --warning-text: var(--md-on-warning-container);
+  --info: var(--md-info);
+  --info-light: var(--md-info-container);
+  --info-text: var(--md-on-info-container);
+
+  /* --- M3 Shape System --- */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 28px;
+  --radius-full: 9999px;
+
+  /* --- M3 Elevation (level 1-4) --- */
+  --shadow-xs: 0 1px 2px 0 rgb(0 50 80 / 0.06);
+  --shadow-sm: 0 1px 2px 0 rgb(0 50 80 / 0.10), 0 1px 3px 1px rgb(0 50 80 / 0.06);
+  --shadow-md: 0 1px 2px 0 rgb(0 50 80 / 0.10), 0 2px 6px 2px rgb(0 50 80 / 0.08);
+  --shadow-lg: 0 4px 8px 3px rgb(0 50 80 / 0.10), 0 1px 3px 0 rgb(0 50 80 / 0.10);
+  --shadow-xl: 0 8px 12px 6px rgb(0 50 80 / 0.12), 0 4px 4px 3px rgb(0 50 80 / 0.08);
+
+  /* --- M3 Motion --- */
+  --transition: 200ms cubic-bezier(0.2, 0, 0, 1);
+  --transition-slow: 350ms cubic-bezier(0.2, 0, 0, 1);
+  --transition-fast: 150ms cubic-bezier(0.2, 0, 0, 1);
+
+  /* --- M3 Typography --- */
+  --font-sans: "Roboto", "Segoe UI", system-ui, -apple-system, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "Roboto Mono", "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+
+  /* --- Layout --- */
+  --sidebar-w: 240px;
+  --sidebar-w-mobile: 180px;
+  --content-max: 1280px;
+
+  /* --- M3 State Layer opacity --- */
+  --state-hover: 0.08;
+  --state-focus: 0.12;
+  --state-pressed: 0.12;
+}
+
+/* ===== Dark Mode (M3 Dark scheme) ===== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --md-primary: #9ECAFF;
+    --md-on-primary: #003258;
+    --md-primary-container: #00497D;
+    --md-on-primary-container: #D1E4FF;
+
+    --md-secondary: #BBC7DB;
+    --md-on-secondary: #253140;
+    --md-secondary-container: #3B4858;
+    --md-on-secondary-container: #D7E3F7;
+
+    --md-tertiary: #D7BEE4;
+    --md-on-tertiary: #3B2948;
+    --md-tertiary-container: #524060;
+    --md-on-tertiary-container: #F2D9FF;
+
+    --md-error: #FFB4AB;
+    --md-on-error: #690005;
+    --md-error-container: #93000A;
+    --md-on-error-container: #FFDAD6;
+
+    --md-success: #6BDB8E;
+    --md-on-success: #003914;
+    --md-success-container: #005221;
+    --md-on-success-container: #8AF8B0;
+
+    --md-warning: #FFB870;
+    --md-on-warning: #452B00;
+    --md-warning-container: #633F00;
+    --md-on-warning-container: #FFDDB7;
+
+    --md-info: #9ECAFF;
+    --md-on-info: #003258;
+    --md-info-container: #00497D;
+    --md-on-info-container: #D1E4FF;
+
+    --md-background: #111418;
+    --md-on-background: #E2E2E6;
+    --md-surface: #111418;
+    --md-on-surface: #E2E2E6;
+    --md-surface-variant: #42474E;
+    --md-on-surface-variant: #C3C7CF;
+    --md-surface-container-lowest: #0C0E12;
+    --md-surface-container-low: #1A1C1E;
+    --md-surface-container: #1E2024;
+    --md-surface-container-high: #282A2F;
+    --md-surface-container-highest: #333539;
+
+    --md-outline: #8D9199;
+    --md-outline-variant: #42474E;
+
+    --md-shadow-color: rgb(0 0 0);
+    --md-scrim: rgb(0 0 0 / 0.6);
+
+    /* Legacy remap */
+    --accent-hover: #B3D9FF;
+    --accent-active: #9ECAFF;
+  }
+}
+
+/* ===== 2. Reset & Base ===== */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { font-size: 15px; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--md-background);
+  color: var(--md-on-surface);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: 0.006em;
+}
+
+a { color: var(--md-primary); text-decoration: none; transition: color var(--transition-fast); }
+a:hover { color: var(--accent-hover); }
+
+code, pre { font-family: var(--font-mono); }
+
+/* ===== 3. M3 Navigation Drawer ===== */
+.layout { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--md-surface-container-low);
+  color: var(--md-on-surface);
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--md-outline-variant);
+}
+
+.sidebar-brand {
+  padding: 28px 24px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-brand i {
+  font-size: 28px;
+  color: var(--md-primary);
+}
+
+.sidebar-brand span {
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--md-on-surface);
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 8px 12px;
+}
+
+/* M3 Navigation Drawer item */
+.sidebar-nav a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  height: 56px;
+  color: var(--md-on-surface-variant);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.25;
+  transition: background var(--transition-fast);
+  border-radius: var(--radius-full);
+  margin-bottom: 2px;
+  position: relative;
+  overflow: hidden;
+}
+
+.sidebar-nav a i {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+/* M3 hover state layer */
+.sidebar-nav a:hover {
+  background: rgb(66 71 78 / var(--state-hover));
+  color: var(--md-on-surface);
+}
+
+/* M3 focus / pressed state layer */
+.sidebar-nav a:active {
+  background: rgb(66 71 78 / var(--state-pressed));
+}
+
+/* M3 active indicator pill (signature Material 3 pattern) */
+.sidebar-nav a.active {
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+  font-weight: 600;
+}
+
+.sidebar-nav a.active:hover {
+  background: var(--md-secondary-container);
+  filter: brightness(0.96);
+}
+
+.sidebar-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--md-outline-variant);
+  font-size: 12px;
+  color: var(--md-outline);
+  font-weight: 500;
+}
+
+.main {
+  flex: 1;
+  padding: 24px 32px;
+  max-width: var(--content-max);
+  min-width: 0;
+}
+
+/* ===== 4. Page Header ===== */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  gap: 16px;
+}
+
+/* M3 Headline Small */
+.page-header h2 {
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--md-on-surface);
+  line-height: 1.25;
+}
+
+.page-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ===== 5. M3 Elevated Cards ===== */
+.card {
+  background: var(--md-surface-container-low);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-xs);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  transition: box-shadow var(--transition);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+/* M3 Title Medium */
+.card h3 {
+  margin-bottom: 16px;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--md-on-surface);
+  letter-spacing: 0.006em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+.card h3 i {
+  font-size: 22px;
+  color: var(--md-primary);
+}
+
+/* ===== 6. M3 Buttons ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 24px;
+  height: 40px;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+  text-decoration: none;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  position: relative;
+  overflow: hidden;
+}
+
+/* M3 state layer effect on buttons */
+.btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+}
+
+.btn:hover::before { opacity: var(--state-hover); }
+.btn:active::before { opacity: var(--state-pressed); }
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn i {
+  font-size: 18px;
+}
+
+/* M3 Filled Button */
+.btn-primary {
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+}
+.btn-primary:hover {
+  background: var(--md-primary);
+  box-shadow: var(--shadow-sm);
+}
+.btn-primary:hover::before { background: var(--md-on-primary); }
+
+/* M3 Tonal / Outlined Button (secondary) */
+.btn-secondary {
+  background: transparent;
+  color: var(--md-primary);
+  border: 1px solid var(--md-outline-variant);
+}
+.btn-secondary:hover {
+  background: transparent;
+  border-color: var(--md-primary);
+}
+.btn-secondary:hover::before { background: var(--md-primary); }
+
+/* M3 Filled Tonal Button (success) */
+.btn-success {
+  background: var(--md-success-container);
+  color: var(--md-on-success-container);
+}
+.btn-success:hover {
+  background: var(--md-success-container);
+  box-shadow: var(--shadow-sm);
+  filter: brightness(0.96);
+}
+.btn-success:hover::before { background: var(--md-on-success-container); }
+
+/* M3 Filled Button (danger) */
+.btn-danger {
+  background: var(--md-error);
+  color: var(--md-on-error);
+}
+.btn-danger:hover {
+  background: var(--md-error);
+  box-shadow: var(--shadow-sm);
+}
+.btn-danger:hover::before { background: var(--md-on-error); }
+
+/* M3 Filled Tonal Button (warning) */
+.btn-warning {
+  background: var(--md-warning-container);
+  color: var(--md-on-warning-container);
+}
+.btn-warning:hover {
+  background: var(--md-warning-container);
+  box-shadow: var(--shadow-sm);
+  filter: brightness(0.96);
+}
+.btn-warning:hover::before { background: var(--md-on-warning-container); }
+
+/* M3 Small button variant */
+.btn-sm {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 13px;
+  border-radius: var(--radius-full);
+}
+.btn-sm i { font-size: 16px; }
+
+.btn:disabled {
+  opacity: 0.38;
+  pointer-events: none;
+  box-shadow: none;
+}
+
+.btn-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ===== 7. M3 Filled Text Fields ===== */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--md-on-surface-variant);
+  letter-spacing: 0.01em;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--md-surface-container-highest);
+  color: var(--md-on-surface);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+.form-group input:hover,
+.form-group select:hover,
+.form-group textarea:hover {
+  border-color: var(--md-on-surface);
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--md-primary);
+  border-width: 2px;
+  padding: 11px 15px;
+  box-shadow: none;
+  background: var(--md-surface-container-lowest);
+}
+
+.form-group input::placeholder,
+.form-group textarea::placeholder {
+  color: var(--md-outline);
+}
+
+.form-group textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.form-group small {
+  color: var(--md-outline);
+  font-size: 12px;
+}
+
+/* ===== 8. M3 Data Table ===== */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding: 14px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--md-outline-variant);
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+/* M3 table header */
+th {
+  background: var(--md-surface-container);
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--md-on-surface-variant);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+tbody tr {
+  transition: background var(--transition-fast);
+}
+
+tbody tr:hover {
+  background: var(--md-surface-container);
+}
+
+/* ===== 9. Stats Grid ===== */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+/* M3 Filled Card for stats */
+.stat-card {
+  background: var(--md-surface-container);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: none;
+  transition: box-shadow var(--transition);
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.stat-card .number {
+  font-size: 36px;
+  font-weight: 500;
+  color: var(--md-primary);
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-card .label {
+  font-size: 12px;
+  color: var(--md-on-surface-variant);
+  margin-top: 6px;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+
+/* ===== 10. Service Grid ===== */
+.service-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.service-card {
+  background: var(--md-surface-container);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: none;
+  transition: box-shadow var(--transition);
+}
+
+.service-card:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.service-card .name {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--md-on-surface);
+}
+
+.service-card .port {
+  font-size: 12px;
+  color: var(--md-on-surface-variant);
+  font-family: var(--font-mono);
+}
+
+/* ===== 11. M3 Status Indicators ===== */
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-running { background: var(--md-success); }
+.status-stopped { background: var(--md-error); }
+
+/* M3 Badge / Chip for status */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.status-badge.running {
+  background: var(--md-success-container);
+  color: var(--md-on-success-container);
+}
+
+.status-badge.stopped {
+  background: var(--md-error-container);
+  color: var(--md-on-error-container);
+}
+
+/* ===== 12. M3 Chips & Tags ===== */
+.tag {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  background: var(--md-surface-container-highest);
+  color: var(--md-on-surface-variant);
+  margin-right: 4px;
+  font-weight: 500;
+  border: 1px solid var(--md-outline-variant);
+  letter-spacing: 0.01em;
+}
+
+.rating { color: var(--md-warning); letter-spacing: 1px; }
+
+.platform-tag {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.platform-抖音 { background: var(--md-warning-container); color: var(--md-on-warning-container); }
+.platform-TikTok { background: var(--md-info-container); color: var(--md-on-info-container); }
+.platform-小红书 { background: var(--md-error-container); color: var(--md-on-error-container); }
+
+/* ===== 13. M3 Snackbar (Toast) ===== */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  color: var(--md-on-surface);
+  z-index: 2000;
+  display: none;
+  max-width: 90vw;
+  min-width: 280px;
+  font-size: 14px;
+  font-weight: 400;
+  box-shadow: var(--shadow-lg);
+  animation: snackbar-in 250ms cubic-bezier(0.2, 0, 0, 1);
+  border: none;
+}
+
+@keyframes snackbar-in {
+  from { transform: translate(-50%, 100%); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+
+.toast-success { background: var(--md-success-container); color: var(--md-on-success-container); }
+.toast-error { background: var(--md-error-container); color: var(--md-on-error-container); }
+.toast-info { background: var(--md-surface-container-high); color: var(--md-on-surface); }
+
+/* ===== 14. Utilities ===== */
+.loading { opacity: 0.5; pointer-events: none; }
+
+.empty-state {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--md-on-surface-variant);
+}
+
+.empty-state i {
+  font-size: 48px;
+  color: var(--md-outline-variant);
+  margin-bottom: 16px;
+  display: block;
+}
+
+/* ===== 15. M3 Linear Progress Indicator ===== */
+.progress-bar-container {
+  width: 100%;
+  height: 4px;
+  background: var(--md-surface-container-highest);
+  border-radius: var(--radius-full);
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--md-primary);
+  border-radius: var(--radius-full);
+  transition: width 300ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ===== 16. Log Box (terminal style) ===== */
+.log-box {
+  max-height: 200px;
+  overflow-y: auto;
+  background: #1A1C1E;
+  color: #C3C7CF;
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  border: none;
+}
+
+.log-box .log-ok { color: #6BDB8E; }
+.log-box .log-err { color: #FFB4AB; }
+.log-box .log-info { color: #9ECAFF; }
+
+/* ===== 17. Responsive ===== */
+@media (max-width: 1024px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    width: var(--sidebar-w-mobile);
+    padding: 0;
+  }
+  .sidebar-brand { padding: 16px 16px 12px; }
+  .sidebar-brand span { font-size: 15px; }
+  .sidebar-brand i { font-size: 24px; }
+  .sidebar-nav { padding: 8px 8px; }
+  .sidebar-nav a { padding: 0 12px; height: 48px; font-size: 13px; gap: 8px; border-radius: var(--radius-full); }
+  .sidebar-nav a i { font-size: 22px; }
+
+  .main { padding: 16px; max-width: 100%; }
+
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .page-header h2 { font-size: 20px; }
+  .page-header-actions { align-self: stretch; }
+  .page-header-actions .btn { text-align: center; flex: 1; }
+
+  .card { padding: 16px; border-radius: var(--radius); margin-bottom: 12px; }
+  .card h3 { font-size: 14px; }
+
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+  .stat-card { padding: 16px; }
+  .stat-card .number { font-size: 28px; }
+  .stat-card .label { font-size: 11px; }
+
+  .service-grid { grid-template-columns: 1fr; gap: 10px; margin-bottom: 16px; }
+
+  .form-group input, .form-group select, .form-group textarea { font-size: 15px; }
+
+  .btn { height: 40px; padding: 0 20px; font-size: 14px; }
+  .btn-sm { height: 32px; padding: 0 14px; font-size: 13px; }
+
+  th, td { padding: 10px 12px; font-size: 12px; }
+
+  .toast { bottom: 16px; left: 16px; right: 16px; transform: none; max-width: none; min-width: 0; }
+  .toast { animation-name: snackbar-in-mobile; }
+}
+
+@keyframes snackbar-in-mobile {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@media (max-width: 420px) {
+  .stats-grid { grid-template-columns: 1fr; }
+  .main { padding: 12px; }
+}
+
+/* ===== 18. M3 Reduced Motion ===== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ===== 19. M3 Scrollbar Styling ===== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--md-outline-variant);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--md-outline);
+}
+
+/* ===== 20. M3 Selection ===== */
+::selection {
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+
+/* ===== 21. M3 Focus Ring ===== */
+:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
+/* ===== 22. Modal / Dialog (M3 style) ===== */
+[style*="position:fixed"][style*="z-index:1000"] > div {
+  border-radius: var(--radius-xl) !important;
+  box-shadow: var(--shadow-xl) !important;
+}

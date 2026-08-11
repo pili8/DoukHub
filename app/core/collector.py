@@ -263,13 +263,13 @@ class Collector:
             return ""
 
     async def get_account_info(self, sec_user_id: str, platform: str = "抖音", cookie: str = "") -> dict:
-        """通过 sec_user_id 获取账号详情（使用 count=1 优化性能）"""
+        """通过 sec_user_id 获取账号资料（账号名称、粉丝数、作品数等）"""
         if not sec_user_id:
             return {}
 
         try:
             if platform == "抖音":
-                endpoint = f"{self.ttd_url}/douyin/account"
+                endpoint = f"{self.ttd_url}/douyin/user/profile"
             elif platform == "TikTok":
                 endpoint = f"{self.ttd_url}/tiktok/account"
             else:
@@ -277,9 +277,6 @@ class Collector:
 
             payload = {
                 "sec_user_id": sec_user_id,
-                "source": True,
-                "pages": 1,
-                "count": 1,  # 优化：只获取 1 个作品，减少数据量
             }
             if cookie:
                 payload["cookie"] = cookie
@@ -288,20 +285,25 @@ class Collector:
             resp.raise_for_status()
             data = resp.json()
             if data.get("data"):
-                items = data["data"]
-                if isinstance(items, list) and items:
-                    first = items[0]
-                    author = first.get("author", {})
-                    return {
-                        "sec_user_id": sec_user_id,
-                        "nickname": author.get("nickname", ""),
-                        "signature": author.get("signature", ""),
-                        "follower_count": author.get("follower_count", 0),
-                        "aweme_count": author.get("aweme_count", 0),
-                        "avatar": author.get("avatar_larger", {}).get("url_list", [""])[0]
-                        if isinstance(author.get("avatar_larger"), dict)
-                        else "",
-                    }
+                d = data["data"]
+                avatar = ""
+                avatar_field = d.get("avatar_larger") or d.get("avatar_300x300") or d.get("avatar_thumb")
+                if isinstance(avatar_field, dict):
+                    url_list = avatar_field.get("url_list", [])
+                    if url_list:
+                        avatar = url_list[0]
+                return {
+                    "sec_user_id": sec_user_id,
+                    "nickname": d.get("nickname", ""),
+                    "signature": d.get("signature", ""),
+                    "follower_count": d.get("follower_count", 0),
+                    "aweme_count": d.get("aweme_count", 0),
+                    "following_count": d.get("following_count", 0),
+                    "total_favorited": d.get("total_favorited", 0),
+                    "avatar": avatar,
+                    "uid": d.get("uid", ""),
+                    "unique_id": d.get("unique_id", ""),
+                }
             return {"sec_user_id": sec_user_id}
 
         except Exception:

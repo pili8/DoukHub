@@ -5,75 +5,34 @@
 .progress-step {
     padding: 10px 12px;
     margin-bottom: 6px;
-    border-radius: 6px;
-    background: #f8f9fa;
+    border-radius: var(--radius-sm);
+    background: var(--bg-muted);
     display: flex;
     align-items: center;
     gap: 10px;
     font-size: 13px;
+    border: 1px solid var(--border-default);
 }
-.progress-step.active {
-    background: #e3f2fd;
-    border-left: 3px solid #2196f3;
-}
-.progress-step.done {
-    background: #e8f5e9;
-    border-left: 3px solid #4caf50;
-}
-.progress-step.error {
-    background: #ffebee;
-    border-left: 3px solid #f44336;
-}
-.progress-bar-container {
-    width: 100%;
-    height: 6px;
-    background: #eee;
-    border-radius: 3px;
-    margin: 8px 0;
-    overflow: hidden;
-}
-.progress-bar {
-    height: 100%;
-    background: linear-gradient(90deg, #e94560, #ff6b6b);
-    border-radius: 3px;
-    transition: width 0.3s;
-}
-.log-box {
-    max-height: 200px;
-    overflow-y: auto;
-    background: #1a1a2e;
-    color: #ccc;
-    border-radius: 6px;
-    padding: 10px 14px;
-    font-family: monospace;
-    font-size: 12px;
-    line-height: 1.6;
-}
-.log-box .log-ok { color: #4caf50; }
-.log-box .log-err { color: #f44336; }
-.log-box .log-info { color: #64b5f6; }
-.collapse-icon {
-    font-size: 12px;
-    transition: transform 0.2s;
-}
+.progress-step.active { background: var(--info-light); border-left: 3px solid var(--info); }
+.progress-step.done { background: var(--success-light); border-left: 3px solid var(--success); }
+.progress-step.error { background: var(--danger-light); border-left: 3px solid var(--danger); }
+.collapse-icon { font-size: 12px; transition: transform var(--transition); }
 .card-content {
     transition: max-height 0.3s ease-out, opacity 0.2s ease-out;
     max-height: 2000px;
     overflow: hidden;
 }
-.card-content.collapsed {
-    max-height: 0;
-    opacity: 0;
-}
+.card-content.collapsed { max-height: 0; opacity: 0; }
 .sync-stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; text-align: center; margin-top: 12px; }
-.sync-textarea { width: 100%; min-height: 120px; resize: vertical; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
-.sync-log-box { max-height: 200px; overflow-y: auto; background: #1a1a2e; color: #ccc; border-radius: 6px; padding: 10px 14px; font-family: monospace; font-size: 12px; line-height: 1.6; }
-.sync-log-box .log-ok { color: #4caf50; }
-.sync-log-box .log-err { color: #f44336; }
-.sync-log-box .log-info { color: #64b5f6; }
+.sync-textarea { width: 100%; min-height: 120px; resize: vertical; padding: 9px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font-mono); background: var(--bg-input); color: var(--text-primary); }
+.sync-textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.sync-log-box { max-height: 200px; overflow-y: auto; background: #0f172a; color: #cbd5e1; border-radius: var(--radius); padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; border: 1px solid #1e293b; }
+.sync-log-box .log-ok { color: #34d399; }
+.sync-log-box .log-err { color: #f87171; }
+.sync-log-box .log-info { color: #60a5fa; }
 @media (max-width: 768px) {
     .sync-stats-grid { grid-template-columns: repeat(2,1fr); }
-    .sync-textarea { font-size: 16px; }
+    .sync-textarea { font-size: 14px; }
 }
 </style>
 
@@ -81,38 +40,35 @@
     <h2>同步</h2>
 </div>
 
-<!-- 1. 数据导入 -->
 <div class="card">
     <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
-        📥 数据导入 <span style="font-size:13px;color:#888;font-weight:normal;">粘贴/预览</span>
-        <span class="collapse-icon">▼</span>
+        <span><i class="ph ph-download"></i> 数据导入 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;margin-left:8px;">粘贴/预览</span></span>
+        <span class="collapse-icon"><i class="ph ph-caret-down"></i></span>
     </h3>
     <div class="card-content">
     <div class="form-group">
         <label>粘贴数据或拖拽文件（支持多种格式）</label>
-        <textarea id="import-text" rows="8" placeholder="格式1: 个2@iMLuCKjq&#10;格式2: {&quot;地址&quot;:&quot;xxx&quot;,&quot;等级&quot;:&quot;个2，图&quot;,&quot;用户&quot;:&quot;xxx&quot;} | ..." style="font-family:monospace;font-size:13px;" ondrop="handleDrop(event)" ondragover="event.preventDefault()" ondragenter="this.style.borderColor='#e94560'" ondragleave="this.style.borderColor=''"></textarea>
+        <textarea id="import-text" rows="8" class="sync-textarea" placeholder="格式1: 个2@iMLuCKjq&#10;格式2: {&quot;地址&quot;:&quot;xxx&quot;,&quot;等级&quot;:&quot;个2，图&quot;,&quot;用户&quot;:&quot;xxx&quot;} | ..." ondrop="handleDrop(event)" ondragover="event.preventDefault()" ondragenter="this.style.borderColor='var(--accent)'" ondragleave="this.style.borderColor=''"></textarea>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
-        <button class="btn btn-secondary" onclick="parseImport()">🔍 解析预览</button>
-        <span id="import-status" style="font-size:13px;color:#888;"></span>
+        <button class="btn btn-secondary" onclick="parseImport()"><i class="ph ph-magnifying-glass"></i> 解析预览</button>
+        <span id="import-status" style="font-size:13px;color:var(--text-muted);"></span>
     </div>
-    <!-- 导入进度 -->
     <div id="import-progress" style="display:none;margin-top:12px;">
         <div class="progress-bar-container">
             <div class="progress-bar" id="import-progress-bar" style="width:0%"></div>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;color:#888;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);">
             <span id="import-progress-text">准备写入...</span>
             <span id="import-progress-count">0/0</span>
         </div>
         <div class="log-box" id="import-log" style="margin-top:8px;display:none;"></div>
     </div>
-    <!-- 解析预览 -->
     <div id="import-preview" style="display:none;margin-top:12px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <span style="font-size:13px;color:#888;">解析结果预览</span>
+            <span style="font-size:13px;color:var(--text-muted);">解析结果预览</span>
         </div>
-        <table>
+        <div class="table-scroll"><table>
             <thead>
                 <tr>
                     <th>原始内容</th>
@@ -125,123 +81,77 @@
                 </tr>
             </thead>
             <tbody id="preview-body"></tbody>
-        </table>
+        </table></div>
     </div>
     </div>
 </div>
 
-<!-- 3. 云端增量同步 -->
 <div class="card">
     <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
-        🔄 增量同步 <span style="font-size:13px;color:#888;font-weight:normal;">本地 ↔ 云端</span>
-        <span class="collapse-icon">▼</span>
+        <span><i class="ph ph-arrows-clockwise"></i> 三步同步 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;margin-left:8px;">导入, 解析, 同步</span></span>
+        <span class="collapse-icon"><i class="ph ph-caret-down"></i></span>
     </h3>
     <div class="card-content">
-        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
-            <button class="btn btn-primary" onclick="startIncrementalSync()" id="incr-sync-btn">▶ 开始同步</button>
-            <button class="btn btn-danger" onclick="stopIncrementalSync()" id="stop-incr-sync-btn" style="display:none;">⏹ 停止</button>
-            <span id="incr-sync-status" style="font-size:13px;color:#888;"></span>
-        </div>
-        <div style="font-size:12px;color:#888;margin-bottom:12px;">
-            双向同步采集表、账号表、Cookie表。<strong>方案 B（LWW 真双向同步）</strong>：
-            人工字段（等级/标签/备注/启用/采集类型/状态）两端都能改，谁后改谁赢；
-            API 字段（粉丝数/作品数等）以本地采集为准。
-        </div>
-        <details style="margin-bottom:12px;font-size:12px;color:#666;">
-            <summary style="cursor:pointer;color:#3498db;">📋 字段同步规则（点击展开）</summary>
-            <div style="margin-top:8px;padding:12px;background:#f8f9fa;border-radius:6px;font-size:11px;line-height:1.7;">
-                <div style="margin-bottom:8px;"><strong>🔄 双向 LWW 字段（两端都能改）：</strong></div>
-                <div style="margin-left:12px;margin-bottom:8px;">
-                    等级、标签、备注、启用、采集类型、状态<br>
-                    <span style="color:#888;">比较两端最后修改时间，谁新谁赢</span>
-                </div>
-                <div style="margin-bottom:8px;"><strong>💻 本地优先字段（DoukHub 采集为准）：</strong></div>
-                <div style="margin-left:12px;">
-                    sec_user_id、链接、昵称、粉丝数、作品数、签名、头像、已获取信息、验证时间<br>
-                    <span style="color:#888;">在云端改这些字段无效，会被本地覆盖</span>
-                </div>
-            </div>
-        </details>
-        
-        <!-- 进度区域 -->
-        <div id="incr-progress-area" style="display:none;margin-top:16px;padding:16px;background:#e3f2fd;border-left:4px solid #2196f3;border-radius:6px;">
-            <div style="font-weight:600;margin-bottom:10px;color:#1565c0;font-size:14px;">⏳ 同步进度</div>
-            <div class="progress-bar-container" style="margin-bottom:10px;">
-                <div class="progress-bar" id="incr-progress-bar" style="width:0%"></div>
-            </div>
-            <div id="incr-progress-steps"></div>
-        </div>
-        
-        <!-- 结果区域 -->
-        <div id="incr-result-area" style="display:none;margin-top:16px;padding:16px;background:#f5f5f5;border-left:4px solid #4caf50;border-radius:6px;">
-            <div style="font-weight:600;margin-bottom:12px;color:#2e7d32;font-size:14px;">📊 同步结果</div>
-            <div id="incr-result-content"></div>
-        </div>
+    <div class="btn-group" style="margin-bottom:12px;">
+        <button class="btn btn-primary" onclick="startSyncV2()" id="sync-btn"><i class="ph ph-number-circle-one"></i> 导入采集表</button>
+        <button class="btn btn-secondary" onclick="updateCollectionV2()" id="update-btn"><i class="ph ph-number-circle-two"></i> 解析账号标识</button>
+        <button class="btn btn-secondary" onclick="syncAccountV2()" id="sync-account-btn"><i class="ph ph-number-circle-three"></i> 同步账号表</button>
+        <button class="btn btn-success" onclick="syncAllV2()" id="sync-all-btn"><i class="ph ph-lightning"></i> 一键执行</button>
+        <button class="btn btn-warning" onclick="refreshAccountsV2()" id="refresh-accounts-btn"><i class="ph ph-arrow-clockwise"></i> 刷新账号资料</button>
+        <button class="btn btn-danger" onclick="stopSync()" id="stop-sync-btn" style="display:none;"><i class="ph ph-stop"></i> 停止</button>
     </div>
-</div>
-
-<!-- 4. 同步 -->
-<div class="card">
-    <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
-        🔄 三步同步 <span style="font-size:13px;color:#888;font-weight:normal;">导入 → 解析 → 同步</span>
-        <span class="collapse-icon">▼</span>
-    </h3>
-    <div class="card-content">
-    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-        <button class="btn btn-primary" onclick="startSyncV2()" id="sync-btn">① 导入采集表</button>
-        <button class="btn btn-secondary" onclick="updateCollectionV2()" id="update-btn">② 解析账号标识</button>
-        <button class="btn btn-secondary" onclick="syncAccountV2()" id="sync-account-btn">③ 同步账号表</button>
-        <button class="btn btn-success" onclick="syncAllV2()" id="sync-all-btn">⚡ 一键执行</button>
-        <button class="btn btn-danger" onclick="stopSync()" id="stop-sync-btn" style="display:none;">⏹ 停止</button>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.8;">
+        <div><strong>导入采集表</strong>: 解析粘贴的文本（分享码, 等级, 标签）写入本地数据库</div>
+        <div><strong>解析账号标识</strong>: 调用 TTD API 解析短链接, 获取 sec_user_id（账号唯一标识）</div>
+        <div><strong>同步账号表</strong>: 将采集表记录同步到账号表, 新账号调 API 获取资料</div>
+        <div><strong>一键执行</strong>: 依次执行三个步骤（全部在本地运行）</div>
+        <div><strong>刷新账号资料</strong>: 重新获取账号表中所有账号的最新资料（账号名称, 粉丝数, 作品数）</div>
     </div>
-    <div style="font-size:12px;color:#888;margin-bottom:12px;">
-        <div>① 导入采集表：解析粘贴的文本（分享码、等级、标签）写入本地，同时拉取云端采集表</div>
-        <div>② 解析账号标识：调用 TTD API 解析短链接，获取 sec_user_id（账号唯一标识）</div>
-        <div>③ 同步账号表：调用 TTD API 获取账号信息（昵称、粉丝数、作品数），回写云端账号表</div>
-        <div>⚡ 一键执行：依次执行三个步骤</div>
     </div>
-
-    
-    </div>
-    <!-- 同步进度 -->
     <div id="sync-progress" style="display:none;margin-top:16px;">
         <div class="progress-bar-container">
             <div class="progress-bar" id="sync-progress-bar" style="width:0%"></div>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;color:#888;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);">
             <span id="sync-progress-text">连接云端...</span>
             <span id="sync-progress-count"></span>
         </div>
         <div class="sync-stats-grid">
-            <div style="padding:8px;background:#f8f9fa;border-radius:6px;">
-                <div style="font-size:20px;font-weight:bold;color:#e94560;" id="stat-total">0</div>
-                <div style="font-size:11px;color:#888;">总记录</div>
+            <div style="padding:10px;background:var(--bg-muted);border-radius:var(--radius-sm);border:1px solid var(--border-default);">
+                <div style="font-size:20px;font-weight:700;color:var(--accent);" id="stat-total">0</div>
+                <div style="font-size:11px;color:var(--text-muted);">总记录</div>
             </div>
-            <div style="padding:8px;background:#f8f9fa;border-radius:6px;">
-                <div style="font-size:20px;font-weight:bold;color:#27ae60;" id="stat-success">0</div>
-                <div style="font-size:11px;color:#888;">成功</div>
+            <div style="padding:10px;background:var(--bg-muted);border-radius:var(--radius-sm);border:1px solid var(--border-default);">
+                <div style="font-size:20px;font-weight:700;color:var(--success);" id="stat-success">0</div>
+                <div style="font-size:11px;color:var(--text-muted);">成功</div>
             </div>
-            <div style="padding:8px;background:#f8f9fa;border-radius:6px;">
-                <div style="font-size:20px;font-weight:bold;color:#f39c12;" id="stat-api">0</div>
-                <div style="font-size:11px;color:#888;">跳过</div>
+            <div style="padding:10px;background:var(--bg-muted);border-radius:var(--radius-sm);border:1px solid var(--border-default);">
+                <div style="font-size:20px;font-weight:700;color:var(--warning);" id="stat-api">0</div>
+                <div style="font-size:11px;color:var(--text-muted);">跳过</div>
             </div>
-            <div style="padding:8px;background:#f8f9fa;border-radius:6px;">
-                <div style="font-size:20px;font-weight:bold;color:#e74c3c;" id="stat-failed">0</div>
-                <div style="font-size:11px;color:#888;">失败</div>
+            <div style="padding:10px;background:var(--bg-muted);border-radius:var(--radius-sm);border:1px solid var(--border-default);">
+                <div style="font-size:20px;font-weight:700;color:var(--danger);" id="stat-failed">0</div>
+                <div style="font-size:11px;color:var(--text-muted);">失败</div>
             </div>
         </div>
-        <div class="log-box" id="sync-log" style="margin-top:12px;display:none;"></div>
+        <div class="sync-log-box" id="sync-log" style="margin-top:12px;display:none;"></div>
     </div>
 </div>
 
-<!-- 4. 账号列表 -->
+<div class="card" style="background:var(--info-light);border-left:4px solid var(--info);">
+    <div style="display:flex;align-items:center;gap:8px;">
+        <i class="ph ph-info" style="font-size:18px;color:var(--info);"></i>
+        <span style="font-size:13px;color:var(--info-text);">本地操作完成后, 请到 <a href="/database" style="color:var(--info-text);font-weight:600;text-decoration:underline;">数据管理</a> 页面执行「云端同步」将数据备份到飞书。</span>
+    </div>
+</div>
+
 <div class="card">
     <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
-        👤 账号列表 <span style="font-size:13px;color:#888;font-weight:normal;">（{{ accounts|length }} 个）</span>
-        <span class="collapse-icon">▼</span>
+        <span><i class="ph ph-users"></i> 账号列表 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;margin-left:8px;">（{{ accounts|length }} 个）</span></span>
+        <span class="collapse-icon"><i class="ph ph-caret-down"></i></span>
     </h3>
     <div class="card-content">
-    <table>
+    <div class="table-scroll"><table>
         <thead>
             <tr>
                 <th>名称</th>
@@ -255,22 +165,22 @@
         <tbody>
             {% for acc in accounts %}
             <tr>
-                <td>{{ acc.name or acc.nickname or '-' }}</td>
-                <td><span class="platform-tag platform-{{ acc.platform }}">{{ acc.platform }}</span></td>
-                <td>{{ '⭐' * acc.rating if acc.rating else '-' }}</td>
-                <td>{{ acc.follower_count if acc.follower_count else '-' }}</td>
+                <td>{{ acc['账号名称'] or '-' }}</td>
+                <td><span class="platform-tag platform-{{ acc['平台'] }}">{{ acc['平台'] or '-' }}</span></td>
+                <td>{{ '⭐' * acc['等级'] if acc['等级'] else '-' }}</td>
+                <td>{{ acc['粉丝数'] if acc['粉丝数'] else '-' }}</td>
                 <td>
-                    {% for tag in acc.tags[:3] %}
+                    {% for tag in acc['tags_list'][:3] %}
                     <span class="tag">{{ tag }}</span>
                     {% endfor %}
                 </td>
-                <td style="font-size:12px;color:#888;">{{ acc.synced_at or '-' }}</td>
+                <td style="font-size:12px;color:var(--text-muted);">{{ acc['同步时间'] or '-' }}</td>
             </tr>
             {% endfor %}
         </tbody>
-    </table>
+    </table></div>
     {% if not accounts %}
-    <div class="empty-state">暂无账号，请先导入数据并同步</div>
+    <div class="empty-state"><i class="ph ph-users"></i>暂无账号, 请先导入数据并执行三步同步</div>
     {% endif %}
     </div>
 </div>
@@ -278,18 +188,17 @@
 
 {% block scripts %}
 <script>
-    // 折叠/展开卡片
     function toggleCard(header) {
         const content = header.nextElementSibling;
-        const icon = header.querySelector('.collapse-icon');
+        const icon = header.querySelector('.collapse-icon i');
         content.classList.toggle('collapsed');
-        icon.textContent = content.classList.contains('collapsed') ? '▶' : '▼';
+        if (icon) {
+            icon.className = content.classList.contains('collapsed') ? 'ph ph-caret-right' : 'ph ph-caret-down';
+        }
     }
 
-    // 标签映射（从配置加载）
     let TAG_MAP = {};
 
-    // 加载标签映射
     async function loadTags() {
         try {
             const data = await apiCall('/api/tags', 'GET');
@@ -300,36 +209,26 @@
         }
     }
 
-    // 页面加载时初始化
     loadTags();
 
     function mapTag(tag) {
-        // 先精确匹配
-        if (TAG_MAP[tag]) {
-            return TAG_MAP[tag];
-        }
-        // 未匹配则作为新标签保留
+        if (TAG_MAP[tag]) return TAG_MAP[tag];
         return tag;
     }
 
-    // 添加日志（只保留最近 10 条）
     function addLog(logBox, html) {
         const lines = logBox.querySelectorAll('div');
-        if (lines.length >= 10) {
-            lines[0].remove();
-        }
+        if (lines.length >= 10) lines[0].remove();
         logBox.innerHTML += html;
         logBox.scrollTop = logBox.scrollHeight;
     }
 
-    // ========== 服务控制 ==========
     async function controlService(name, action) {
         const data = await apiCall(`/api/services/${name}/${action}`, 'POST');
         showToast(data.message, data.success ? 'success' : 'error');
         if (data.success) setTimeout(() => location.reload(), 1000);
     }
 
-    // ========== 数据导入 ==========
     let parsedData = [];
 
     function handleDrop(event) {
@@ -350,19 +249,15 @@
         const text = document.getElementById('import-text').value.trim();
         if (!text) { showToast('请输入数据', 'error'); return; }
 
-        if (text.includes('{')) {
-            parseJsonFormat(text);
-        } else {
-            parseSimpleFormat(text);
-        }
+        if (text.includes('{')) parseJsonFormat(text);
+        else parseSimpleFormat(text);
 
         if (parsedData.length === 0) { showToast('未解析到有效数据', 'error'); return; }
 
-        // 显示预览（标签已映射为完整名称）
         const previewBody = document.getElementById('preview-body');
         previewBody.innerHTML = parsedData.map(item => `
             <tr>
-                <td style="font-size:12px;color:#666;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${item.raw}">${item.raw || '-'}</td>
+                <td style="font-size:12px;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${item.raw}">${item.raw || '-'}</td>
                 <td><code style="font-size:12px;">${item.link}</code></td>
                 <td>${'⭐'.repeat(item.rating)}</td>
                 <td>${item.tags.map(t => `<span class="tag">${t}</span>`).join('')}</td>
@@ -377,16 +272,13 @@
         const totalLines = text.split('\n').filter(l => l.trim()).length;
         const parsed = parsedData.length;
         const skipped = totalLines - parsed;
-        document.getElementById('import-status').innerHTML = 
+        document.getElementById('import-status').innerHTML =
             `解析完成: <b>${parsed}</b> 条` +
-            (skipped > 0 ? ` <span style="color:#e74c3c;">（跳过 ${skipped} 行无效）</span>` : '') +
-            (parsed > 0 ? ` <span style="color:#27ae60;">→ 点击「① 导入采集表」写入数据库</span>` : '');
+            (skipped > 0 ? ` <span style="color:var(--danger);">（跳过 ${skipped} 行无效）</span>` : '') +
+            (parsed > 0 ? ` <span style="color:var(--success);">, 点击「导入采集表」写入数据库</span>` : '');
 
-        // 显示预览统计
         const previewHeader = document.querySelector('#import-preview > div:first-child');
-        if (previewHeader) {
-            previewHeader.innerHTML = `解析结果预览（共 ${parsed} 条）`;
-        }
+        if (previewHeader) previewHeader.innerHTML = `解析结果预览（共 ${parsed} 条）`;
     }
 
     function parseSimpleFormat(text) {
@@ -397,30 +289,21 @@
             if (match) {
                 const prefix = match[1].trim();
                 const link = match[2].trim();
-
-                // 按逗号分割（支持中文逗号和英文逗号）
                 const parts = prefix.split(/[,，]/).map(s => s.trim()).filter(s => s);
                 let rating = 3;
                 const tags = [];
-
                 for (const part of parts) {
-                    // 提取末尾数字作为等级
                     const numMatch = part.match(/(\d+)$/);
                     if (numMatch) {
                         rating = Math.max(1, Math.min(4, parseInt(numMatch[1])));
                         const tagPart = part.slice(0, -numMatch[1].length).trim();
-                        if (tagPart) {
-                            tags.push(mapTag(tagPart));
-                        }
+                        if (tagPart) tags.push(mapTag(tagPart));
                     } else if (/^\d+$/.test(part)) {
-                        // 纯数字
                         rating = Math.max(1, Math.min(4, parseInt(part)));
                     } else {
-                        // 纯标签
                         tags.push(mapTag(part));
                     }
                 }
-
                 parsedData.push({ link, rating, tags, name: '', raw: line.trim() });
             }
         }
@@ -435,7 +318,6 @@
                 const link = data['地址'] || '';
                 const grade = data['等级'] || '';
                 const name = data['用户'] || '';
-                // 解析粉丝数（去掉"万"等后缀）
                 let follower_count = 0;
                 const fansStr = data['粉丝'] || '';
                 const fansMatch = fansStr.match(/([\d.]+)/);
@@ -444,319 +326,39 @@
                     if (fansStr.includes('万')) fansNum *= 10000;
                     follower_count = Math.round(fansNum);
                 }
-                // 解析作品数
                 let aweme_count = 0;
                 const worksStr = data['作品'] || '';
                 const worksMatch = worksStr.match(/(\d+)/);
-                if (worksMatch) {
-                    aweme_count = parseInt(worksMatch[1]);
-                }
-
+                if (worksMatch) aweme_count = parseInt(worksMatch[1]);
                 if (!link) continue;
-
-                // 解析等级字段：先按逗号分割，每部分提取数字和标签
                 const parts = grade.split(/[,，]/).map(s => s.trim()).filter(s => s);
                 let rating = 3;
                 const tags = [];
-
                 for (const part of parts) {
-                    // 提取末尾数字作为等级
                     const numMatch = part.match(/(\d+)$/);
                     if (numMatch) {
                         rating = Math.max(1, Math.min(4, parseInt(numMatch[1])));
                         const tagPart = part.slice(0, -numMatch[1].length).trim();
-                        if (tagPart) {
-                            tags.push(mapTag(tagPart));
-                        }
+                        if (tagPart) tags.push(mapTag(tagPart));
                     } else if (/^\d+$/.test(part)) {
-                        // 纯数字
                         rating = Math.max(1, Math.min(4, parseInt(part)));
                     } else {
-                        // 纯标签
                         tags.push(mapTag(part));
                     }
                 }
-
                 parsedData.push({ link, rating, tags, name, follower_count, aweme_count, raw: item.trim() });
             } catch (e) { /* skip */ }
         }
     }
 
-
-    // ========== 同步 ==========
-    let currentEventSource = null;
-    let syncAbortController = null;
-    
-    async function startSync() {
-        const btn = document.getElementById('sync-btn');
-        const stopBtn = document.getElementById('stop-sync-btn');
-        btn.disabled = true;
-        btn.textContent = '同步中...';
-        stopBtn.style.display = 'inline-block';
-
-        const progressDiv = document.getElementById('sync-progress');
-        const progressBar = document.getElementById('sync-progress-bar');
-        const progressText = document.getElementById('sync-progress-text');
-        const logBox = document.getElementById('sync-log');
-
-        progressDiv.style.display = 'block';
-        logBox.style.display = 'block';
-        logBox.innerHTML = '';
-        progressBar.style.width = '0%';
-        document.getElementById('stat-total').textContent = '...';
-        document.getElementById('stat-success').textContent = '0';
-        document.getElementById('stat-api').textContent = '0';
-        document.getElementById('stat-failed').textContent = '0';
-
-        progressText.textContent = '连接云端...';
-        addLog(logBox, '<div class="log-info">→ 正在连接云端...</div>');
-
-        // 创建 AbortController 用于取消请求
-        syncAbortController = new AbortController();
-
-        // 使用 fetch + POST 启动 SSE
-        try {
-            const response = await fetch('/api/sync', { 
-                method: 'POST',
-                signal: syncAbortController.signal
-            });
-            
-            if (!response.ok) {
-                const error = await response.json();
-                addLog(logBox, `<div class="log-err">❌ ${error.message}</div>`);
-                progressText.textContent = `失败: ${error.message}`;
-                progressBar.style.background = '#f44336';
-                showToast(error.message, 'error');
-                btn.disabled = false;
-                btn.textContent = '① 导入采集表';
-                stopBtn.style.display = 'none';
-                return;
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.slice(6));
-                            handleSyncEvent(data);
-                        } catch (e) {
-                            // 忽略解析错误
-                        }
-                    }
-                }
-            }
-
-            // 处理剩余的 buffer
-            if (buffer.startsWith('data: ')) {
-                try {
-                    const data = JSON.parse(buffer.slice(6));
-                    handleSyncEvent(data);
-                } catch (e) {
-                    // 忽略解析错误
-                }
-            }
-
-        } catch (e) {
-            if (e.name === 'AbortError') {
-                addLog(logBox, `<div class="log-info">→ 同步已停止</div>`);
-                progressText.textContent = `同步已停止`;
-                showToast('同步已停止', 'error');
-            } else {
-                addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
-                progressText.textContent = `请求失败`;
-                showToast('同步请求失败', 'error');
-            }
-        } finally {
-            btn.disabled = false;
-            btn.textContent = '① 导入采集表';
-            stopBtn.style.display = 'none';
-            syncAbortController = null;
-        }
-    }
-
-    function stopSync() {
-        if (syncAbortController) {
-            syncAbortController.abort();
-        }
-    }
-
-    function handleSyncEvent(data) {
-        const progressBar = document.getElementById('sync-progress-bar');
-        const progressText = document.getElementById('sync-progress-text');
-        const logBox = document.getElementById('sync-log');
-
-        switch (data.type) {
-            case 'start':
-                addLog(logBox, `<div class="log-info">→ ${data.message}</div>`);
-                break;
-            
-            case 'progress':
-                progressText.textContent = data.message;
-                addLog(logBox, `<div class="log-info">→ ${data.message}</div>`);
-                break;
-            
-            case 'stats':
-                document.getElementById('stat-total').textContent = data.total || 0;
-                document.getElementById('stat-success').textContent = data.success || 0;
-                document.getElementById('stat-api').textContent = data.api_calls || 0;
-                document.getElementById('stat-failed').textContent = data.failed || 0;
-                // 更新进度条
-                if (data.total > 0) {
-                    const progress = ((data.success + data.failed) / data.total) * 100;
-                    progressBar.style.width = progress + '%';
-                }
-                break;
-            
-            case 'log':
-                const logClass = data.level === 'error' ? 'log-err' : data.level === 'ok' ? 'log-ok' : 'log-info';
-                const icon = data.level === 'error' ? '❌' : data.level === 'ok' ? '✅' : '→';
-                addLog(logBox, `<div class="${logClass}">${icon} ${data.message}</div>`);
-                break;
-            
-            case 'complete':
-                progressBar.style.width = '100%';
-                if (data.success) {
-                    addLog(logBox, `<div class="log-ok">✅ ${data.message}</div>`);
-                    progressText.textContent = `同步完成: ${data.message}`;
-                    if (!window._syncAllMode) {
-                        showToast('同步完成', 'success');
-                        setTimeout(() => location.reload(), 2000);
-                    }
-                } else {
-                    addLog(logBox, `<div class="log-err">❌ ${data.message}</div>`);
-                    progressText.textContent = `失败: ${data.message}`;
-                    progressBar.style.background = '#f44336';
-                    showToast(data.message, 'error');
-                }
-                break;
-        }
-    }
-
-    // ========== 步骤2：解析账号标识 ==========
-    let fetchInfoAbortController = null;
-
-    async function fetchAccountInfo() {
-        const btn = document.getElementById('fetch-info-btn');
-        const stopBtn = document.getElementById('stop-fetch-btn');
-        btn.disabled = true;
-        btn.textContent = '获取中...';
-        stopBtn.style.display = 'inline-block';
-
-        const progressDiv = document.getElementById('sync-progress');
-        const progressBar = document.getElementById('sync-progress-bar');
-        const progressText = document.getElementById('sync-progress-text');
-        const logBox = document.getElementById('sync-log');
-
-        progressDiv.style.display = 'block';
-        logBox.style.display = 'block';
-        logBox.innerHTML = '';
-        progressBar.style.width = '0%';
-        progressBar.style.background = 'linear-gradient(90deg, #e94560, #ff6b6b)';
-        document.getElementById('stat-total').textContent = '...';
-        document.getElementById('stat-success').textContent = '0';
-        document.getElementById('stat-api').textContent = '0';
-        document.getElementById('stat-failed').textContent = '0';
-
-        progressText.textContent = '步骤2：解析账号标识';
-        addLog(logBox, '<div class="log-info">→ 开始获取账号详细信息...</div>');
-
-        // 创建 AbortController
-        fetchInfoAbortController = new AbortController();
-
-        try {
-            // 使用 fetch 替代 apiCall，支持取消
-            const response = await fetch('/api/sync/fetch-info', {
-                method: 'POST',
-                signal: fetchInfoAbortController.signal
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                addLog(logBox, `<div class="log-err">❌ ${error.message}</div>`);
-                progressText.textContent = `失败: ${error.message}`;
-                progressBar.style.background = '#f44336';
-                showToast(error.message, 'error');
-                btn.disabled = false;
-                btn.textContent = '② 解析账号标识';
-                stopBtn.style.display = 'none';
-                return;
-            }
-
-            const data = await response.json();
-
-            progressBar.style.width = '100%';
-
-            if (data.success) {
-                document.getElementById('stat-total').textContent = data.total || 0;
-                document.getElementById('stat-success').textContent = data.updated_count || 0;
-                document.getElementById('stat-api').textContent = data.api_calls || 0;
-                document.getElementById('stat-failed').textContent = data.error_count || 0;
-
-                addLog(logBox, `<div class="log-ok">✅ 获取完成: ${data.updated_count} 个账号</div>`);
-                addLog(logBox, `<div class="log-info">→ API 调用: ${data.api_calls} 次</div>`);
-
-                if (data.errors && data.errors.length > 0) {
-                    data.errors.slice(0, 5).forEach(e => {
-                        addLog(logBox, `<div class="log-err">❌ ${e}</div>`);
-                    });
-                    if (data.errors.length > 5) {
-                        addLog(logBox, `<div class="log-err">... 还有 ${data.errors.length - 5} 个错误</div>`);
-                    }
-                }
-
-                progressText.textContent = `获取完成: ${data.message}`;
-                showToast('获取完成', 'success');
-                setTimeout(() => location.reload(), 2000);
-            } else {
-                addLog(logBox, `<div class="log-err">❌ 获取失败: ${data.message}</div>`);
-                progressText.textContent = `失败: ${data.message}`;
-                progressBar.style.background = '#f44336';
-                showToast(data.message, 'error');
-            }
-        } catch (e) {
-            if (e.name === 'AbortError') {
-                addLog(logBox, `<div class="log-info">→ 获取已停止</div>`);
-                progressText.textContent = `获取已停止`;
-                showToast('获取已停止', 'error');
-            } else {
-                addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
-                progressText.textContent = `请求失败`;
-                showToast('获取请求失败', 'error');
-            }
-        } finally {
-            btn.disabled = false;
-            btn.textContent = '② 解析账号标识';
-            stopBtn.style.display = 'none';
-            fetchInfoAbortController = null;
-        }
-    }
-
-    function stopFetchInfo() {
-        if (fetchInfoAbortController) {
-            fetchInfoAbortController.abort();
-        }
-    }
-
-    // ========== 新同步器 v2（三步同步）==========
     let syncV2AbortController = null;
 
     async function startSyncV2() {
         const btn = document.getElementById('sync-btn');
         const stopBtn = document.getElementById('stop-sync-btn');
         btn.disabled = true;
-        btn.textContent = '导入中...';
-        stopBtn.style.display = 'inline-block';
+        btn.innerHTML = '<i class="ph ph-spinner"></i> 导入中...';
+        stopBtn.style.display = 'inline-flex';
 
         const progressDiv = document.getElementById('sync-progress');
         const progressBar = document.getElementById('sync-progress-bar');
@@ -772,14 +374,14 @@
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
 
-        progressText.textContent = '步骤1：导入采集表';
-        addLog(logBox, '<div class="log-info">→ 开始导入文本到采集表...</div>');
+        progressText.textContent = '步骤1: 导入采集表';
+        addLog(logBox, '<div class="log-info">, 开始导入文本到采集表...</div>');
 
         const text = document.getElementById('import-text').value;
         if (!text.trim()) {
-            addLog(logBox, '<div class="log-err">❌ 请先输入要导入的文本</div>');
+            addLog(logBox, '<div class="log-err">请先输入要导入的文本</div>');
             btn.disabled = false;
-            btn.textContent = '① 导入采集表';
+            btn.innerHTML = '<i class="ph ph-number-circle-one"></i> 导入采集表';
             stopBtn.style.display = 'none';
             return;
         }
@@ -803,31 +405,29 @@
                 document.getElementById('stat-total').textContent = data.total || 0;
                 if (data.skipped) document.getElementById('stat-api').textContent = data.skipped;
 
-                addLog(logBox, `<div class="log-ok">✅ ${data.message}</div>`);
-                if (data.skipped > 0) {
-                    addLog(logBox, `<div class="log-info">→ 跳过 ${data.skipped} 条无效记录</div>`);
-                }
+                addLog(logBox, `<div class="log-ok">${data.message}</div>`);
+                if (data.skipped > 0) addLog(logBox, `<div class="log-info">跳过 ${data.skipped} 条无效记录</div>`);
                 progressText.textContent = data.message;
                 showToast('导入完成', 'success');
             } else {
-                addLog(logBox, `<div class="log-err">❌ ${data.message}</div>`);
+                addLog(logBox, `<div class="log-err">${data.message}</div>`);
                 progressText.textContent = `失败: ${data.message}`;
-                progressBar.style.background = '#f44336';
+                progressBar.style.background = 'var(--danger)';
                 showToast(data.message, 'error');
             }
         } catch (e) {
             if (e.name === 'AbortError') {
-                addLog(logBox, `<div class="log-info">→ 导入已停止</div>`);
-                progressText.textContent = `导入已停止`;
+                addLog(logBox, '<div class="log-info">导入已停止</div>');
+                progressText.textContent = '导入已停止';
                 showToast('导入已停止', 'error');
             } else {
-                addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
-                progressText.textContent = `请求失败`;
+                addLog(logBox, `<div class="log-err">请求失败: ${e.message}</div>`);
+                progressText.textContent = '请求失败';
                 showToast('导入请求失败', 'error');
             }
         } finally {
             btn.disabled = false;
-            btn.textContent = '① 导入采集表';
+            btn.innerHTML = '<i class="ph ph-number-circle-one"></i> 导入采集表';
             stopBtn.style.display = 'none';
             syncV2AbortController = null;
         }
@@ -837,8 +437,8 @@
         const btn = document.getElementById('update-btn');
         const stopBtn = document.getElementById('stop-sync-btn');
         btn.disabled = true;
-        btn.textContent = '更新中...';
-        stopBtn.style.display = 'inline-block';
+        btn.innerHTML = '<i class="ph ph-spinner"></i> 更新中...';
+        stopBtn.style.display = 'inline-flex';
 
         const progressDiv = document.getElementById('sync-progress');
         const progressBar = document.getElementById('sync-progress-bar');
@@ -849,13 +449,14 @@
         logBox.style.display = 'block';
         logBox.innerHTML = '';
         progressBar.style.width = '0%';
+        progressBar.style.background = 'var(--accent)';
         document.getElementById('stat-total').textContent = '...';
         document.getElementById('stat-success').textContent = '0';
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
 
-        progressText.textContent = '步骤2：解析账号标识';
-        addLog(logBox, '<div class="log-info">→ 开始获取 sec_user_id...</div>');
+        progressText.textContent = '步骤2: 解析账号标识';
+        addLog(logBox, '<div class="log-info">开始获取 sec_user_id...</div>');
 
         syncV2AbortController = new AbortController();
 
@@ -867,12 +468,12 @@
 
             if (!response.ok) {
                 const error = await response.json();
-                addLog(logBox, `<div class="log-err">❌ ${error.message}</div>`);
+                addLog(logBox, `<div class="log-err">${error.message}</div>`);
                 progressText.textContent = `失败: ${error.message}`;
-                progressBar.style.background = '#f44336';
+                progressBar.style.background = 'var(--danger)';
                 showToast(error.message, 'error');
                 btn.disabled = false;
-                btn.textContent = '② 解析账号标识';
+                btn.innerHTML = '<i class="ph ph-number-circle-two"></i> 解析账号标识';
                 stopBtn.style.display = 'none';
                 return;
             }
@@ -884,36 +485,28 @@
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
-
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.slice(6));
-                            handleSyncEvent(data);
-                        } catch (e) {
-                            // 忽略解析错误
-                        }
+                        try { handleSyncEvent(JSON.parse(line.slice(6))); } catch (e) {}
                     }
                 }
             }
-
         } catch (e) {
             if (e.name === 'AbortError') {
-                addLog(logBox, `<div class="log-info">→ 更新已停止</div>`);
-                progressText.textContent = `更新已停止`;
+                addLog(logBox, '<div class="log-info">更新已停止</div>');
+                progressText.textContent = '更新已停止';
                 showToast('更新已停止', 'error');
             } else {
-                addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
-                progressText.textContent = `请求失败`;
+                addLog(logBox, `<div class="log-err">请求失败: ${e.message}</div>`);
+                progressText.textContent = '请求失败';
                 showToast('更新请求失败', 'error');
             }
         } finally {
             btn.disabled = false;
-            btn.textContent = '② 解析账号标识';
+            btn.innerHTML = '<i class="ph ph-number-circle-two"></i> 解析账号标识';
             stopBtn.style.display = 'none';
             syncV2AbortController = null;
         }
@@ -923,8 +516,8 @@
         const btn = document.getElementById('sync-account-btn');
         const stopBtn = document.getElementById('stop-sync-btn');
         btn.disabled = true;
-        btn.textContent = '同步中...';
-        stopBtn.style.display = 'inline-block';
+        btn.innerHTML = '<i class="ph ph-spinner"></i> 同步中...';
+        stopBtn.style.display = 'inline-flex';
 
         const progressDiv = document.getElementById('sync-progress');
         const progressBar = document.getElementById('sync-progress-bar');
@@ -935,13 +528,14 @@
         logBox.style.display = 'block';
         logBox.innerHTML = '';
         progressBar.style.width = '0%';
+        progressBar.style.background = 'var(--accent)';
         document.getElementById('stat-total').textContent = '...';
         document.getElementById('stat-success').textContent = '0';
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
 
-        progressText.textContent = '步骤3：同步账号表';
-        addLog(logBox, '<div class="log-info">→ 开始获取账号详细信息...</div>');
+        progressText.textContent = '步骤3: 同步账号表';
+        addLog(logBox, '<div class="log-info">开始获取账号详细信息...</div>');
 
         syncV2AbortController = new AbortController();
 
@@ -953,12 +547,12 @@
 
             if (!response.ok) {
                 const error = await response.json();
-                addLog(logBox, `<div class="log-err">❌ ${error.message}</div>`);
+                addLog(logBox, `<div class="log-err">${error.message}</div>`);
                 progressText.textContent = `失败: ${error.message}`;
-                progressBar.style.background = '#f44336';
+                progressBar.style.background = 'var(--danger)';
                 showToast(error.message, 'error');
                 btn.disabled = false;
-                btn.textContent = '③ 同步账号表';
+                btn.innerHTML = '<i class="ph ph-number-circle-three"></i> 同步账号表';
                 stopBtn.style.display = 'none';
                 return;
             }
@@ -970,47 +564,39 @@
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
-
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.slice(6));
-                            handleSyncEvent(data);
-                        } catch (e) {
-                            // 忽略解析错误
-                        }
+                        try { handleSyncEvent(JSON.parse(line.slice(6))); } catch (e) {}
                     }
                 }
             }
-
         } catch (e) {
             if (e.name === 'AbortError') {
-                addLog(logBox, `<div class="log-info">→ 同步已停止</div>`);
-                progressText.textContent = `同步已停止`;
+                addLog(logBox, '<div class="log-info">同步已停止</div>');
+                progressText.textContent = '同步已停止';
                 showToast('同步已停止', 'error');
             } else {
-                addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
-                progressText.textContent = `请求失败`;
+                addLog(logBox, `<div class="log-err">请求失败: ${e.message}</div>`);
+                progressText.textContent = '请求失败';
                 showToast('同步请求失败', 'error');
             }
         } finally {
             btn.disabled = false;
-            btn.textContent = '③ 同步账号表';
+            btn.innerHTML = '<i class="ph ph-number-circle-three"></i> 同步账号表';
             stopBtn.style.display = 'none';
             syncV2AbortController = null;
         }
     }
 
-    async function syncAllV2() {
-        const btn = document.getElementById('sync-all-btn');
+    async function refreshAccountsV2() {
+        const btn = document.getElementById('refresh-accounts-btn');
         const stopBtn = document.getElementById('stop-sync-btn');
         btn.disabled = true;
-        btn.textContent = '同步中...';
-        stopBtn.style.display = 'inline-block';
+        btn.innerHTML = '<i class="ph ph-spinner"></i> 刷新中...';
+        stopBtn.style.display = 'inline-flex';
 
         const progressDiv = document.getElementById('sync-progress');
         const progressBar = document.getElementById('sync-progress-bar');
@@ -1021,20 +607,99 @@
         logBox.style.display = 'block';
         logBox.innerHTML = '';
         progressBar.style.width = '0%';
-        progressBar.style.background = '#3498db';
+        progressBar.style.background = 'var(--warning)';
         document.getElementById('stat-total').textContent = '...';
         document.getElementById('stat-success').textContent = '0';
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
 
-        progressText.textContent = '⚡ 一键同步';
-        addLog(logBox, '<div class="log-info">→ 开始一键同步（分步执行）...</div>');
+        progressText.textContent = '刷新账号资料';
+        addLog(logBox, '<div class="log-info">开始批量获取账号资料...</div>');
+
+        syncV2AbortController = new AbortController();
+
+        try {
+            const response = await fetch('/api/sync/v2/refresh-accounts', {
+                method: 'POST',
+                signal: syncV2AbortController.signal
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                addLog(logBox, `<div class="log-err">${error.message}</div>`);
+                progressText.textContent = `失败: ${error.message}`;
+                progressBar.style.background = 'var(--danger)';
+                showToast(error.message, 'error');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="ph ph-arrow-clockwise"></i> 刷新账号资料';
+                stopBtn.style.display = 'none';
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try { handleSyncEvent(JSON.parse(line.slice(6))); } catch (e) {}
+                    }
+                }
+            }
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                addLog(logBox, '<div class="log-info">刷新已停止</div>');
+                progressText.textContent = '刷新已停止';
+                showToast('刷新已停止', 'error');
+            } else {
+                addLog(logBox, `<div class="log-err">请求失败: ${e.message}</div>`);
+                progressText.textContent = '请求失败';
+                showToast('刷新请求失败', 'error');
+            }
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="ph ph-arrow-clockwise"></i> 刷新账号资料';
+            stopBtn.style.display = 'none';
+            syncV2AbortController = null;
+        }
+    }
+
+    async function syncAllV2() {
+        const btn = document.getElementById('sync-all-btn');
+        const stopBtn = document.getElementById('stop-sync-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="ph ph-spinner"></i> 同步中...';
+        stopBtn.style.display = 'inline-flex';
+
+        const progressDiv = document.getElementById('sync-progress');
+        const progressBar = document.getElementById('sync-progress-bar');
+        const progressText = document.getElementById('sync-progress-text');
+        const logBox = document.getElementById('sync-log');
+
+        progressDiv.style.display = 'block';
+        logBox.style.display = 'block';
+        logBox.innerHTML = '';
+        progressBar.style.width = '0%';
+        progressBar.style.background = 'var(--info)';
+        document.getElementById('stat-total').textContent = '...';
+        document.getElementById('stat-success').textContent = '0';
+        document.getElementById('stat-api').textContent = '0';
+        document.getElementById('stat-failed').textContent = '0';
+
+        progressText.textContent = '一键同步';
+        addLog(logBox, '<div class="log-info">开始一键同步（分步执行）...</div>');
 
         const text = document.getElementById('import-text').value;
         syncV2AbortController = new AbortController();
 
         async function runStep(url, body, label) {
-            addLog(logBox, `<div class="log-info">━━━ ${label} ━━━</div>`);
+            addLog(logBox, `<div class="log-info">--- ${label} ---</div>`);
             const opts = { method: 'POST', signal: syncV2AbortController.signal };
             if (body !== null) {
                 opts.headers = { 'Content-Type': 'application/json' };
@@ -1065,29 +730,29 @@
 
         window._syncAllMode = true;
         try {
-            await runStep('/api/sync/v2/import', { text }, '步骤1：导入采集表');
-            await runStep('/api/sync/v2/update-collection', null, '步骤2：解析短链接');
-            await runStep('/api/sync/v2/sync-account', null, '步骤3：获取详情 + 回写云端');
+            await runStep('/api/sync/v2/import', { text }, '步骤1: 导入采集表');
+            await runStep('/api/sync/v2/update-collection', null, '步骤2: 解析短链接');
+            await runStep('/api/sync/v2/sync-account', null, '步骤3: 获取详情 + 回写云端');
 
             progressBar.style.width = '100%';
-            progressBar.style.background = '#27ae60';
-            progressText.textContent = '✅ 一键同步完成 <button onclick="location.reload()" style="margin-left:12px;padding:4px 12px;font-size:12px;background:#3498db;color:white;border:none;border-radius:4px;cursor:pointer;">刷新页面</button>';
-            addLog(logBox, '<div class="log-ok">✅ 全部步骤执行完成</div>');
+            progressBar.style.background = 'var(--success)';
+            progressText.innerHTML = '一键同步完成 <button onclick="location.reload()" style="margin-left:8px;padding:4px 12px;font-size:12px;background:var(--info);color:#fff;border:none;border-radius:4px;cursor:pointer;">刷新页面</button>';
+            addLog(logBox, '<div class="log-ok">全部步骤执行完成</div>');
             showToast('一键同步完成', 'success');
         } catch (e) {
             if (e.name === 'AbortError') {
-                addLog(logBox, '<div class="log-info">→ 同步已停止</div>');
+                addLog(logBox, '<div class="log-info">同步已停止</div>');
                 progressText.textContent = '同步已停止';
                 showToast('同步已停止', 'error');
             } else {
-                addLog(logBox, `<div class="log-err">❌ 请求失败: ${e.message}</div>`);
+                addLog(logBox, `<div class="log-err">请求失败: ${e.message}</div>`);
                 progressText.textContent = `失败: ${e.message}`;
-                progressBar.style.background = '#f44336';
+                progressBar.style.background = 'var(--danger)';
                 showToast('同步请求失败: ' + e.message, 'error');
             }
         } finally {
             btn.disabled = false;
-            btn.textContent = '⚡ 一键执行';
+            btn.innerHTML = '<i class="ph ph-lightning"></i> 一键执行';
             stopBtn.style.display = 'none';
             syncV2AbortController = null;
             window._syncAllMode = false;
@@ -1095,220 +760,52 @@
     }
 
     function stopSync() {
-        if (syncV2AbortController) {
-            syncV2AbortController.abort();
-        }
-        if (syncAbortController) {
-            syncAbortController.abort();
-        }
-        if (fetchInfoAbortController) {
-            fetchInfoAbortController.abort();
-        }
+        if (syncV2AbortController) syncV2AbortController.abort();
     }
 
-    // ========== 云端同步（已迁移到 /api/feishu/sync） ==========
+    function handleSyncEvent(data) {
+        const progressBar = document.getElementById('sync-progress-bar');
+        const progressText = document.getElementById('sync-progress-text');
+        const logBox = document.getElementById('sync-log');
 
-    // ========== 云端双向增量同步 ==========
-    let incrSyncAbortController = null;
-
-    async function startIncrementalSync() {
-        const btn = document.getElementById('incr-sync-btn');
-        const stopBtn = document.getElementById('stop-incr-sync-btn');
-        const status = document.getElementById('incr-sync-status');
-        const progressArea = document.getElementById('incr-progress-area');
-        const resultArea = document.getElementById('incr-result-area');
-
-        btn.disabled = true;
-        btn.textContent = '同步中...';
-        stopBtn.style.display = 'inline-block';
-        status.textContent = '正在连接...';
-        status.style.color = '#888';
-        progressArea.style.display = 'block';
-        resultArea.style.display = 'none';
-
-        incrSyncAbortController = new AbortController();
-
-        try {
-            const response = await fetch('/api/feishu/sync', {
-                method: 'POST',
-                signal: incrSyncAbortController.signal
-            });
-            
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            
-            const progressBar = document.getElementById('incr-progress-bar');
-            const progressSteps = document.getElementById('incr-progress-steps');
-            progressSteps.innerHTML = '';
-            
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-                
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.substring(6));
-                            handleIncrSyncEvent(data, progressBar, progressSteps, status);
-                        } catch (e) {
-                            console.error('Parse error:', e, line);
-                        }
+        switch (data.type) {
+            case 'start':
+                addLog(logBox, `<div class="log-info">${data.message}</div>`);
+                break;
+            case 'progress':
+                progressText.textContent = data.message;
+                addLog(logBox, `<div class="log-info">${data.message}</div>`);
+                break;
+            case 'stats':
+                document.getElementById('stat-total').textContent = data.total || 0;
+                document.getElementById('stat-success').textContent = data.success || 0;
+                document.getElementById('stat-api').textContent = data.api_calls || 0;
+                document.getElementById('stat-failed').textContent = data.failed || 0;
+                if (data.total > 0) {
+                    const progress = ((data.success + data.failed) / data.total) * 100;
+                    progressBar.style.width = progress + '%';
+                }
+                break;
+            case 'log':
+                const logClass = data.level === 'error' ? 'log-err' : data.level === 'ok' ? 'log-ok' : 'log-info';
+                addLog(logBox, `<div class="${logClass}">${data.message}</div>`);
+                break;
+            case 'complete':
+                progressBar.style.width = '100%';
+                if (data.success) {
+                    addLog(logBox, `<div class="log-ok">${data.message}</div>`);
+                    progressText.textContent = `同步完成: ${data.message}`;
+                    if (!window._syncAllMode) {
+                        showToast('同步完成', 'success');
+                        setTimeout(() => location.reload(), 2000);
                     }
+                } else {
+                    addLog(logBox, `<div class="log-err">${data.message}</div>`);
+                    progressText.textContent = `失败: ${data.message}`;
+                    progressBar.style.background = 'var(--danger)';
+                    showToast(data.message, 'error');
                 }
-            }
-        } catch (e) {
-            if (e.name === 'AbortError') {
-                status.textContent = '已停止';
-                status.style.color = '#f39c12';
-                showToast('同步已停止', 'error');
-            } else {
-                status.textContent = '失败: ' + e.message;
-                status.style.color = '#e74c3c';
-                showToast('同步请求失败: ' + e.message, 'error');
-            }
-        } finally {
-            btn.disabled = false;
-            btn.textContent = '▶ 开始同步';
-            stopBtn.style.display = 'none';
-            incrSyncAbortController = null;
-        }
-    }
-
-    function handleIncrSyncEvent(data, progressBar, progressSteps, status) {
-        const type = data.type;
-        
-        if (type === 'start') {
-            status.textContent = data.message || '开始同步...';
-            status.style.color = '#888';
-        }
-        else if (type === 'progress') {
-            status.textContent = data.message;
-            // 添加进度步骤
-            const stepDiv = document.createElement('div');
-            stepDiv.className = 'incr-step-item';
-            stepDiv.style.cssText = 'padding:8px 12px;margin-bottom:6px;border-radius:6px;background:#e3f2fd;border-left:3px solid #2196f3;font-size:13px;';
-            stepDiv.textContent = data.message;
-            progressSteps.appendChild(stepDiv);
-        }
-        else if (type === 'log') {
-            const level = data.level;
-            const msg = data.message;
-            // 更新最后一个进度步骤
-            const lastStep = progressSteps.lastElementChild;
-            if (lastStep) {
-                if (level === 'ok') {
-                    lastStep.style.background = '#e8f5e9';
-                    lastStep.style.borderLeftColor = '#4caf50';
-                    lastStep.textContent = msg;
-                } else if (level === 'error') {
-                    lastStep.style.background = '#ffebee';
-                    lastStep.style.borderLeftColor = '#f44336';
-                    lastStep.textContent = msg;
-                }
-            }
-        }
-        else if (type === 'stats') {
-            const step = data.step;
-            const total = data.total;
-            const percent = Math.round((step / total) * 100);
-            progressBar.style.width = percent + '%';
-        }
-        else if (type === 'complete') {
-            const success = data.success;
-            const message = data.message;
-            const results = data.results || {};
-            const errors = data.errors || [];
-            
-            status.textContent = message;
-            status.style.color = success ? '#27ae60' : '#e74c3c';
-            progressBar.style.width = '100%';
-            progressBar.style.background = success ? '#4caf50' : '#f44336';
-            
-            // 显示结果
-            showIncrSyncResults(results, errors, success);
-            
-            if (success) {
-                showToast(message, 'success');
-            } else {
-                showToast(message, 'error');
-            }
-        }
-    }
-
-    function showIncrSyncResults(results, errors, success) {
-        const resultArea = document.getElementById('incr-result-area');
-        const resultContent = document.getElementById('incr-result-content');
-        
-        resultArea.style.display = 'block';
-        resultContent.innerHTML = '';
-        
-        // 汇总信息
-        let totalCreated = 0, totalUpdated = 0, totalFailed = 0;
-        for (const [label, result] of Object.entries(results)) {
-            totalCreated += result.created || 0;
-            totalUpdated += result.updated || 0;
-            totalFailed += result.failed || 0;
-        }
-        
-        // 汇总卡片
-        const summaryDiv = document.createElement('div');
-        summaryDiv.style.cssText = 'display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;';
-        summaryDiv.innerHTML = `
-            <div style="padding:10px 16px;background:#e8f5e9;border-radius:6px;min-width:80px;">
-                <div style="font-size:20px;font-weight:bold;color:#4caf50;">${totalCreated}</div>
-                <div style="font-size:12px;color:#666;">新增</div>
-            </div>
-            <div style="padding:10px 16px;background:#e3f2fd;border-radius:6px;min-width:80px;">
-                <div style="font-size:20px;font-weight:bold;color:#2196f3;">${totalUpdated}</div>
-                <div style="font-size:12px;color:#666;">更新</div>
-            </div>
-            <div style="padding:10px 16px;background:${totalFailed > 0 ? '#ffebee' : '#f5f5f5'};border-radius:6px;min-width:80px;">
-                <div style="font-size:20px;font-weight:bold;color:${totalFailed > 0 ? '#f44336' : '#999'};">${totalFailed}</div>
-                <div style="font-size:12px;color:#666;">失败</div>
-            </div>
-        `;
-        resultContent.appendChild(summaryDiv);
-        
-        // 详细结果
-        const detailsDiv = document.createElement('div');
-        detailsDiv.style.cssText = 'font-size:13px;line-height:1.8;';
-        
-        for (const [label, result] of Object.entries(results)) {
-            const parts = [];
-            if (result.created) parts.push(`<span style="color:#4caf50;">新增 ${result.created}</span>`);
-            if (result.updated) parts.push(`<span style="color:#2196f3;">更新 ${result.updated}</span>`);
-            if (result.uptodate) parts.push(`<span style="color:#888;">已最新 ${result.uptodate}</span>`);
-            if (result.duplicate) parts.push(`<span style="color:#f39c12;">重复 ${result.duplicate}</span>`);
-            if (result.invalid) parts.push(`<span style="color:#999;">无效 ${result.invalid}</span>`);
-            if (result.failed) parts.push(`<span style="color:#f44336;">失败 ${result.failed}</span>`);
-            
-            const row = document.createElement('div');
-            row.style.cssText = 'padding:6px 0;border-bottom:1px solid #e0e0e0;';
-            row.innerHTML = `<span style="font-weight:600;">${label}:</span> ${parts.join(', ') || '<span style="color:#888;">无变化</span>'}`;
-            detailsDiv.appendChild(row);
-        }
-        
-        resultContent.appendChild(detailsDiv);
-        
-        // 错误信息
-        if (errors.length > 0) {
-            const errorDiv = document.createElement('div');
-            errorDiv.style.cssText = 'margin-top:12px;padding:10px;background:#ffebee;border-radius:6px;font-size:12px;color:#c62828;';
-            errorDiv.innerHTML = '<div style="font-weight:600;margin-bottom:6px;">错误详情:</div>' + 
-                errors.slice(0, 5).map(e => `<div>${e}</div>`).join('') +
-                (errors.length > 5 ? `<div style="color:#888;margin-top:4px;">... 还有 ${errors.length - 5} 个错误</div>` : '');
-            resultContent.appendChild(errorDiv);
-        }
-    }
-
-    function stopIncrementalSync() {
-        if (incrSyncAbortController) {
-            incrSyncAbortController.abort();
+                break;
         }
     }
 </script>

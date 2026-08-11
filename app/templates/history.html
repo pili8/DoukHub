@@ -28,9 +28,13 @@
                 <td>{{ r.collection_type }}</td>
                 <td>{{ r.works_count }}</td>
                 <td>
-                    {% if r.status == 'success' %}✅
-                    {% elif r.status == 'failed' %}❌
-                    {% else %}⏳{% endif %}
+                    {% if r.status == 'success' %}
+                    <span class="status-badge running"><span class="status-dot status-running"></span> 成功</span>
+                    {% elif r.status == 'failed' %}
+                    <span class="status-badge stopped"><span class="status-dot status-stopped"></span> 失败</span>
+                    {% else %}
+                    <span class="status-badge"><i class="ph ph-hourglass"></i> 进行中</span>
+                    {% endif %}
                 </td>
                 <td>{{ '%.1f'|format(r.duration_seconds) }}s</td>
                 <td>{{ r.started_at or '-' }}</td>
@@ -39,7 +43,7 @@
         </tbody>
     </table></div>
     {% if not records %}
-    <div class="empty-state">暂无采集记录</div>
+    <div class="empty-state"><i class="ph ph-clock-counter-clockwise"></i>暂无采集记录</div>
     {% endif %}
 </div>
 {% endblock %}

@@ -3,9 +3,9 @@
 {% block content %}
 <div class="page-header">
     <h2>仪表盘</h2>
-    <div>
-        <button class="btn btn-secondary" onclick="syncFeishu()">🔄 同步云端</button>
-        <a href="/collect" class="btn btn-primary">📥 开始采集</a>
+    <div class="page-header-actions">
+        <button class="btn btn-secondary" onclick="syncFeishu()"><i class="ph ph-cloud-arrow-up"></i> 同步云端</button>
+        <a href="/collect" class="btn btn-primary"><i class="ph ph-download-simple"></i> 开始采集</a>
     </div>
 </div>
 
@@ -19,11 +19,11 @@
         <div class="label">总采集次数</div>
     </div>
     <div class="stat-card">
-        <div class="number" style="color:#27ae60" id="stat-success">{{ stats.success }}</div>
+        <div class="number" style="color:var(--success)" id="stat-success">{{ stats.success }}</div>
         <div class="label">成功</div>
     </div>
     <div class="stat-card">
-        <div class="number" style="color:#e74c3c" id="stat-failed">{{ stats.failed }}</div>
+        <div class="number" style="color:var(--danger)" id="stat-failed">{{ stats.failed }}</div>
         <div class="label">失败</div>
     </div>
 </div>
@@ -36,13 +36,13 @@
             {{ svc.name }}
         </div>
         <div class="port">端口: {{ svc.port }} | {{ svc.url }}</div>
-        <div style="margin-top: 12px;">
+        <div style="margin-top: 12px;" class="btn-group">
             {% if svc.running %}
-            <button class="btn btn-danger btn-sm" onclick="stopService('{{ svc.name }}')">停止</button>
+            <button class="btn btn-danger btn-sm" onclick="stopService('{{ svc.name }}')"><i class="ph ph-stop"></i> 停止</button>
             {% else %}
-            <button class="btn btn-success btn-sm" onclick="startService('{{ svc.name }}')">启动</button>
+            <button class="btn btn-success btn-sm" onclick="startService('{{ svc.name }}')"><i class="ph ph-play"></i> 启动</button>
             {% endif %}
-            <button class="btn btn-secondary btn-sm" onclick="updateService('{{ svc.name }}')">更新</button>
+            <button class="btn btn-secondary btn-sm" onclick="updateService('{{ svc.name }}')"><i class="ph ph-arrow-clockwise"></i> 更新</button>
         </div>
     </div>
     {% endfor %}
@@ -50,8 +50,8 @@
 
 {% if jobs %}
 <div class="card">
-    <h3>定时任务</h3>
-    <table>
+    <h3><i class="ph ph-calendar-clock"></i> 定时任务</h3>
+    <div class="table-scroll"><table>
         <tr><th>任务</th><th>下次执行</th></tr>
         {% for job in jobs %}
         <tr>
@@ -59,14 +59,14 @@
             <td>{{ job.next_run or '-' }}</td>
         </tr>
         {% endfor %}
-    </table>
+    </table></div>
 </div>
 {% endif %}
 {% endblock %}
 {% block scripts %}
 <script>
     async function syncFeishu() {
-        showToast('正在同步云端...');
+        showToast('正在同步云端...', 'info');
         const data = await apiCall('/api/sync', 'POST');
         if (data.success) {
             showToast(data.message);
@@ -89,7 +89,7 @@
     }
     async function updateService(name) {
         if (!confirm(`确定更新 ${name}？正在运行的服务会自动重启。`)) return;
-        showToast(`正在更新 ${name}...`);
+        showToast(`正在更新 ${name}...`, 'info');
         const data = await apiCall(`/api/services/${name}/update`, 'POST');
         showToast(data.message, data.success ? 'success' : 'error');
         if (data.success) setTimeout(() => location.reload(), 2000);

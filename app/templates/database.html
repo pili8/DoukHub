@@ -3,607 +3,143 @@
 {% block content %}
 <div class="page-header">
     <h2>数据管理</h2>
-    <button class="btn btn-secondary" onclick="refreshStats()">🔄 刷新</button>
-</div>
-
-<!-- 数据概览 -->
-<div class="card">
-    <h3>📊 数据概览</h3>
-    <div id="stats-container" class="db-stats-grid">
-        <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
-            <div style="font-size:24px;font-weight:bold;color:#e94560;" id="stat-collection">-</div>
-            <div style="font-size:12px;color:#888;">采集表</div>
-        </div>
-        <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
-            <div style="font-size:24px;font-weight:bold;color:#27ae60;" id="stat-account">-</div>
-            <div style="font-size:12px;color:#888;">账号表</div>
-        </div>
-        <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
-            <div style="font-size:24px;font-weight:bold;color:#f39c12;" id="stat-cookie">-</div>
-            <div style="font-size:12px;color:#888;">Cookie表</div>
-        </div>
-        <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
-            <div style="font-size:24px;font-weight:bold;color:#3498db;" id="stat-history">-</div>
-            <div style="font-size:12px;color:#888;">采集历史</div>
-        </div>
-        <div style="padding:12px;background:#f8f9fa;border-radius:6px;">
-            <div style="font-size:24px;font-weight:bold;color:#9b59b6;" id="stat-task">-</div>
-            <div style="font-size:12px;color:#888;">定时任务</div>
-        </div>
+    <div class="page-header-actions">
+        <button class="btn btn-secondary" onclick="refreshStats()"><i class="ph ph-arrow-clockwise"></i> 刷新</button>
     </div>
 </div>
 
-<!-- 云端同步 -->
 <div class="card">
-    <h3>🔗 云端同步</h3>
+    <h3><i class="ph ph-chart-bar"></i> 数据概览</h3>
+    <div id="stats-container" class="db-stats-enhanced">
+        <div style="text-align:center;color:var(--text-muted);padding:20px;"><i class="ph ph-spinner"></i> 加载中...</div>
+    </div>
+</div>
 
-    <!-- 增量同步（日常使用） -->
+<div class="card">
+    <h3><i class="ph ph-cloud-arrow-up"></i> 云端同步</h3>
+
     <div style="margin-bottom:16px;">
-        <p style="font-size:13px;color:#888;margin-bottom:8px;">增量同步：双向同步本地 ↔ 云端，按字段归属自动合并冲突（人工字段云端赢，API 字段本地赢）</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="btn btn-primary" onclick="feishuSyncSSE('/api/feishu/sync', '增量同步（本地 ↔ 云端）')" id="btn-incremental">⚡ 增量同步</button>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">增量同步: 双向同步本地与云端, 按字段归属自动合并冲突（人工字段云端赢, API 字段本地赢）</p>
+        <div class="btn-group">
+            <button class="btn btn-primary" onclick="feishuSyncSSE('/api/feishu/sync', '增量同步（本地与云端）')" id="btn-incremental"><i class="ph ph-lightning"></i> 增量同步</button>
         </div>
     </div>
 
-    <!-- 全盘同步（核武器，数据混乱时托底用） -->
-    <div style="margin-bottom:12px;padding:12px;background:#fff3e0;border-radius:6px;border-left:4px solid #ff9800;">
-        <p style="font-size:13px;color:#a66;margin-bottom:8px;">
-            ⚠️ <strong>全盘同步（核武器）</strong>：选择一方作为基准强制覆盖另一方，目标端数据会被全部清空后重建。<strong>使用前务必备份数据</strong>，仅用于数据混乱时托底。
+    <div style="margin-bottom:12px;padding:12px;background:var(--warning-light);border-radius:var(--radius);border-left:4px solid var(--warning);">
+        <p style="font-size:13px;color:var(--warning-text);margin-bottom:8px;">
+            <strong>全盘同步（核武器）</strong>: 选择一方作为基准强制覆盖另一方, 目标端数据会被全部清空后重建。<strong>使用前务必备份数据</strong>, 仅用于数据混乱时托底。
         </p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="btn btn-warning btn-sm" onclick="fullSyncConfirm('to-feishu')" id="btn-full-to">☁️ 以本地覆盖云端</button>
-            <button class="btn btn-warning btn-sm" onclick="fullSyncConfirm('from-feishu')" id="btn-full-from">💻 以云端覆盖本地</button>
+        <div class="btn-group">
+            <button class="btn btn-warning btn-sm" onclick="fullSyncConfirm('to-feishu')" id="btn-full-to"><i class="ph ph-cloud-arrow-up"></i> 以本地覆盖云端</button>
+            <button class="btn btn-warning btn-sm" onclick="fullSyncConfirm('from-feishu')" id="btn-full-from"><i class="ph ph-cloud-arrow-down"></i> 以云端覆盖本地</button>
         </div>
     </div>
 
     <div id="feishu-sync-status" style="font-size:13px;margin-top:12px;"></div>
-    <!-- 进度区域 -->
-    <div id="feishu-sync-progress" style="display:none;margin-top:12px;padding:16px;background:#e3f2fd;border-left:4px solid #2196f3;border-radius:6px;">
-        <div style="font-weight:600;margin-bottom:10px;color:#1565c0;font-size:14px;">⏳ 同步进度</div>
-        <div style="height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden;margin-bottom:8px;">
-            <div id="feishu-sync-bar" style="height:100%;width:0%;background:#2196f3;transition:width 0.3s;"></div>
+    <div id="feishu-sync-progress" style="display:none;margin-top:12px;padding:16px;background:var(--info-light);border-left:4px solid var(--info);border-radius:var(--radius);">
+        <div style="font-weight:600;margin-bottom:10px;color:var(--info-text);font-size:14px;"><i class="ph ph-spinner"></i> 同步进度</div>
+        <div class="progress-bar-container" style="margin-bottom:8px;">
+            <div id="feishu-sync-bar" class="progress-bar" style="width:0%;background:var(--info);"></div>
         </div>
-        <div id="feishu-sync-log" style="max-height:200px;overflow-y:auto;font-size:13px;font-family:monospace;"></div>
+        <div id="feishu-sync-log" style="max-height:200px;overflow-y:auto;font-size:13px;font-family:var(--font-mono);"></div>
     </div>
-    <!-- 结果区域 -->
-    <div id="feishu-sync-result" style="margin-top:16px;padding:16px;background:#f5f5f5;border-left:4px solid #4caf50;border-radius:6px;display:none;">
-        <div style="font-weight:600;margin-bottom:12px;color:#2e7d32;font-size:14px;">📊 同步结果</div>
+    <div id="feishu-sync-result" style="margin-top:16px;padding:16px;background:var(--bg-muted);border-left:4px solid var(--success);border-radius:var(--radius);display:none;">
+        <div style="font-weight:600;margin-bottom:12px;color:var(--success-text);font-size:14px;"><i class="ph ph-chart-bar"></i> 同步结果</div>
         <div id="feishu-sync-result-content"></div>
     </div>
 </div>
 
-<!-- 搜索 -->
-<div class="card">
-    <h3>🔍 搜索</h3>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <select id="search-table" style="padding:8px;border:1px solid #ddd;border-radius:4px;">
-            <option value="collection_cache">采集表</option>
-            <option value="account_cache">账号表</option>
-            <option value="cookie_cache">Cookie表</option>
-            <option value="collection_history">采集历史</option>
-            <option value="scheduled_tasks">定时任务</option>
-        </select>
-        <input type="text" id="search-keyword" placeholder="搜索关键词..." style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;min-width:160px;" onkeydown="if(event.key==='Enter')doSearch()">
-        <button class="btn btn-primary" onclick="doSearch()">搜索</button>
-        <button class="btn btn-secondary" onclick="clearSearch()" id="btn-clear-search" style="display:none;">清除</button>
+<div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+    <div>
+        <h3 style="margin:0 0 4px 0;"><i class="ph ph-table"></i> 表浏览</h3>
+        <p style="font-size:13px;color:var(--text-muted);margin:0;">查看、搜索、编辑、导入导出各数据表的详细记录</p>
     </div>
-</div>
-
-<!-- 表浏览 -->
-<div class="card">
-    <h3>📋 表浏览</h3>
-    <div class="table-scroll" style="margin-bottom:16px;"><div style="display:flex;gap:8px;min-width:max-content;">
-        <button class="btn btn-secondary" onclick="showTable('collection_cache')">采集表</button>
-        <button class="btn btn-secondary" onclick="showTable('account_cache')">账号表</button>
-        <button class="btn btn-secondary" onclick="showTable('cookie_cache')">Cookie表</button>
-        <button class="btn btn-secondary" onclick="showTable('collection_history')">采集历史</button>
-        <button class="btn btn-secondary" onclick="showTable('scheduled_tasks')">定时任务</button>
-    </div></div>
-
-    <div id="table-container" style="display:none;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap;">
-            <h4 id="table-title" style="margin:0;">-</h4>
-            <div style="display:flex;gap:8px;align-items:center;">
-                <button class="btn btn-primary btn-sm" onclick="validateCookies()" id="btn-validate-cookie" style="display:none;">🔍 验证Cookie</button>
-                <button class="btn btn-secondary btn-sm" onclick="importCsv()" title="从 CSV 导入（严格模式）">📤 导入</button>
-                <button class="btn btn-secondary btn-sm" onclick="exportCsv()" title="导出全量 CSV">📥 导出</button>
-            </div>
-        </div>
-        <div id="table-content" style="overflow-x:auto;"></div>
-        <div id="pagination" style="margin-top:12px;"></div>
-        <input type="file" id="import-file-input" accept=".csv" style="display:none;">
-        <div id="cookie-validate-result" style="display:none;margin-top:16px;padding:16px;background:#fafafa;border-radius:8px;border:1px solid #eee;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                <h4 style="margin:0;">Cookie 验证结果</h4>
-                <span id="cookie-validate-stats" style="font-size:13px;color:#888;"></span>
-            </div>
-            <div id="cookie-validate-progress" style="height:6px;background:#e0e0e0;border-radius:3px;margin-bottom:12px;overflow:hidden;">
-                <div id="cookie-validate-bar" style="height:100%;width:0%;background:#3498db;transition:width 0.3s;"></div>
-            </div>
-            <div id="cookie-validate-log" style="max-height:300px;overflow-y:auto;font-size:13px;font-family:monospace;"></div>
-        </div>
-    </div>
-</div>
-
-<!-- 导入预览弹窗 -->
-<div id="import-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
-    <div style="background:white;border-radius:8px;padding:24px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-            <h3 style="margin:0;">📥 导入预览</h3>
-            <button onclick="closeImportModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">×</button>
-        </div>
-        <div id="import-modal-body"></div>
-    </div>
+    <a href="/table" class="btn btn-primary"><i class="ph ph-arrow-right"></i> 前往表浏览</a>
 </div>
 {% endblock %}
 
-
 <style>
-.db-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 12px;
-    text-align: center;
-}
-.db-stats-grid > div {
-    padding: 12px;
-    background: #f8f9fa;
-    border-radius: 6px;
-}
-.db-stats-grid .num { font-size: 24px; font-weight: bold; }
-.db-stats-grid .lbl { font-size: 12px; color: #888; }
-
-@media (max-width: 768px) {
-    .db-stats-grid { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 420px) {
-    .db-stats-grid { grid-template-columns: 1fr; }
-}
+.db-stats-enhanced { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.db-stats-enhanced .stats-card { padding: 16px; background: var(--bg-muted); border-radius: var(--radius); border-left: 4px solid var(--border-default); border: 1px solid var(--border-default); }
+.db-stats-enhanced .stats-card.coll { border-left-color: var(--accent); }
+.db-stats-enhanced .stats-card.acc { border-left-color: var(--success); }
+.db-stats-enhanced .stats-card.ck  { border-left-color: var(--warning); }
+.db-stats-enhanced .stats-card.hist { border-left-color: var(--info); }
+.db-stats-enhanced .stats-card.task { border-left-color: #8b5cf6; }
+.db-stats-enhanced .stats-card .stats-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary); }
+.db-stats-enhanced .stats-card .stats-num { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.db-stats-enhanced .stats-card .stats-sub { display: flex; gap: 12px; margin-top: 8px; font-size: 12px; flex-wrap: wrap; }
+.db-stats-enhanced .stats-card .stats-sub span { color: var(--text-muted); }
+.db-stats-enhanced .stats-card .stats-sub .ok { color: var(--success); }
+.db-stats-enhanced .stats-card .stats-sub .warn { color: var(--warning); }
+.db-stats-enhanced .stats-card .stats-sub .err { color: var(--danger); }
+@media (max-width: 768px) { .db-stats-enhanced { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 420px) { .db-stats-enhanced { grid-template-columns: 1fr; } }
 </style>
 
 {% block scripts %}
 <script>
-    const TABLE_NAMES = {
-        'collection_cache': '采集表',
-        'account_cache': '账号表',
-        'cookie_cache': 'Cookie表',
-        'collection_history': '采集历史',
-        'scheduled_tasks': '定时任务'
-    };
-    const PAGE_SIZE = 100;
-
-    let currentTable = '';
-    let currentKeyword = '';
-    let currentPage = 1;
-    let sortField = '';     // 当前排序字段
-    let sortOrder = 'desc'; // asc / desc
-    let schemaFields = [];  // 当前表字段定义（含类型）
-    let pendingImportFile = null; // 导入预览暂存的文件
-    let currentTotal = 0;   // 当前表（含搜索/筛选）的总条数
-
-    document.addEventListener('DOMContentLoaded', () => {
-        refreshStats();
-    });
+    document.addEventListener('DOMContentLoaded', () => { refreshStats(); });
 
     async function refreshStats() {
         try {
-            const data = await apiCall('/api/database/stats', 'GET');
-            document.getElementById('stat-collection').textContent = data.collection_cache || 0;
-            document.getElementById('stat-account').textContent = data.account_cache || 0;
-            document.getElementById('stat-cookie').textContent = data.cookie_cache || 0;
-            document.getElementById('stat-history').textContent = data.collection_history || 0;
-            document.getElementById('stat-task').textContent = data.scheduled_tasks || 0;
+            const data = await apiCall('/api/database/stats-detailed', 'GET');
+            const s = data.data || {};
+            const container = document.getElementById('stats-container');
+            let html = '';
+            const coll = s.collection_cache || {};
+            html += `<div class="stats-card coll">
+                <div class="stats-title"><i class="ph ph-clipboard-text"></i> 采集表</div>
+                <div class="stats-num" style="color:var(--accent);">${coll.total || 0}</div>
+                <div class="stats-sub">
+                    <span class="ok">已同步 ${coll.synced || 0}</span>
+                    <span class="warn">未同步 ${coll.not_synced || 0}</span>
+                    ${coll.has_error ? `<span class="err">有错误 ${coll.has_error}</span>` : ''}
+                </div>
+            </div>`;
+            const acc = s.account_cache || {};
+            html += `<div class="stats-card acc">
+                <div class="stats-title"><i class="ph ph-user"></i> 账号表</div>
+                <div class="stats-num" style="color:var(--success);">${acc.total || 0}</div>
+                <div class="stats-sub">
+                    <span class="ok">启用 ${acc.enabled || 0}</span>
+                    <span>禁用 ${acc.disabled || 0}</span>
+                    ${acc.not_fetched ? `<span class="warn">未获取 ${acc.not_fetched}</span>` : ''}
+                </div>
+            </div>`;
+            const ck = s.cookie_cache || {};
+            html += `<div class="stats-card ck">
+                <div class="stats-title"><i class="ph ph-cookie"></i> Cookie表</div>
+                <div class="stats-num" style="color:var(--warning);">${ck.total || 0}</div>
+                <div class="stats-sub">
+                    <span class="ok">正常 ${ck.normal || 0}</span>
+                    ${ck.invalid ? `<span class="err">失效 ${ck.invalid}</span>` : ''}
+                    <span>启用 ${ck.enabled || 0}</span>
+                </div>
+            </div>`;
+            const hist = s.collection_history || {};
+            html += `<div class="stats-card hist">
+                <div class="stats-title"><i class="ph ph-clock-counter-clockwise"></i> 采集历史</div>
+                <div class="stats-num" style="color:var(--info);">${hist.total || 0}</div>
+            </div>`;
+            const task = s.scheduled_tasks || {};
+            html += `<div class="stats-card task">
+                <div class="stats-title"><i class="ph ph-calendar-clock"></i> 定时任务</div>
+                <div class="stats-num" style="color:#8b5cf6;">${task.total || 0}</div>
+                <div class="stats-sub"><span class="ok">启用 ${task.enabled || 0}</span></div>
+            </div>`;
+            container.innerHTML = html;
         } catch (e) {
-            showToast('获取统计失败: ' + e.message, 'error');
-        }
-    }
-
-    async function showTable(tableName, page = 1, keyword = '') {
-        currentTable = tableName;
-        currentPage = page;
-        currentKeyword = keyword;
-
-        document.getElementById('table-container').style.display = 'block';
-        const validateBtn = document.getElementById('btn-validate-cookie');
-        if (validateBtn) validateBtn.style.display = tableName === 'cookie_cache' ? '' : 'none';
-
-        document.getElementById('table-title').textContent = TABLE_NAMES[tableName] + ' · 加载中...';
-        document.getElementById('table-content').innerHTML = '<div style="text-align:center;color:#888;padding:20px;">加载中...</div>';
-        document.getElementById('pagination').innerHTML = '';
-
-        // 加载 schema（用于排序和启用字段检测）
-        try {
-            const sd = await apiCall(`/api/database/table/${tableName}/schema`, 'GET');
-            schemaFields = sd.fields || [];
-        } catch (e) {
-            schemaFields = [];
-        }
-
-        const offset = (page - 1) * PAGE_SIZE;
-        let url = `/api/database/table/${tableName}?limit=${PAGE_SIZE}&offset=${offset}`;
-        if (keyword) url += `&search=${encodeURIComponent(keyword)}`;
-        if (sortField) url += `&sort_field=${encodeURIComponent(sortField)}&sort_order=${sortOrder}`;
-
-        try {
-            const data = await apiCall(url, 'GET');
-            renderTable(data);
-        } catch (e) {
-            showToast('获取表数据失败: ' + e.message, 'error');
-        }
-    }
-
-    function toggleSort(field) {
-        if (sortField === field) {
-            // 同字段：切换顺序
-            sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
-        } else {
-            sortField = field;
-            sortOrder = 'asc';
-        }
-        showTable(currentTable, 1, currentKeyword);
-    }
-
-    function renderTable(data) {
-        const records = data.records || [];
-        const total = data.total || 0;
-        currentTotal = total;  // 供导出按钮提示用
-
-        // 表头：表名 · 共 N 条 （搜索时加搜索词标注）
-        const kwSuffix = currentKeyword ? ` · 搜索"${currentKeyword}"` : '';
-        document.getElementById('table-title').textContent = `${TABLE_NAMES[currentTable]}${kwSuffix} · 共 ${total} 条`;
-
-        if (!records.length) {
-            document.getElementById('table-content').innerHTML = '<div style="text-align:center;color:#888;padding:20px;">暂无数据</div>';
-            document.getElementById('pagination').innerHTML = '';
-            return;
-        }
-
-        // 列顺序：record_id / ID 移到末尾
-        let columns = Object.keys(records[0]);
-        const idIdx = columns.indexOf('record_id');
-        if (idIdx >= 0) {
-            columns.splice(idIdx, 1);
-            columns.push('record_id');
-        }
-
-        // schema 类型映射（用于识别布尔字段）
-        const fieldType = {};
-        schemaFields.forEach(f => fieldType[f.name] = (f.type || '').toUpperCase());
-
-        // 表格
-        let html = '<table style="width:100%;border-collapse:collapse;">';
-        html += '<thead><tr>';
-        columns.forEach(col => {
-            const isSortable = true;  // 所有字段都可排序
-            const arrow = sortField === col ? (sortOrder === 'asc' ? ' ▲' : ' ▼') : '';
-            const cursor = isSortable ? 'cursor:pointer;' : '';
-            const onclick = isSortable ? ` onclick="toggleSort('${col}')"` : '';
-            const color = sortField === col ? '#3498db;' : '#333;';
-            html += `<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;white-space:nowrap;${cursor}${color}"${onclick} title="${isSortable ? '点击排序' : ''}">${col}${arrow}</th>`;
-        });
-        html += '<th style="padding:8px;background:#f8f9fa;border:1px solid #ddd;font-size:12px;">操作</th>';
-        html += '</tr></thead><tbody>';
-
-        records.forEach(row => {
-            html += '<tr>';
-            columns.forEach(col => {
-                let value = row[col];
-                const isBool = fieldType[col] === 'BOOLEAN';
-
-                // 布尔字段渲染为复选框
-                if (isBool) {
-                    const checked = value === true || value === 1 ? 'checked' : '';
-                    const rid = row['record_id'] || row['ID'] || '';
-                    // 只对有主键的行可切换
-                    if (rid && col === '启用') {
-                        html += `<td style="padding:8px;border:1px solid #ddd;text-align:center;"><input type="checkbox" ${checked} onchange="toggleEnabled('${rid}', '${col}', this.checked)" title="启用/禁用"></td>`;
-                        return;
-                    }
-                    // 其他布尔字段只展示
-                    value = value === true || value === 1 ? '✓' : (value === false || value === 0 ? '○' : '-');
-                } else {
-                    if (value === null || value === undefined) { value = '-'; }
-                    else if (typeof value === 'object') { value = JSON.stringify(value); }
-                    else if (typeof value === 'string' && value.trim().startsWith('[') && value.trim().endsWith(']')) {
-                        try {
-                            const parsed = JSON.parse(value);
-                            if (Array.isArray(parsed)) value = parsed.join(', ');
-                        } catch(e) {}
-                    }
-                    if (String(value).length > 80) { value = String(value).substring(0, 80) + '...'; }
-                }
-                html += `<td style="padding:8px;border:1px solid #ddd;font-size:12px;white-space:nowrap;">${value}</td>`;
-            });
-
-            const recordId = row['record_id'] || row['ID'] || '';
-            if (recordId && currentTable !== 'collection_history' && currentTable !== 'scheduled_tasks') {
-                html += `<td style="padding:8px;border:1px solid #ddd;"><button class="btn btn-danger btn-sm" onclick="deleteRecord('${currentTable}', '${recordId}')">删除</button></td>`;
-            } else {
-                html += '<td style="padding:8px;border:1px solid #ddd;">-</td>';
-            }
-            html += '</tr>';
-        });
-        html += '</tbody></table>';
-
-        document.getElementById('table-content').innerHTML = html;
-        renderPagination(total, data.limit || PAGE_SIZE, data.offset || 0);
-    }
-
-    async function toggleEnabled(recordId, field, value) {
-        try {
-            const url = `/api/database/table/${currentTable}/record/${recordId}?field=${encodeURIComponent(field)}&value=${value ? 'true' : 'false'}`;
-            const data = await apiCall(url, 'PATCH');
-            if (!data.success) {
-                showToast(data.message || '更新失败', 'error');
-                showTable(currentTable, currentPage, currentKeyword); // 刷新恢复
-            } else {
-                showToast('已' + (value ? '启用' : '禁用'), 'success');
-            }
-        } catch (e) {
-            showToast('更新失败: ' + e.message, 'error');
-            showTable(currentTable, currentPage, currentKeyword);
-        }
-    }
-
-    function renderPagination(total, limit, offset) {
-        const totalPages = Math.max(1, Math.ceil(total / limit));
-        const curPage = Math.floor(offset / limit) + 1;
-        const pgDiv = document.getElementById('pagination');
-        if (totalPages <= 1) {
-            pgDiv.innerHTML = `<div style="text-align:center;color:#888;font-size:12px;">共 ${total} 条</div>`;
-            return;
-        }
-
-        let html = '<div style="display:flex;justify-content:center;align-items:center;gap:6px;flex-wrap:wrap;">';
-        if (curPage > 1) {
-            html += `<button class="btn btn-secondary btn-sm" onclick="gotoPage(${curPage - 1})">上一页</button>`;
-        }
-
-        let start = Math.max(1, curPage - 2);
-        let end = Math.min(totalPages, start + 4);
-        start = Math.max(1, end - 4);
-
-        if (start > 1) {
-            html += `<button class="btn btn-secondary btn-sm" onclick="gotoPage(1)">1</button>`;
-            if (start > 2) html += '<span style="padding:0 4px;color:#888;">...</span>';
-        }
-        for (let i = start; i <= end; i++) {
-            if (i === curPage) {
-                html += `<button class="btn btn-primary btn-sm">${i}</button>`;
-            } else {
-                html += `<button class="btn btn-secondary btn-sm" onclick="gotoPage(${i})">${i}</button>`;
-            }
-        }
-        if (end < totalPages) {
-            if (end < totalPages - 1) html += '<span style="padding:0 4px;color:#888;">...</span>';
-            html += `<button class="btn btn-secondary btn-sm" onclick="gotoPage(${totalPages})">${totalPages}</button>`;
-        }
-
-        if (curPage < totalPages) {
-            html += `<button class="btn btn-secondary btn-sm" onclick="gotoPage(${curPage + 1})">下一页</button>`;
-        }
-        html += `<span style="color:#888;font-size:12px;margin-left:8px;">第 ${curPage}/${totalPages} 页 · 共 ${total} 条</span>`;
-        html += '</div>';
-        pgDiv.innerHTML = html;
-    }
-
-    function gotoPage(page) {
-        showTable(currentTable, page, currentKeyword);
-    }
-
-    function doSearch() {
-        const tableName = document.getElementById('search-table').value;
-        const keyword = document.getElementById('search-keyword').value.trim();
-        if (!keyword) {
-            showToast('请输入搜索关键词', 'error');
-            return;
-        }
-        document.getElementById('btn-clear-search').style.display = '';
-        showTable(tableName, 1, keyword);
-        document.getElementById('table-container').scrollIntoView({behavior: 'smooth', block: 'start'});
-    }
-
-    function clearSearch() {
-        document.getElementById('search-keyword').value = '';
-        document.getElementById('btn-clear-search').style.display = 'none';
-        if (currentTable && currentKeyword) {
-            showTable(currentTable, 1, '');
-        }
-    }
-
-    async function deleteRecord(tableName, recordId) {
-        if (!confirm(`确定要删除记录 ${recordId} 吗？`)) return;
-        try {
-            const data = await apiCall(`/api/database/table/${tableName}/record/${recordId}`, 'DELETE');
-            if (data.success) {
-                showToast('删除成功', 'success');
-                showTable(tableName, currentPage, currentKeyword);
-                refreshStats();
-            } else {
-                showToast(data.message || '删除失败', 'error');
-            }
-        } catch (e) {
-            showToast('删除失败: ' + e.message, 'error');
-        }
-    }
-
-    async function exportCsv(ev) {
-        if (!currentTable) {
-            showToast('请先选择一张表', 'error');
-            return;
-        }
-        const btn = ev ? ev.target.closest('button') : null;
-        const originalText = btn ? btn.innerHTML : '📥 导出';
-        const scope = currentKeyword ? `（搜索"${currentKeyword}"）` : '';
-        const countInfo = currentTotal > 0 ? `共 ${currentTotal} 条` : '全部数据';
-
-        if (!confirm(`确定导出 ${TABLE_NAMES[currentTable] || currentTable} ${scope}？\n${countInfo}，将下载为 CSV 文件。`)) return;
-
-        let url = `/api/database/table/${currentTable}/export`;
-        if (currentKeyword) url += `?search=${encodeURIComponent(currentKeyword)}`;
-
-        if (btn) { btn.disabled = true; btn.innerHTML = '⏳ 导出中...'; }
-
-        try {
-            const resp = await fetch(url);
-            if (!resp.ok) {
-                let msg = `HTTP ${resp.status}`;
-                try { const e = await resp.json(); msg = e.message || msg; } catch (_) {}
-                throw new Error(msg);
-            }
-
-            const blob = await resp.blob();
-            // 从 Content-Disposition 解析文件名
-            const cd = resp.headers.get('Content-Disposition') || '';
-            const m = cd.match(/filename="?([^"]+)"?/);
-            const filename = m ? m[1] : `${currentTable}.csv`;
-
-            // 触发下载
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-
-            // 友好提示：文件大小
-            const size = blob.size;
-            const sizeText = size > 1024 * 1024 ? `${(size/1024/1024).toFixed(2)} MB`
-                            : size > 1024 ? `${(size/1024).toFixed(1)} KB`
-                            : `${size} B`;
-            showToast(`✅ 已导出 ${countInfo} · ${sizeText}`, 'success');
-        } catch (e) {
-            showToast('导出失败: ' + e.message, 'error');
-        } finally {
-            if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
-        }
-    }
-
-    function importCsv() {
-        if (!currentTable) {
-            showToast('请先选择一张表', 'error');
-            return;
-        }
-        const input = document.getElementById('import-file-input');
-        input.value = '';
-        input.onchange = handleImportFile;
-        input.click();
-    }
-
-    async function handleImportFile(ev) {
-        const file = ev.target.files[0];
-        if (!file) return;
-        if (!file.name.toLowerCase().endsWith('.csv')) {
-            showToast('请上传 CSV 文件', 'error');
-            return;
-        }
-        pendingImportFile = file;
-        // 调预览接口
-        const fd = new FormData();
-        fd.append('file', file);
-        try {
-            const resp = await fetch(`/api/database/table/${currentTable}/import/preview`, {
-                method: 'POST',
-                body: fd,
-            });
-            const data = await resp.json();
-            if (!data.success) {
-                showToast(data.message || '预览失败', 'error');
-                if (data.expected_fields) {
-                    console.log('期望字段:', data.expected_fields);
-                }
-                return;
-            }
-            showImportPreview(data);
-        } catch (e) {
-            showToast('预览失败: ' + e.message, 'error');
-        }
-    }
-
-    function showImportPreview(data) {
-        const body = document.getElementById('import-modal-body');
-        const fields = data.fields || [];
-        const preview = data.preview || [];
-        const errors = data.errors || [];
-
-        let html = `<div style="margin-bottom:16px;padding:12px;background:#f8f9fa;border-radius:6px;">`;
-        html += `<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:14px;">`;
-        html += `<span>📊 总计 <b>${data.total}</b></span>`;
-        html += `<span style="color:#27ae60;">➕ 新增 <b>${data.new}</b></span>`;
-        html += `<span style="color:#888;">⏭️ 跳过 <b>${data.skipped}</b></span>`;
-        if (errors.length) html += `<span style="color:#e74c3c;">⚠️ 错误 <b>${errors.length}</b></span>`;
-        html += `</div></div>`;
-
-        if (errors.length) {
-            html += `<div style="margin-bottom:12px;color:#e74c3c;font-size:13px;max-height:120px;overflow-y:auto;border:1px solid #f5c6cb;background:#fff5f5;padding:8px;border-radius:4px;">`;
-            errors.forEach(e => html += `<div>${e}</div>`);
-            html += `</div>`;
-        }
-
-        if (preview.length) {
-            html += `<div style="font-size:13px;color:#888;margin-bottom:6px;">前 ${preview.length} 行预览：</div>`;
-            html += '<div style="overflow-x:auto;border:1px solid #eee;border-radius:4px;">';
-            html += '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
-            html += '<thead><tr>';
-            fields.forEach(f => html += `<th style="padding:6px;background:#f8f9fa;border:1px solid #eee;white-space:nowrap;">${f}</th>`);
-            html += '</tr></thead><tbody>';
-            preview.forEach(row => {
-                html += '<tr>';
-                fields.forEach(f => {
-                    let v = row[f];
-                    if (v === null || v === undefined) v = '';
-                    if (typeof v === 'object') v = JSON.stringify(v);
-                    const disp = String(v).length > 40 ? String(v).substring(0, 40) + '...' : v;
-                    html += `<td style="padding:6px;border:1px solid #eee;white-space:nowrap;">${disp}</td>`;
-                });
-                html += '</tr>';
-            });
-            html += '</tbody></table></div>';
-        }
-
-        html += `<div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">`;
-        html += `<button class="btn btn-secondary btn-sm" onclick="closeImportModal()">取消</button>`;
-        if (data.new > 0) {
-            html += `<button class="btn btn-primary btn-sm" onclick="confirmImport()">确认导入（新增 ${data.new} 条）</button>`;
-        } else {
-            html += `<button class="btn btn-primary btn-sm" disabled>无可导入数据</button>`;
-        }
-        html += `</div>`;
-
-        body.innerHTML = html;
-        document.getElementById('import-modal').style.display = 'flex';
-    }
-
-    function closeImportModal() {
-        document.getElementById('import-modal').style.display = 'none';
-        pendingImportFile = null;
-    }
-
-    async function confirmImport() {
-        if (!pendingImportFile) {
-            showToast('文件已失效，请重新选择', 'error');
-            closeImportModal();
-            return;
-        }
-        const fd = new FormData();
-        fd.append('file', pendingImportFile);
-        try {
-            const resp = await fetch(`/api/database/table/${currentTable}/import/confirm`, {
-                method: 'POST',
-                body: fd,
-            });
-            const data = await resp.json();
-            if (data.success) {
-                showToast(`导入完成：新增 ${data.created}，跳过 ${data.skipped}，失败 ${data.failed}`, data.failed ? 'error' : 'success');
-                closeImportModal();
-                showTable(currentTable, 1, '');
-                refreshStats();
-            } else {
-                showToast(data.message || '导入失败', 'error');
-            }
-        } catch (e) {
-            showToast('导入失败: ' + e.message, 'error');
+            try {
+                const data = await apiCall('/api/database/stats', 'GET');
+                document.getElementById('stats-container').innerHTML = `
+                    <div class="stats-card coll"><div class="stats-title">采集表</div><div class="stats-num" style="color:var(--accent);">${data.collection_cache || 0}</div></div>
+                    <div class="stats-card acc"><div class="stats-title">账号表</div><div class="stats-num" style="color:var(--success);">${data.account_cache || 0}</div></div>
+                    <div class="stats-card ck"><div class="stats-title">Cookie表</div><div class="stats-num" style="color:var(--warning);">${data.cookie_cache || 0}</div></div>
+                    <div class="stats-card hist"><div class="stats-title">采集历史</div><div class="stats-num" style="color:var(--info);">${data.collection_history || 0}</div></div>
+                    <div class="stats-card task"><div class="stats-title">定时任务</div><div class="stats-num" style="color:#8b5cf6;">${data.scheduled_tasks || 0}</div></div>
+                `;
+            } catch (e2) { showToast('获取统计失败: ' + e2.message, 'error'); }
         }
     }
 
@@ -618,24 +154,22 @@
         const barDiv = document.getElementById('feishu-sync-bar');
         const logDiv = document.getElementById('feishu-sync-log');
         status.textContent = '正在' + title + '...';
-        status.style.color = '#3498db';
+        status.style.color = 'var(--info)';
         result.style.display = 'none';
         progressDiv.style.display = 'block';
         logDiv.style.display = 'block';
         logDiv.innerHTML = '';
         barDiv.style.width = '0%';
-        barDiv.style.background = '#3498db';
-
+        barDiv.style.background = 'var(--info)';
         function addLog(text, level) {
-            const colors = {ok: '#27ae60', error: '#e74c3c', info: '#3498db'};
+            const colors = {ok: 'var(--success)', error: 'var(--danger)', info: 'var(--info)'};
             const div = document.createElement('div');
-            div.style.color = colors[level] || '#666';
+            div.style.color = colors[level] || 'var(--text-secondary)';
             div.style.padding = '3px 0';
             div.textContent = text;
             logDiv.appendChild(div);
             logDiv.scrollTop = logDiv.scrollHeight;
         }
-
         try {
             addLog(title, 'info');
             const resp = await fetch(url, {method: 'POST'});
@@ -650,84 +184,56 @@
                 buffer = lines.pop();
                 for (const line of lines) {
                     if (!line.startsWith('data: ')) continue;
-                    let data;
-                    try { data = JSON.parse(line.slice(6)); } catch { continue; }
-                    if (data.type === 'start') {
-                        addLog(data.message, 'info');
-                    } else if (data.type === 'progress') {
-                        status.textContent = data.message;
-                        addLog('-> ' + data.message, 'info');
-                    } else if (data.type === 'log') {
-                        addLog(data.message, data.level);
-                    } else if (data.type === 'stats') {
-                        const pct = (data.step / data.total) * 100;
-                        barDiv.style.width = pct + '%';
-                    } else if (data.type === 'complete') {
+                    let data; try { data = JSON.parse(line.slice(6)); } catch { continue; }
+                    if (data.type === 'start') addLog(data.message, 'info');
+                    else if (data.type === 'progress') { status.textContent = data.message; addLog('-> ' + data.message, 'info'); }
+                    else if (data.type === 'log') addLog(data.message, data.level);
+                    else if (data.type === 'stats') { const pct = (data.step / data.total) * 100; barDiv.style.width = pct + '%'; }
+                    else if (data.type === 'complete') {
                         barDiv.style.width = '100%';
-                        barDiv.style.background = data.success ? '#27ae60' : '#e74c3c';
+                        barDiv.style.background = data.success ? 'var(--success)' : 'var(--danger)';
                         status.textContent = data.message;
-                        status.style.color = data.success ? '#27ae60' : '#e74c3c';
+                        status.style.color = data.success ? 'var(--success)' : 'var(--danger)';
                         addLog(data.message, data.success ? 'ok' : 'error');
                         if (data.results) {
-                            // 计算汇总数据
                             let totalCreated = 0, totalUpdated = 0, totalDeleted = 0, totalSkipped = 0, totalFailed = 0;
                             for (const [label, vals] of Object.entries(data.results)) {
-                                totalCreated += vals.created || 0;
-                                totalUpdated += vals.updated || 0;
-                                totalDeleted += vals.deleted || 0;
-                                totalSkipped += (vals.uptodate || 0) + (vals.duplicate || 0) + (vals.invalid || 0);
-                                totalFailed += vals.failed || 0;
+                                totalCreated += vals.created || 0; totalUpdated += vals.updated || 0; totalDeleted += vals.deleted || 0;
+                                totalSkipped += (vals.uptodate || 0) + (vals.duplicate || 0) + (vals.invalid || 0); totalFailed += vals.failed || 0;
                             }
-                            
-                            // 顶部摘要：一句话总结变化
-                            let summary = '本次同步：';
+                            let summary = '本次同步: ';
                             let summaryParts = [];
-                            if (totalCreated > 0) summaryParts.push(`<span style="color:#4caf50;font-weight:600;">新增 ${totalCreated} 条</span>`);
-                            if (totalUpdated > 0) summaryParts.push(`<span style="color:#2196f3;font-weight:600;">更新 ${totalUpdated} 条</span>`);
-                            if (totalDeleted > 0) summaryParts.push(`<span style="color:#f44336;font-weight:600;">删除 ${totalDeleted} 条</span>`);
-                            if (totalSkipped > 0) summaryParts.push(`<span style="color:#888;">跳过 ${totalSkipped} 条</span>`);
-                            if (totalFailed > 0) summaryParts.push(`<span style="color:#f44336;">失败 ${totalFailed} 条</span>`);
-                            summary += summaryParts.length > 0 ? summaryParts.join('，') : '<span style="color:#888;">无变化</span>';
-                            
-                            let html = `<div style="padding:12px;background:#fff;border-radius:6px;margin-bottom:12px;font-size:14px;">${summary}</div>`;
-                            
-                            // 变化统计卡片（只展示有变化的）
+                            if (totalCreated > 0) summaryParts.push(`<span style="color:var(--success);font-weight:600;">新增 ${totalCreated} 条</span>`);
+                            if (totalUpdated > 0) summaryParts.push(`<span style="color:var(--info);font-weight:600;">更新 ${totalUpdated} 条</span>`);
+                            if (totalDeleted > 0) summaryParts.push(`<span style="color:var(--danger);font-weight:600;">删除 ${totalDeleted} 条</span>`);
+                            if (totalSkipped > 0) summaryParts.push(`<span style="color:var(--text-muted);">跳过 ${totalSkipped} 条</span>`);
+                            if (totalFailed > 0) summaryParts.push(`<span style="color:var(--danger);">失败 ${totalFailed} 条</span>`);
+                            summary += summaryParts.length > 0 ? summaryParts.join(', ') : '<span style="color:var(--text-muted);">无变化</span>';
+                            let html = `<div style="padding:12px;background:var(--bg-surface);border-radius:var(--radius);margin-bottom:12px;font-size:14px;border:1px solid var(--border-default);">${summary}</div>`;
                             html += '<div style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap;">';
-                            if (totalCreated > 0) html += `<div style="padding:12px 20px;background:#e8f5e9;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#4caf50;">+${totalCreated}</div><div style="font-size:13px;color:#666;margin-top:4px;">✅ 新增</div></div>`;
-                            if (totalUpdated > 0) html += `<div style="padding:12px 20px;background:#e3f2fd;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#2196f3;">~${totalUpdated}</div><div style="font-size:13px;color:#666;margin-top:4px;">🔄 更新</div></div>`;
-                            if (totalDeleted > 0) html += `<div style="padding:12px 20px;background:#ffebee;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#f44336;">-${totalDeleted}</div><div style="font-size:13px;color:#666;margin-top:4px;">🗑️ 删除</div></div>`;
-                            if (totalSkipped > 0) html += `<div style="padding:12px 20px;background:#f5f5f5;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#888;">⏭${totalSkipped}</div><div style="font-size:13px;color:#666;margin-top:4px;">跳过</div></div>`;
-                            if (totalFailed > 0) html += `<div style="padding:12px 20px;background:#ffebee;border-radius:8px;min-width:100px;text-align:center;"><div style="font-size:28px;font-weight:bold;color:#f44336;">!${totalFailed}</div><div style="font-size:13px;color:#666;margin-top:4px;">❌ 失败</div></div>`;
+                            if (totalCreated > 0) html += `<div style="padding:12px 20px;background:var(--success-light);border-radius:var(--radius);min-width:100px;text-align:center;border:1px solid var(--border-default);"><div style="font-size:28px;font-weight:700;color:var(--success);">+${totalCreated}</div><div style="font-size:13px;color:var(--text-muted);margin-top:4px;">新增</div></div>`;
+                            if (totalUpdated > 0) html += `<div style="padding:12px 20px;background:var(--info-light);border-radius:var(--radius);min-width:100px;text-align:center;border:1px solid var(--border-default);"><div style="font-size:28px;font-weight:700;color:var(--info);">~${totalUpdated}</div><div style="font-size:13px;color:var(--text-muted);margin-top:4px;">更新</div></div>`;
+                            if (totalDeleted > 0) html += `<div style="padding:12px 20px;background:var(--danger-light);border-radius:var(--radius);min-width:100px;text-align:center;border:1px solid var(--border-default);"><div style="font-size:28px;font-weight:700;color:var(--danger);">-${totalDeleted}</div><div style="font-size:13px;color:var(--text-muted);margin-top:4px;">删除</div></div>`;
+                            if (totalSkipped > 0) html += `<div style="padding:12px 20px;background:var(--bg-muted);border-radius:var(--radius);min-width:100px;text-align:center;border:1px solid var(--border-default);"><div style="font-size:28px;font-weight:700;color:var(--text-muted);">${totalSkipped}</div><div style="font-size:13px;color:var(--text-muted);margin-top:4px;">跳过</div></div>`;
+                            if (totalFailed > 0) html += `<div style="padding:12px 20px;background:var(--danger-light);border-radius:var(--radius);min-width:100px;text-align:center;border:1px solid var(--border-default);"><div style="font-size:28px;font-weight:700;color:var(--danger);">!${totalFailed}</div><div style="font-size:13px;color:var(--text-muted);margin-top:4px;">失败</div></div>`;
                             html += '</div>';
-                            
-                            // 图例说明
-                            if (totalCreated > 0 || totalUpdated > 0 || totalDeleted > 0 || totalFailed > 0) {
-                                html += '<div style="font-size:11px;color:#999;margin-bottom:12px;">符号：+新增 ~更新 -删除 ⏭跳过（已存在） !失败</div>';
-                            }
-                            
-                            // 详细分解（按方向展示，用中文）
                             html += '<div style="font-size:13px;line-height:1.8;">';
                             for (const [label, vals] of Object.entries(data.results)) {
                                 let parts = [];
-                                if (vals.created) parts.push(`<span style="color:#4caf50;">新增 ${vals.created}</span>`);
-                                if (vals.updated) parts.push(`<span style="color:#2196f3;">更新 ${vals.updated}</span>`);
-                                if (vals.deleted) parts.push(`<span style="color:#f44336;">删除 ${vals.deleted}</span>`);
-                                if (vals.uptodate) parts.push(`<span style="color:#888;">跳过 ${vals.uptodate}</span>`);
-                                if (vals.duplicate) parts.push(`<span style="color:#f39c12;">重复 ${vals.duplicate}</span>`);
-                                if (vals.invalid) parts.push(`<span style="color:#999;">无效 ${vals.invalid}</span>`);
-                                if (vals.failed) parts.push(`<span style="color:#f44336;">失败 ${vals.failed}</span>`);
-                                
-                                // 计算变化量
+                                if (vals.created) parts.push(`<span style="color:var(--success);">新增 ${vals.created}</span>`);
+                                if (vals.updated) parts.push(`<span style="color:var(--info);">更新 ${vals.updated}</span>`);
+                                if (vals.deleted) parts.push(`<span style="color:var(--danger);">删除 ${vals.deleted}</span>`);
+                                if (vals.uptodate) parts.push(`<span style="color:var(--text-muted);">跳过 ${vals.uptodate}</span>`);
+                                if (vals.duplicate) parts.push(`<span style="color:var(--warning);">重复 ${vals.duplicate}</span>`);
+                                if (vals.invalid) parts.push(`<span style="color:var(--text-muted);">无效 ${vals.invalid}</span>`);
+                                if (vals.failed) parts.push(`<span style="color:var(--danger);">失败 ${vals.failed}</span>`);
                                 const changes = (vals.created || 0) + (vals.updated || 0) + (vals.deleted || 0);
-                                const changeText = changes > 0 ? `<span style="background:#fff3e0;padding:2px 6px;border-radius:4px;font-size:11px;margin-left:6px;">变化 ${changes}</span>` : '';
-                                
-                                html += `<div style="padding:8px 0;border-bottom:1px solid #e0e0e0;"><span style="font-weight:600;">${label}</span>${changeText}：${parts.length > 0 ? parts.join('，') : '<span style="color:#888;">无变化</span>'}</div>`;
+                                const changeText = changes > 0 ? `<span style="background:var(--warning-light);padding:2px 6px;border-radius:var(--radius-sm);font-size:11px;margin-left:6px;color:var(--warning-text);">变化 ${changes}</span>` : '';
+                                html += `<div style="padding:8px 0;border-bottom:1px solid var(--border-default);"><span style="font-weight:600;">${label}</span>${changeText}: ${parts.length > 0 ? parts.join(', ') : '<span style="color:var(--text-muted);">无变化</span>'}</div>`;
                             }
                             html += '</div>';
-                            
-                            // 错误信息
                             if (data.errors && data.errors.length > 0) {
-                                html += '<div style="margin-top:12px;padding:10px;background:#ffebee;border-radius:6px;font-size:12px;color:#c62828;"><div style="font-weight:600;margin-bottom:6px;">❌ 错误详情:</div>' + data.errors.slice(0, 5).map(e => '<div style="margin-top:4px;">• ' + e + '</div>').join('') + (data.errors.length > 5 ? '<div style="color:#888;margin-top:4px;">... 还有 ' + (data.errors.length - 5) + ' 个错误</div>' : '') + '</div>';
+                                html += '<div style="margin-top:12px;padding:10px;background:var(--danger-light);border-radius:var(--radius);font-size:12px;color:var(--danger-text);border:1px solid var(--danger);"><div style="font-weight:600;margin-bottom:6px;">错误详情:</div>' + data.errors.slice(0, 5).map(e => '<div style="margin-top:4px;">- ' + e + '</div>').join('') + (data.errors.length > 5 ? '<div style="color:var(--text-muted);margin-top:4px;">... 还有 ' + (data.errors.length - 5) + ' 个错误</div>' : '') + '</div>';
                             }
                             resultContent.innerHTML = html;
                             result.style.display = 'block';
@@ -738,35 +244,23 @@
             }
         } catch (e) {
             status.textContent = '同步失败: ' + e.message;
-            status.style.color = '#e74c3c';
-            barDiv.style.background = '#e74c3c';
+            status.style.color = 'var(--danger)';
+            barDiv.style.background = 'var(--danger)';
             addLog('请求失败: ' + e.message, 'error');
         } finally {
             btns.forEach(b => b.disabled = false);
         }
     }
 
-    // 全盘同步：二次确认 + 警告提示
     async function fullSyncConfirm(direction) {
         const isToFeishu = direction === 'to-feishu';
         const actionText = isToFeishu ? '以本地覆盖云端' : '以云端覆盖本地';
         const targetText = isToFeishu ? '云端（飞书）表的所有数据' : '本地数据库的所有数据';
         const sourceText = isToFeishu ? '本地数据库' : '云端（飞书）';
-
-        // 第一层确认：警告
-        const msg1 = `⚠️ 危险操作：${actionText}\n\n这将会：\n1. 清空 ${targetText}\n2. 用 ${sourceText} 的数据完全覆盖\n\n此操作不可逆！请确认你已备份重要数据。`;
+        const msg1 = `危险操作: ${actionText}\n\n这将会:\n1. 清空 ${targetText}\n2. 用 ${sourceText} 的数据完全覆盖\n\n此操作不可逆! 请确认你已备份重要数据。`;
         if (!confirm(msg1)) return;
-
-        // 第二层确认：输入"确认"二次验证
-        const confirmText = prompt(`请输入"确认"以执行${actionText}（核武器操作）：`);
-        if (confirmText !== '确认') {
-            if (confirmText !== null) {
-                showToast('已取消：未输入"确认"', 'info');
-            }
-            return;
-        }
-
-        // 执行
+        const confirmText = prompt(`请输入"确认"以执行${actionText}（核武器操作）:`);
+        if (confirmText !== '确认') { if (confirmText !== null) showToast('已取消: 未输入"确认"', 'info'); return; }
         const url = '/api/feishu/sync/full';
         const btns = document.querySelectorAll('[onclick*="feishuSyncSSE"], [onclick*="fullSyncConfirm"]');
         btns.forEach(b => b.disabled = true);
@@ -777,31 +271,25 @@
         const barDiv = document.getElementById('feishu-sync-bar');
         const logDiv = document.getElementById('feishu-sync-log');
         status.textContent = '正在执行' + actionText + '...';
-        status.style.color = '#ff9800';
+        status.style.color = 'var(--warning)';
         result.style.display = 'none';
         progressDiv.style.display = 'block';
         logDiv.style.display = 'block';
         logDiv.innerHTML = '';
         barDiv.style.width = '0%';
-        barDiv.style.background = '#ff9800';
-
+        barDiv.style.background = 'var(--warning)';
         function addLog(text, level) {
-            const colors = {ok: '#27ae60', error: '#e74c3c', info: '#3498db'};
+            const colors = {ok: 'var(--success)', error: 'var(--danger)', info: 'var(--info)'};
             const div = document.createElement('div');
-            div.style.color = colors[level] || '#666';
+            div.style.color = colors[level] || 'var(--text-secondary)';
             div.style.padding = '3px 0';
             div.textContent = text;
             logDiv.appendChild(div);
             logDiv.scrollTop = logDiv.scrollHeight;
         }
-
         try {
             addLog(actionText + '（核武器）', 'info');
-            const resp = await fetch(url, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({direction: direction}),
-            });
+            const resp = await fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({direction: direction}) });
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
@@ -813,43 +301,33 @@
                 buffer = lines.pop();
                 for (const line of lines) {
                     if (!line.startsWith('data: ')) continue;
-                    let data;
-                    try { data = JSON.parse(line.slice(6)); } catch { continue; }
-                    if (data.type === 'start') {
-                        addLog(data.message, 'info');
-                    } else if (data.type === 'progress') {
-                        status.textContent = data.message;
-                        addLog('→ ' + data.message, 'info');
-                    } else if (data.type === 'log') {
-                        addLog(data.message, data.level);
-                    } else if (data.type === 'stats') {
-                        const pct = (data.step / data.total) * 100;
-                        barDiv.style.width = pct + '%';
-                    } else if (data.type === 'complete') {
+                    let data; try { data = JSON.parse(line.slice(6)); } catch { continue; }
+                    if (data.type === 'start') addLog(data.message, 'info');
+                    else if (data.type === 'progress') { status.textContent = data.message; addLog('-> ' + data.message, 'info'); }
+                    else if (data.type === 'log') addLog(data.message, data.level);
+                    else if (data.type === 'stats') { const pct = (data.step / data.total) * 100; barDiv.style.width = pct + '%'; }
+                    else if (data.type === 'complete') {
                         barDiv.style.width = '100%';
-                        barDiv.style.background = data.success ? '#27ae60' : '#e74c3c';
+                        barDiv.style.background = data.success ? 'var(--success)' : 'var(--danger)';
                         status.textContent = data.message;
-                        status.style.color = data.success ? '#27ae60' : '#e74c3c';
+                        status.style.color = data.success ? 'var(--success)' : 'var(--danger)';
                         addLog(data.message, data.success ? 'ok' : 'error');
                         if (data.results) {
                             let totalCreated = 0, totalUpdated = 0, totalDeleted = 0, totalSkipped = 0, totalFailed = 0;
                             for (const [, vals] of Object.entries(data.results)) {
-                                totalCreated += vals.created || 0;
-                                totalUpdated += vals.updated || 0;
-                                totalDeleted += vals.deleted || 0;
-                                totalSkipped += (vals.uptodate || 0) + (vals.duplicate || 0) + (vals.invalid || 0);
-                                totalFailed += vals.failed || 0;
+                                totalCreated += vals.created || 0; totalUpdated += vals.updated || 0; totalDeleted += vals.deleted || 0;
+                                totalSkipped += (vals.uptodate || 0) + (vals.duplicate || 0) + (vals.invalid || 0); totalFailed += vals.failed || 0;
                             }
-                            let summary = '本次同步：';
+                            let summary = '本次同步: ';
                             const parts = [];
-                            if (totalCreated > 0) parts.push(`<span style="color:#4caf50;font-weight:600;">新增 ${totalCreated} 条</span>`);
-                            if (totalUpdated > 0) parts.push(`<span style="color:#2196f3;font-weight:600;">更新 ${totalUpdated} 条</span>`);
-                            if (totalDeleted > 0) parts.push(`<span style="color:#f44336;font-weight:600;">删除 ${totalDeleted} 条</span>`);
-                            if (totalSkipped > 0) parts.push(`<span style="color:#888;">跳过 ${totalSkipped} 条</span>`);
-                            if (totalFailed > 0) parts.push(`<span style="color:#f44336;">失败 ${totalFailed} 条</span>`);
-                            summary += parts.length > 0 ? parts.join('，') : '<span style="color:#888;">无变化</span>';
-                            let html = `<div style="padding:12px;background:#fff;border-radius:6px;margin-bottom:12px;font-size:14px;">${summary}</div>`;
-                            html += '<div style="font-size:13px;color:#666;">详细分解：</div>';
+                            if (totalCreated > 0) parts.push(`<span style="color:var(--success);font-weight:600;">新增 ${totalCreated} 条</span>`);
+                            if (totalUpdated > 0) parts.push(`<span style="color:var(--info);font-weight:600;">更新 ${totalUpdated} 条</span>`);
+                            if (totalDeleted > 0) parts.push(`<span style="color:var(--danger);font-weight:600;">删除 ${totalDeleted} 条</span>`);
+                            if (totalSkipped > 0) parts.push(`<span style="color:var(--text-muted);">跳过 ${totalSkipped} 条</span>`);
+                            if (totalFailed > 0) parts.push(`<span style="color:var(--danger);">失败 ${totalFailed} 条</span>`);
+                            summary += parts.length > 0 ? parts.join(', ') : '<span style="color:var(--text-muted);">无变化</span>';
+                            let html = `<div style="padding:12px;background:var(--bg-surface);border-radius:var(--radius);margin-bottom:12px;font-size:14px;border:1px solid var(--border-default);">${summary}</div>`;
+                            html += '<div style="font-size:13px;color:var(--text-secondary);">详细分解:</div>';
                             html += '<div style="margin-top:8px;">';
                             for (const [label, vals] of Object.entries(data.results)) {
                                 const subParts = [];
@@ -857,11 +335,11 @@
                                 if (vals.updated) subParts.push(`更新 ${vals.updated}`);
                                 if (vals.deleted) subParts.push(`删除 ${vals.deleted}`);
                                 if (vals.failed) subParts.push(`失败 ${vals.failed}`);
-                                html += `<div style="padding:6px 0;border-bottom:1px solid #e0e0e0;"><span style="font-weight:600;">${label}</span>：${subParts.length > 0 ? subParts.join('，') : '<span style="color:#888;">无变化</span>'}</div>`;
+                                html += `<div style="padding:6px 0;border-bottom:1px solid var(--border-default);"><span style="font-weight:600;">${label}</span>: ${subParts.length > 0 ? subParts.join(', ') : '<span style="color:var(--text-muted);">无变化</span>'}</div>`;
                             }
                             html += '</div>';
                             if (data.errors && data.errors.length > 0) {
-                                html += '<div style="margin-top:12px;padding:10px;background:#ffebee;border-radius:6px;font-size:12px;color:#c62828;"><div style="font-weight:600;margin-bottom:6px;">❌ 错误详情:</div>' + data.errors.slice(0, 5).map(e => '<div style="margin-top:4px;">• ' + e + '</div>').join('') + '</div>';
+                                html += '<div style="margin-top:12px;padding:10px;background:var(--danger-light);border-radius:var(--radius);font-size:12px;color:var(--danger-text);border:1px solid var(--danger);"><div style="font-weight:600;margin-bottom:6px;">错误详情:</div>' + data.errors.slice(0, 5).map(e => '<div style="margin-top:4px;">- ' + e + '</div>').join('') + '</div>';
                             }
                             resultContent.innerHTML = html;
                             result.style.display = 'block';
@@ -872,80 +350,10 @@
             }
         } catch (e) {
             status.textContent = '全盘同步失败: ' + e.message;
-            status.style.color = '#e74c3c';
+            status.style.color = 'var(--danger)';
             addLog('请求失败: ' + e.message, 'error');
         } finally {
             btns.forEach(b => b.disabled = false);
-        }
-    }
-
-    async function validateCookies() {
-        const btn = document.getElementById('btn-validate-cookie');
-        const resultDiv = document.getElementById('cookie-validate-result');
-        const logDiv = document.getElementById('cookie-validate-log');
-        const barDiv = document.getElementById('cookie-validate-bar');
-        const statsDiv = document.getElementById('cookie-validate-stats');
-
-        btn.disabled = true;
-        btn.textContent = '验证中...';
-        resultDiv.style.display = 'block';
-        logDiv.innerHTML = '';
-        barDiv.style.width = '0%';
-        statsDiv.textContent = '';
-
-        function addLog(text, level) {
-            const colors = {ok: '#27ae60', error: '#e74c3c', info: '#3498db'};
-            const div = document.createElement('div');
-            div.style.color = colors[level] || '#666';
-            div.style.padding = '4px 0';
-            div.textContent = text;
-            logDiv.appendChild(div);
-            logDiv.scrollTop = logDiv.scrollHeight;
-        }
-
-        try {
-            const resp = await fetch('/api/cookies/validate', {method: 'POST'});
-            const reader = resp.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-                const {done, value} = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, {stream: true});
-                const lines = buffer.split('\n');
-                buffer = lines.pop();
-
-                for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue;
-                    let data;
-                    try { data = JSON.parse(line.slice(6)); } catch { continue; }
-
-                    if (data.type === 'start') {
-                        addLog('开始验证 ' + (data.total || 0) + ' 个 Cookie...', 'info');
-                    } else if (data.type === 'progress') {
-                        addLog(data.message, 'info');
-                    } else if (data.type === 'log') {
-                        addLog(data.message, data.level);
-                    } else if (data.type === 'stats') {
-                        const pct = data.total > 0 ? ((data.valid + data.invalid) / data.total * 100) : 0;
-                        barDiv.style.width = pct + '%';
-                        statsDiv.textContent = '有效: ' + data.valid + ' / 失效: ' + data.invalid + ' / 共: ' + data.total;
-                    } else if (data.type === 'complete') {
-                        barDiv.style.width = '100%';
-                        barDiv.style.background = data.success ? '#27ae60' : '#e74c3c';
-                        statsDiv.textContent = data.message;
-                        addLog(data.message, data.success ? 'ok' : 'error');
-                        refreshStats();
-                        showTable('cookie_cache', currentPage, currentKeyword);
-                    }
-                }
-            }
-        } catch (e) {
-            addLog('验证请求失败: ' + e.message, 'error');
-        } finally {
-            btn.disabled = false;
-            btn.textContent = '🔍 验证Cookie';
         }
     }
 </script>
