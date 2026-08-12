@@ -148,6 +148,10 @@
     box-shadow: var(--shadow-xs), var(--glow-primary);
     font-weight: 600;
 }
+/* 选中态图标统一用背景高对比色,避免各自颜色在 accent 背景上看不清 */
+.tab-btn.active .tab-icon {
+    color: var(--text-on-accent, #0A0B0F) !important;
+}
 .tab-btn .tab-icon { font-size: 15px; transition: transform var(--transition-fast); }
 .tab-btn:hover .tab-icon { transform: scale(1.15); }
 
@@ -293,8 +297,8 @@
 }
 .tbl-grid {
     width: 100%;
-    height: calc(100vh - 340px);
-    min-height: 300px;
+    height: calc(100vh - 280px);
+    min-height: 400px;
 }
 
 /* ===== AG Grid Obsidian 主题覆盖 ===== */
@@ -482,6 +486,19 @@
 
 /* ===== 分页 ===== */
 .tbl-pagination { margin-top: 12px; }
+.pg-size {
+    padding: 6px 8px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xs);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    outline: none;
+    margin-right: 8px;
+}
+.pg-size:hover { border-color: var(--accent); color: var(--accent); }
 .pg-wrap {
     display: flex; justify-content: center; align-items: center;
     gap: 4px; flex-wrap: wrap;
@@ -718,7 +735,7 @@ input[type="checkbox"]:disabled {
         'collection_history': 'hist',
         'scheduled_tasks': 'task'
     };
-    const PAGE_SIZE = 50;
+    let PAGE_SIZE = parseInt(localStorage.getItem('doukhub-table-page-size')) || 50;
 
     const HIDDEN_COLS = [];
 
@@ -903,6 +920,28 @@ input[type="checkbox"]:disabled {
         return checkbox;
     }
 
+    // 状态灯渲染器(用于"已获取信息/已同步"):点击可切换状态,
+    // 代表"是否已获取过信息"这种反馈型标记,与"启用"开关视觉上区分。
+    function statusLightRenderer(params) {
+        const on = params.value === true || params.value === 1;
+        const el = document.createElement('span');
+        el.style.cssText = 'display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:2px 8px;border-radius:var(--radius-full);font-size:11px;font-weight:600;user-select:none;transition:all var(--transition-fast);border:1px solid transparent;';
+        const dot = document.createElement('i');
+        dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + (on ? 'var(--success)' : 'var(--text-muted)') + ';box-shadow:' + (on ? '0 0 6px var(--success)' : 'none') + ';';
+        const label = document.createElement('span');
+        label.textContent = on ? '已获取' : '未获取';
+        label.style.color = on ? 'var(--success)' : 'var(--text-muted)';
+        el.appendChild(dot);
+        el.appendChild(label);
+        el.title = '点击切换状态(未获取将在下次同步时重新获取)';
+        el.addEventListener('click', () => {
+            const field = params.colDef.field;
+            const newValue = on ? 0 : 1;
+            params.node.setDataValue(field, newValue);
+        });
+        return el;
+    }
+
     function tagsRenderer(params) {
         let val = params.value;
         if (!val) return '<span style="color: var(--text-muted);">-</span>';
@@ -917,7 +956,7 @@ input[type="checkbox"]:disabled {
             }
         }
         if (tags.length > 0) {
-            return tags.slice(0, 3).map(t => '<span style="display:inline-block;padding:1px 8px;border-radius:4px;font-size:11px;background:var(--surface-overlay);color:var(--text-secondary);margin-right:3px;border:1px solid var(--border-default);">' + (String(t).length > 12 ? String(t).substring(0, 12) + '…' : t) + '</span>').join('') + (tags.length > 3 ? '<span style="font-size:11px;color:var(--text-muted);">+' + (tags.length - 3) + '</span>' : '');
+            return tags.slice(0, 3).map(t => '<span style="display:inline-block;padding:0 5px;border-radius:3px;font-size:10px;line-height:16px;background:var(--surface-overlay);color:var(--text-secondary);margin-right:2px;border:1px solid var(--border-default);">' + (String(t).length > 12 ? String(t).substring(0, 12) + '…' : t) + '</span>').join('') + (tags.length > 3 ? '<span style="font-size:11px;color:var(--text-muted);">+' + (tags.length - 3) + '</span>' : '');
         }
         let display = String(val);
         if (display.length > 30) display = display.substring(0, 30) + '…';
@@ -1326,7 +1365,12 @@ input[type="checkbox"]:disabled {
             }
 
             if (isEditable && isBool) {
-                colDef.cellRenderer = editableCheckboxRenderer;
+                // "已获取信息/已同步"用状态灯(反馈型标记),"启用"等用开关
+                if (field.name === '已获取信息' || field.name === '已同步') {
+                    colDef.cellRenderer = statusLightRenderer;
+                } else {
+                    colDef.cellRenderer = editableCheckboxRenderer;
+                }
                 colDef.editable = false;
             } else if (isEditable && editorCfg) {
                 const renderer = FIELD_RENDERERS[field.name];
@@ -1538,8 +1582,9 @@ input[type="checkbox"]:disabled {
         const totalPages = Math.max(1, Math.ceil(total / limit));
         const curPage = Math.floor(offset / limit) + 1;
         const pgDiv = document.getElementById('pagination');
-        if (totalPages <= 1) { pgDiv.innerHTML = '<div class="pg-info" style="text-align:center;">共 ' + total + ' 条</div>'; return; }
-        let html = '<div class="pg-wrap">';
+        const sizeSel = '<select class="pg-size" onchange="changePageSize(this.value)" title="每页显示条数">' + [50, 100, 200].map(n => '<option value="' + n + '"' + (n === PAGE_SIZE ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>';
+        if (totalPages <= 1) { pgDiv.innerHTML = '<div class="pg-wrap">' + sizeSel + '<span class="pg-info" style="text-align:center;">共 ' + total + ' 条</span></div>'; return; }
+        let html = '<div class="pg-wrap">' + sizeSel;
         html += '<button class="pg-btn" ' + (curPage <= 1 ? 'disabled' : '') + ' onclick="gotoPage(' + (curPage - 1) + ')"><i class="ph ph-caret-left"></i></button>';
         let start = Math.max(1, curPage - 2), end = Math.min(totalPages, start + 4);
         start = Math.max(1, end - 4);
@@ -1555,6 +1600,12 @@ input[type="checkbox"]:disabled {
     }
 
     function gotoPage(page) { showTable(currentTable, page, currentKeyword); }
+
+    function changePageSize(size) {
+        PAGE_SIZE = parseInt(size) || 50;
+        localStorage.setItem('doukhub-table-page-size', PAGE_SIZE);
+        showTable(currentTable, 1, currentKeyword);
+    }
 
     // =========================================================================
     // 搜索（增强：实时清除按钮 + 防抖）
