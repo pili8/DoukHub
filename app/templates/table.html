@@ -1553,7 +1553,7 @@ input[type="checkbox"]:disabled {
             document.getElementById('table-tabs').dataset.lastTable = tableName;
         }
         updateTabActive();
-        document.getElementById('table-main').style.display = 'block';
+        document.getElementById('table-main').style.display = 'flex';
         const validateBtn = document.getElementById('btn-validate-cookie');
         if (validateBtn) validateBtn.style.display = tableName === 'cookie_cache' ? '' : 'none';
         document.getElementById('table-title').textContent = TABLE_NAMES[tableName];
