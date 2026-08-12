@@ -84,7 +84,7 @@
   --bg-hover: var(--glass-surface-hover);
   --bg-muted: var(--glass-surface-muted);
   --bg-elevated: var(--glass-surface-elevated);
-  --bg-input: var(--glass-surface-input);
+  --bg-input: rgba(255, 255, 255, 0.85);
 
   --text-primary: var(--glass-text-primary);
   --text-secondary: var(--glass-text-secondary);
@@ -154,10 +154,11 @@
   color-scheme: light;
 
   /* --- 通用交互层变量(供表格菜单等共享组件引用) --- */
-  --surface-overlay: var(--glass-surface-elevated);
+  --surface-overlay: var(--glass-surface-active);
   --surface-raised: var(--glass-surface-elevated);
   --menu-hover: var(--glass-accent-light);
   --text-tertiary: var(--glass-text-muted);
+  --text-on-accent: var(--glass-text-on-accent);
 }
 
 /* ===== 2. Reset & Base ===== */

@@ -84,6 +84,7 @@
   --surface-raised: var(--bg-surface);
   --menu-hover: var(--accent-light);
   --text-tertiary: var(--text-muted);
+  --text-on-accent: var(--text-on-dark);
 }
 
 /* ===== Dark Mode ===== */

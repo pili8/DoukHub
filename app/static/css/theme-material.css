@@ -158,6 +158,7 @@
   --surface-raised: var(--md-surface-container);
   --menu-hover: var(--md-primary-container);
   --text-tertiary: var(--md-on-surface-variant);
+  --text-on-accent: var(--md-on-primary);
 }
 
 /* ===== Dark Mode (M3 Dark scheme) ===== */
