@@ -33,11 +33,30 @@ def make_icon() -> Image.Image:
 SERVER_PROC: subprocess.Popen | None = None
 
 
+def free_port() -> None:
+    """清理占用 PORT 端口的残留进程(上次异常退出可能遗留孤儿进程)。"""
+    try:
+        out = subprocess.run(
+            ["netstat", "-aon"], capture_output=True, text=True,
+            timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+        ).stdout
+    except Exception:
+        return
+    for line in out.splitlines():
+        if f":{PORT}" in line and "LISTENING" in line:
+            pid = line.split()[-1]
+            if pid.isdigit() and pid != "0":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", pid],
+                               capture_output=True, timeout=10,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+
+
 def start_server() -> bool:
     """启动 uvicorn 服务子进程(隐藏窗口,热重载由托盘文件监控实现)。返回是否启动成功。"""
     global SERVER_PROC
     if SERVER_PROC and SERVER_PROC.poll() is None:
         return True  # 已在运行
+    free_port()
     cmd = [
         sys.executable, "-m", "uvicorn", "app.main:app",
         "--host", "0.0.0.0", "--port", str(PORT),
@@ -133,10 +152,11 @@ def get_service_manager():
 
 
 def start_downloaders():
-    """显式拉起下载器并持有进程句柄,使托盘能真正停/启下载器。
+    """在后台线程拉起下载器并持有进程句柄,使托盘能真正停/启下载器。
 
-    uvicorn 的 lifespan 也会在后台调用 start_all,但端口已占用时
-    DownloaderService.start() 幂等跳过,不冲突。
+    必须在后台执行:downloader.start() 启动后最多轮询等待 30 秒,
+    若同步调用会阻塞 DoukHub 服务启动。uvicorn 的 lifespan 也会在后台
+    调用 start_all,但端口已占用时 DownloaderService.start() 幂等跳过,不冲突。
     """
     try:
         svc = get_service_manager()
@@ -144,6 +164,11 @@ def start_downloaders():
             logger.info(r.get("message", str(r)))
     except Exception as e:
         logger.warning(f"启动下载器异常: {e}")
+
+
+def start_downloaders_async() -> None:
+    """后台线程执行 start_downloaders(),避免阻塞服务启动。"""
+    threading.Thread(target=start_downloaders, daemon=True).start()
 
 
 # --- 菜单动作 ---
@@ -205,8 +230,9 @@ def main():
     )
     icon = pystray.Icon("doukhub", make_icon(), "DoukHub", menu)
 
-    # 先同步拉起下载器并持有句柄,再启动服务(uvicorn lifespan 检测到端口占用会幂等跳过)
-    start_downloaders()
+    # 后台异步拉起下载器(避免阻塞服务启动),再启动服务
+    # (uvicorn lifespan 检测到端口占用会幂等跳过)
+    start_downloaders_async()
     if start_server():
         _reopen_ui_after_ready()
 
