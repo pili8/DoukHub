@@ -78,20 +78,54 @@ def wait_ready(timeout: float = 20.0) -> bool:
     return False
 
 
+# --- 下载器管理(复用现有 ServiceManager) ---
+_svc = None
+
+
+def get_service_manager():
+    global _svc
+    if _svc is None:
+        from app.core.config import Config
+        from app.services.downloader import ServiceManager
+        cfg = Config()
+        _svc = ServiceManager(
+            ttd_path=cfg.ttd_path,
+            ttd_port=cfg.ttd_port,
+            xhs_path=cfg.xhs_path,
+            xhs_port=cfg.xhs_port,
+        )
+    return _svc
+
+
 # --- 菜单动作 ---
 def open_ui(icon, item):
     webbrowser.open(URL)
 
 
 def restart_doukhub_only(icon, item):
-    print("restart_doukhub_only")
+    logger.info("只重启 DoukHub")
+    stop_server()
+    start_server()
 
 
 def restart_all(icon, item):
-    print("restart_all")
+    logger.info("重启全部(含下载器)")
+    svc = get_service_manager()
+    svc.stop_all()
+    stop_server()
+    start_server()
+    svc.start_all()
 
 
 def quit_app(icon, item):
+    logger.info("退出")
+    stop_server()
+    try:
+        svc = get_service_manager()
+        svc.stop_all()
+        svc.close()
+    except Exception as e:
+        logger.warning(f"停止下载器异常: {e}")
     icon.stop()
 
 
