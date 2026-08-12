@@ -92,7 +92,7 @@
     }
 
     async function deleteTask(id) {
-        if (!confirm('确定删除此定时任务？')) return;
+        if (!await confirmDialog('将永久删除此定时任务，此操作不可撤销。', { title: '删除确认', confirmText: '删除' })) return;
         const data = await apiCall(`/api/schedule/${id}/delete`, 'POST');
         if (data.success) {
             showToast('已删除');
@@ -101,7 +101,7 @@
     }
 
     async function runNow(id) {
-        if (!confirm('确定立即执行此任务？')) return;
+        if (!await confirmDialog('', { title: '执行确认', confirmText: '执行', danger: false })) return;
         showToast('正在执行...', 'info');
         const data = await apiCall(`/api/schedule/${id}/run`, 'POST');
         showToast(data.message, data.success ? 'success' : 'error');

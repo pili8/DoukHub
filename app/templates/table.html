@@ -1591,7 +1591,8 @@ input[type="checkbox"]:disabled {
     // 删除
     // =========================================================================
     async function deleteRecord(tableName, recordId) {
-        if (!confirm('确定删除记录 ' + recordId + '？')) return;
+        const ok = await confirmDialog('将永久删除记录 ' + recordId + '，此操作不可撤销。', { title: '删除确认', confirmText: '删除' });
+        if (!ok) return;
         try {
             const data = await apiCall('/api/database/table/' + tableName + '/record/' + recordId, 'DELETE');
             if (data.success) { showToast('已删除', 'success'); showTable(tableName, currentPage, currentKeyword); }
@@ -1635,7 +1636,8 @@ input[type="checkbox"]:disabled {
         const selectedRows = gridApi.getSelectedRows();
         const ids = selectedRows.map(r => r.record_id || String(r.ID || ''));
         if (!ids.length) return;
-        if (!confirm('确定删除选中的 ' + ids.length + ' 条记录？')) return;
+        const ok = await confirmDialog('将永久删除选中的 ' + ids.length + ' 条记录，此操作不可撤销。', { title: '删除确认', confirmText: '删除' });
+        if (!ok) return;
         try {
             const data = await apiCall('/api/database/batch-delete', 'POST', { table: currentTable, record_ids: ids });
             if (data.success) {
@@ -1653,7 +1655,8 @@ input[type="checkbox"]:disabled {
         const field = document.getElementById('batch-field-select').value;
         const value = document.getElementById('batch-value-input').value;
         if (!field) { showToast('请选择字段', 'error'); return; }
-        if (!confirm('将 ' + ids.length + ' 条记录的「' + field + '」改为「' + value + '」？')) return;
+        const ok = await confirmDialog('将 ' + ids.length + ' 条记录的「' + field + '」改为「' + value + '」，此操作不可撤销。', { title: '更新确认', confirmText: '更新', danger: false });
+        if (!ok) return;
         try {
             const data = await apiCall('/api/database/batch-update', 'POST', { table: currentTable, record_ids: ids, updates: { [field]: value } });
             if (data.success) {
@@ -1831,7 +1834,8 @@ input[type="checkbox"]:disabled {
         const cbs = document.querySelectorAll('.dup-checkbox:checked');
         const ids = Array.from(cbs).map(cb => cb.value);
         if (!ids.length) { showToast('请选择要删除的记录', 'error'); return; }
-        if (!confirm('确定删除选中的 ' + ids.length + ' 条记录？')) return;
+        const ok = await confirmDialog('将永久删除选中的 ' + ids.length + ' 条记录，此操作不可撤销。', { title: '删除确认', confirmText: '删除' });
+        if (!ok) return;
         try {
             const data = await apiCall('/api/database/batch-delete', 'POST', { table: currentTable, record_ids: ids });
             if (data.success) { showToast('删除完成: 成功 ' + data.data.deleted, 'success'); checkDuplicates(); }
@@ -1850,7 +1854,8 @@ input[type="checkbox"]:disabled {
         const originalText = btn ? btn.innerHTML : '导出';
         const scope = currentKeyword ? '（"' + currentKeyword + '"）' : '';
         const countInfo = currentTotal > 0 ? '共 ' + currentTotal + ' 条' : '全部数据';
-        if (!confirm('导出 ' + TABLE_NAMES[currentTable] + ' ' + scope + '？\n' + countInfo + '，下载为 CSV。')) return;
+        const ok = await confirmDialog('导出 ' + TABLE_NAMES[currentTable] + ' ' + scope + '？' + countInfo + '，下载为 CSV。', { title: '导出确认', confirmText: '导出', danger: false });
+        if (!ok) return;
         let url = '/api/database/table/' + currentTable + '/export';
         if (currentKeyword) url += '?search=' + encodeURIComponent(currentKeyword);
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ph ph-circle-notch" style="animation:spin 0.8s linear infinite;"></i>'; }

@@ -208,7 +208,7 @@
     }
     async function updateAll() {
         const status = document.getElementById('update-status');
-        if (!confirm('确定更新所有 Downloader？正在运行的服务会自动重启。')) return;
+        if (!await confirmDialog('更新所有 Downloader 后，正在运行的服务会自动重启。', { title: '更新确认', confirmText: '更新', danger: false })) return;
         status.textContent = '正在更新...';
         status.style.color = 'var(--text-muted)';
         const data = await apiCall('/api/services/update-all', 'POST');

@@ -186,7 +186,7 @@
         const msg = document.getElementById(`kernel-${prefix}-msg`);
         const btnEl = document.getElementById(`kernel-${prefix}-btn`);
 
-        if (!confirm(`确定从 GitHub 下载 ${name} 内核源码吗？\n（需要已安装 git）`)) return;
+        if (!await confirmDialog('将从 GitHub 下载 ' + name + ' 内核源码，需要已安装 git。', { title: '下载确认', confirmText: '下载', danger: false })) return;
 
         if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ph ph-spinner"></i> 下载中...'; }
         if (msg) msg.textContent = '正在从 GitHub 克隆源码, 请耐心等待...';

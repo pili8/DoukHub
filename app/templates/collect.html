@@ -384,7 +384,7 @@
     }
 
     async function deleteTask(id) {
-        if (!confirm('确定删除此任务？')) return;
+        if (!await confirmDialog('将永久删除此任务，此操作不可撤销。', { title: '删除确认', confirmText: '删除' })) return;
         const data = await apiCall(`/api/schedule/${id}/delete`, 'POST');
         if (data.success) {
             showToast('已删除');

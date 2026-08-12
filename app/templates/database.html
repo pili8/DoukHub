@@ -144,7 +144,7 @@
     }
 
     async function feishuSyncSSE(url, title) {
-        if (!confirm('确定要执行' + title + '吗？')) return;
+        if (!await confirmDialog('确定要执行 ' + title + ' 吗？', { title: '操作确认', confirmText: '执行', danger: false })) return;
         const btns = document.querySelectorAll('[onclick*="feishuSyncSSE"], [onclick*="fullSyncConfirm"]');
         btns.forEach(b => b.disabled = true);
         const status = document.getElementById('feishu-sync-status');
@@ -258,9 +258,9 @@
         const targetText = isToFeishu ? '云端（飞书）表的所有数据' : '本地数据库的所有数据';
         const sourceText = isToFeishu ? '本地数据库' : '云端（飞书）';
         const msg1 = `危险操作: ${actionText}\n\n这将会:\n1. 清空 ${targetText}\n2. 用 ${sourceText} 的数据完全覆盖\n\n此操作不可逆! 请确认你已备份重要数据。`;
-        if (!confirm(msg1)) return;
-        const confirmText = prompt(`请输入"确认"以执行${actionText}（核武器操作）:`);
-        if (confirmText !== '确认') { if (confirmText !== null) showToast('已取消: 未输入"确认"', 'info'); return; }
+        if (!await confirmDialog(msg1, { title: '危险操作', confirmText: '继续' })) return;
+        const typed = await confirmDialog('请输入「确认」以执行' + actionText + '(核武器操作):', { title: '最后确认', confirmText: '执行', requireText: '确认' });
+        if (!typed) { showToast('已取消: 未输入"确认"', 'info'); return; }
         const url = '/api/feishu/sync/full';
         const btns = document.querySelectorAll('[onclick*="feishuSyncSSE"], [onclick*="fullSyncConfirm"]');
         btns.forEach(b => b.disabled = true);
