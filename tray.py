@@ -17,6 +17,9 @@ logger = logging.getLogger("doukhub.tray")
 PORT = 2999
 URL = f"http://127.0.0.1:{PORT}"
 
+ROOT = Path(__file__).resolve().parent
+APP_DIR = ROOT / "app"
+
 
 def make_icon() -> Image.Image:
     """生成一个简单托盘图标(不依赖外部素材文件)"""
@@ -31,19 +34,18 @@ SERVER_PROC: subprocess.Popen | None = None
 
 
 def start_server() -> bool:
-    """启动 uvicorn 服务子进程(reload=True, 隐藏窗口)。返回是否启动成功。"""
+    """启动 uvicorn 服务子进程(隐藏窗口,热重载由托盘文件监控实现)。返回是否启动成功。"""
     global SERVER_PROC
     if SERVER_PROC and SERVER_PROC.poll() is None:
         return True  # 已在运行
-    root = Path(__file__).resolve().parent
     cmd = [
         sys.executable, "-m", "uvicorn", "app.main:app",
-        "--host", "0.0.0.0", "--port", str(PORT), "--reload",
+        "--host", "0.0.0.0", "--port", str(PORT),
     ]
     try:
         SERVER_PROC = subprocess.Popen(
             cmd,
-            cwd=str(root),
+            cwd=str(ROOT),
             creationflags=subprocess.CREATE_NO_WINDOW,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -55,9 +57,17 @@ def start_server() -> bool:
 
 
 def stop_server() -> None:
-    """停止 uvicorn 子进程"""
+    """停止 uvicorn 子进程:taskkill 杀进程树,失败再 terminate/kill 兜底"""
     global SERVER_PROC
-    if SERVER_PROC and SERVER_PROC.poll() is None:
+    if not (SERVER_PROC and SERVER_PROC.poll() is None):
+        SERVER_PROC = None
+        return
+    try:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(SERVER_PROC.pid)],
+                       capture_output=True, timeout=10)
+    except Exception:
+        pass
+    if SERVER_PROC.poll() is None:  # taskkill 失败兜底
         SERVER_PROC.terminate()
         try:
             SERVER_PROC.wait(timeout=10)
@@ -67,15 +77,40 @@ def stop_server() -> None:
 
 
 def wait_ready(timeout: float = 20.0) -> bool:
-    """等待端口就绪"""
+    """等待端口就绪(HTTP 5xx 视为未就绪)"""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            httpx.get(f"http://127.0.0.1:{PORT}/", timeout=1)
-            return True
+            resp = httpx.get(f"http://127.0.0.1:{PORT}/", timeout=1)
+            if resp.status_code < 500:
+                return True
         except Exception:
-            time.sleep(0.5)
+            pass
+        time.sleep(0.5)
     return False
+
+
+def _watch_files() -> None:
+    """后台线程:轮询 app/ 目录 .py 文件 mtime,服务运行中检测到变化则自动重启。
+
+    uvicorn --reload 依赖 Windows 控制台信号,与隐藏窗口互斥,故由托盘自实现。
+    stop/start 不修改文件 mtime,且每次检测后重建快照,不会误触发。
+    """
+    files = {p: p.stat().st_mtime for p in APP_DIR.rglob("*.py")}
+    while True:
+        time.sleep(1)
+        if SERVER_PROC is None or SERVER_PROC.poll() is not None:
+            continue  # 服务未在运行,跳过
+        try:
+            snapshot = {p: p.stat().st_mtime for p in APP_DIR.rglob("*.py")}
+        except OSError:
+            continue  # 遍历期间文件被删,下轮再试
+        if snapshot == files:
+            continue
+        files = snapshot
+        logger.info("检测到 app/ 代码变化,自动重启服务")
+        stop_server()
+        start_server()
 
 
 # --- 下载器管理(复用现有 ServiceManager) ---
@@ -170,12 +205,13 @@ def main():
     )
     icon = pystray.Icon("doukhub", make_icon(), "DoukHub", menu)
 
-    # 启动服务并在就绪后打开浏览器
+    # 先同步拉起下载器并持有句柄,再启动服务(uvicorn lifespan 检测到端口占用会幂等跳过)
+    start_downloaders()
     if start_server():
         _reopen_ui_after_ready()
 
-    # 托盘显式拉起下载器并持有进程句柄(uvicorn lifespan 的 start_all 检测到端口已占用会跳过)
-    threading.Thread(target=start_downloaders, daemon=True).start()
+    # 自实现热重载:监控 app/ 目录文件变化(uvicorn --reload 与隐藏窗口互斥)
+    threading.Thread(target=_watch_files, daemon=True).start()
 
     icon.run()
 
