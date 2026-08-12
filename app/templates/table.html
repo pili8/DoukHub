@@ -337,6 +337,20 @@
     text-transform: uppercase;
 }
 
+/* 表头菜单按钮（竖点） */
+.tbl-header-menu-btn:hover {
+    background: var(--bg-hover);
+    color: var(--accent) !important;
+}
+/* 自写列菜单 */
+.tbl-col-menu {
+    animation: tbl-menu-in 120ms ease-out;
+}
+@keyframes tbl-menu-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 /* AG Grid 行悬停增强 */
 .ag-theme-quartz .ag-row:hover {
     box-shadow: inset 3px 0 0 var(--accent);
@@ -833,6 +847,11 @@ input[type="checkbox"]:disabled {
     let gridApi = null;
     let gridInitialized = false;
     let searchDebounceTimer = null;
+    let currentSortField = '';
+    let currentSortOrder = '';
+    let currentFilterField = '';
+    let currentFilterOp = '';
+    let currentFilterValue = '';
 
     // =========================================================================
     // 自定义单元格渲染器
@@ -951,6 +970,191 @@ input[type="checkbox"]:disabled {
         '同步错误': errorRenderer,
         '状态': statusBadgeRenderer,
     };
+
+    // =========================================================================
+    // 自定义表头组件（点表头不排序，竖点按钮弹自写菜单）
+    // =========================================================================
+    class DoukHeaderComponent {
+        init(params) {
+            this.params = params;
+            this.field = params.column.getColDef().field;
+            this.displayName = params.displayName;
+            this.gui = document.createElement('div');
+            this.gui.style.cssText = 'display:flex;align-items:center;justify-content:space-between;width:100%;height:100%;padding:0 8px;cursor:default;user-select:none;';
+            this._render();
+        }
+        _render() {
+            const isSorted = currentSortField === this.field;
+            const order = isSorted ? currentSortOrder : '';
+            const arrow = order === 'asc' ? '↑' : (order === 'desc' ? '↓' : '');
+            this.gui.innerHTML =
+                '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' +
+                this.displayName.replace(/"/g, '&quot;') + '">' + this.displayName +
+                (isSorted ? '<span style="color:var(--accent);margin-left:4px;font-weight:700;">' + arrow + '</span>' : '') +
+                '</span>' +
+                '<button class="tbl-header-menu-btn" data-field="' + this.field + '" title="菜单：排序/筛选" style="' +
+                'flex-shrink:0;border:none;background:transparent;color:var(--text-muted);cursor:pointer;padding:2px 4px;border-radius:4px;font-size:13px;line-height:1;' +
+                '">⋮</button>';
+            this.gui.querySelector('.tbl-header-menu-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                openColMenu(e, this.field);
+            });
+        }
+        refresh(params) {
+            this._render();
+            return true;
+        }
+        getGui() { return this.gui; }
+        destroy() { this.gui = null; }
+    }
+
+    // =========================================================================
+    // 自写列菜单（排序 + 筛选）
+    // =========================================================================
+    let colMenuEl = null;
+    let colMenuField = '';
+
+    function openColMenu(event, field) {
+        closeColMenu();
+        colMenuField = field;
+        const btn = event.target;
+        const rect = btn.getBoundingClientRect();
+        const menu = document.createElement('div');
+        menu.className = 'tbl-col-menu';
+        menu.style.cssText =
+            'position:fixed;z-index:20000;min-width:200px;background:var(--surface-overlay);' +
+            'border:1px solid var(--border-default);border-radius:var(--radius-sm);' +
+            'box-shadow:var(--shadow-lg);padding:6px;font-size:13px;color:var(--text-primary);';
+        let left = rect.left;
+        let top = rect.bottom + 6;
+        if (left + 220 > window.innerWidth) left = window.innerWidth - 220;
+        if (top + 260 > window.innerHeight) top = rect.top - 260;
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+
+        const isSorted = currentSortField === field;
+        const curOrder = isSorted ? currentSortOrder : '';
+
+        function item(icon, label, active, onClick) {
+            const el = document.createElement('div');
+            el.style.cssText =
+                'display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--radius-xs);' +
+                'cursor:pointer;color:' + (active ? 'var(--accent)' : 'var(--text-primary)') + ';font-weight:' + (active ? '600' : '400');
+            el.innerHTML = '<i class="ph ' + icon + '" style="font-size:15px;"></i><span>' + label + '</span>';
+            el.addEventListener('mouseenter', () => { el.style.background = 'var(--menu-hover)'; });
+            el.addEventListener('mouseleave', () => { el.style.background = 'transparent'; });
+            el.addEventListener('click', onClick);
+            return el;
+        }
+
+        menu.appendChild(item('ph-sort-ascending', '升序', curOrder === 'asc', (e) => {
+            e.stopPropagation();
+            applyColSort(field, 'asc');
+        }));
+        menu.appendChild(item('ph-sort-descending', '降序', curOrder === 'desc', (e) => {
+            e.stopPropagation();
+            applyColSort(field, 'desc');
+        }));
+        menu.appendChild(item('ph-x', '清除排序', false, (e) => {
+            e.stopPropagation();
+            applyColSort(field, '');
+        }));
+
+        // 分隔线
+        const sep = document.createElement('div');
+        sep.style.cssText = 'height:1px;background:var(--border-default);margin:6px 4px;';
+        menu.appendChild(sep);
+
+        // 筛选区
+        const filterRow = document.createElement('div');
+        filterRow.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:2px 2px;';
+        const filterHead = document.createElement('div');
+        filterHead.textContent = '筛选';
+        filterHead.style.cssText = 'font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;padding:2px 6px;';
+        filterRow.appendChild(filterHead);
+
+        const opSelect = document.createElement('select');
+        opSelect.style.cssText = 'padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-xs);font-size:12px;background:var(--bg-input);color:var(--text-primary);font-family:inherit;';
+        opSelect.innerHTML = '<option value="contains">包含</option><option value="equals">等于</option>';
+        if (currentFilterField === field && currentFilterOp) opSelect.value = currentFilterOp;
+
+        const valInput = document.createElement('input');
+        valInput.type = 'text';
+        valInput.placeholder = '筛选值…';
+        valInput.style.cssText = 'padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-xs);font-size:12px;background:var(--bg-input);color:var(--text-primary);font-family:inherit;';
+        if (currentFilterField === field) valInput.value = currentFilterValue || '';
+
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;gap:6px;justify-content:flex-end;';
+
+        const applyBtn = document.createElement('button');
+        applyBtn.textContent = '应用';
+        applyBtn.className = 'btn btn-primary btn-sm';
+        applyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            applyColFilter(field, opSelect.value, valInput.value.trim());
+        });
+        btnRow.appendChild(applyBtn);
+
+        const clearBtn = document.createElement('button');
+        clearBtn.textContent = '清除';
+        clearBtn.className = 'btn btn-secondary btn-sm';
+        clearBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            applyColFilter(field, '', '');
+        });
+        btnRow.appendChild(clearBtn);
+
+        filterRow.appendChild(opSelect);
+        filterRow.appendChild(valInput);
+        filterRow.appendChild(btnRow);
+        menu.appendChild(filterRow);
+
+        document.body.appendChild(menu);
+        colMenuEl = menu;
+        if (valInput.value) valInput.focus();
+    }
+
+    function closeColMenu() {
+        if (colMenuEl) { colMenuEl.remove(); colMenuEl = null; }
+        colMenuField = '';
+    }
+
+    function applyColSort(field, order) {
+        closeColMenu();
+        if (order) {
+            currentSortField = field;
+            currentSortOrder = order;
+        } else {
+            currentSortField = '';
+            currentSortOrder = '';
+        }
+        showTable(currentTable, 1, currentKeyword);
+    }
+
+    function applyColFilter(field, op, value) {
+        closeColMenu();
+        if (op && value) {
+            currentFilterField = field;
+            currentFilterOp = op;
+            currentFilterValue = value;
+        } else {
+            currentFilterField = '';
+            currentFilterOp = '';
+            currentFilterValue = '';
+        }
+        showTable(currentTable, 1, currentKeyword);
+    }
+
+    // 点击外部区域 / Esc 关闭菜单
+    document.addEventListener('click', (e) => {
+        if (colMenuEl && !colMenuEl.contains(e.target) && !e.target.classList.contains('tbl-header-menu-btn')) {
+            closeColMenu();
+        }
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeColMenu();
+    });
 
     // =========================================================================
     // 标签多选编辑器
@@ -1096,12 +1300,13 @@ input[type="checkbox"]:disabled {
             let colDef = {
                 field: field.name,
                 headerName: FIELD_DISPLAY_NAMES[field.name] || field.name,
-                sortable: true,
+                sortable: false,
                 resizable: true,
                 editable: isEditable,
                 width: FIELD_WIDTHS[field.name] || 120,
                 suppressMovable: true,
-                filter: true,
+                filter: false,
+                headerComponent: DoukHeaderComponent,
                 headerClass: (() => { const c = getFieldCategory(tableName, field.name); return c ? 'col-cat-' + c : null; })(),
             };
 
@@ -1181,7 +1386,7 @@ input[type="checkbox"]:disabled {
                 stopEditingWhenCellsLoseFocus: true,
                 undoRedoCellEditing: true,
                 defaultColDef: {
-                    sortable: true,
+                    sortable: false,
                     resizable: true,
                     minWidth: 50,
                     floatingFilter: false,
@@ -1264,6 +1469,18 @@ input[type="checkbox"]:disabled {
         currentTable = tableName;
         currentPage = page;
         currentKeyword = keyword;
+        // 切换表时重置排序/筛选
+        if (typeof currentSortField !== 'undefined' && document.getElementById('table-tabs') &&
+            document.getElementById('table-tabs').dataset.lastTable !== tableName) {
+            currentSortField = '';
+            currentSortOrder = '';
+            currentFilterField = '';
+            currentFilterOp = '';
+            currentFilterValue = '';
+        }
+        if (document.getElementById('table-tabs')) {
+            document.getElementById('table-tabs').dataset.lastTable = tableName;
+        }
         updateTabActive();
         document.getElementById('table-main').style.display = 'block';
         const validateBtn = document.getElementById('btn-validate-cookie');
@@ -1287,6 +1504,8 @@ input[type="checkbox"]:disabled {
         const offset = (page - 1) * PAGE_SIZE;
         let url = '/api/database/table/' + tableName + '?limit=' + PAGE_SIZE + '&offset=' + offset;
         if (keyword) url += '&search=' + encodeURIComponent(keyword);
+        if (currentSortField) url += '&sort_field=' + encodeURIComponent(currentSortField) + '&sort_order=' + encodeURIComponent(currentSortOrder || 'asc');
+        if (currentFilterField && currentFilterValue) url += '&filter_field=' + encodeURIComponent(currentFilterField) + '&filter_value=' + encodeURIComponent(currentFilterValue) + '&filter_op=' + encodeURIComponent(currentFilterOp || 'contains');
         try {
             const data = await apiCall(url, 'GET');
             const records = data.records || [];
