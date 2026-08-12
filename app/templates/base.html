@@ -31,6 +31,9 @@
             <div class="sidebar-brand">
                 <i class="ph-bold ph-rocket-launch"></i>
                 <span>DoukHub</span>
+                <button id="sidebar-collapse-btn" onclick="toggleSidebar()" title="折叠/展开侧边栏" class="sidebar-collapse-btn">
+                    <i class="ph ph-sidebar-simple"></i>
+                </button>
             </div>
             <div class="sidebar-nav">
                 <a href="/status" class="{% if page == 'status' %}active{% endif %}">
@@ -65,9 +68,6 @@
                         <option value="glass">Glass</option>
                     </select>
                 </div>
-                <button id="sidebar-collapse-btn" onclick="toggleSidebar()" title="折叠/展开侧边栏" class="sidebar-collapse-btn">
-                    <i class="ph ph-sidebar-simple"></i>
-                </button>
             </div>
         </nav>
         <div id="sidebar-resizer" class="sidebar-resizer"></div>
@@ -150,21 +150,46 @@
     .sidebar { position: relative; transition: width 0.2s ease; }
     .sidebar.sb-collapsed { width: 64px !important; }
     .sb-collapsed .sidebar-brand { padding: 24px 12px 16px; justify-content: center; }
-    .sb-collapsed .sidebar-brand span,
+    .sb-collapsed .sidebar-brand > span,
     .sb-collapsed .sidebar-nav a span,
     .sb-collapsed .sidebar-version,
     .sb-collapsed #theme-select { display: none; }
     .sb-collapsed .sidebar-nav a { justify-content: center; padding: 0; gap: 0; }
-    .sb-collapsed .sidebar-footer > div { display: none; }
-    .sb-collapsed .sidebar-footer { padding: 8px; border-top: none; display: flex; justify-content: center; }
+    .sb-collapsed .sidebar-footer { padding: 8px; border-top: none; }
     .sb-collapsed .sidebar-nav a::before { left: auto; right: 0; }
+    /* 折叠时悬停/钉住:整个侧边栏浮层展开 */
+    .sidebar.sb-collapsed.sb-flyout,
+    .sidebar.sb-collapsed.sb-pinned {
+        position: fixed; top: 0; left: 0; z-index: 2000;
+        width: var(--sidebar-w) !important;
+        box-shadow: var(--shadow-xl);
+    }
+    .sidebar.sb-collapsed.sb-flyout .sidebar-nav a,
+    .sidebar.sb-collapsed.sb-pinned .sidebar-nav a {
+        justify-content: flex-start; padding: 0 16px; gap: 12px;
+    }
+    .sidebar.sb-collapsed.sb-flyout .sidebar-brand,
+    .sidebar.sb-collapsed.sb-pinned .sidebar-brand {
+        justify-content: flex-start; padding: 24px 20px 16px;
+    }
+    .sidebar.sb-collapsed.sb-flyout .sidebar-brand > span,
+    .sidebar.sb-collapsed.sb-pinned .sidebar-brand > span,
+    .sidebar.sb-collapsed.sb-flyout .sidebar-version,
+    .sidebar.sb-collapsed.sb-pinned .sidebar-version { display: inline; }
+    .sidebar.sb-collapsed.sb-flyout .sidebar-nav a span,
+    .sidebar.sb-collapsed.sb-pinned .sidebar-nav a span { display: inline; }
+    .sidebar.sb-collapsed.sb-flyout #theme-select,
+    .sidebar.sb-collapsed.sb-pinned #theme-select { display: inline-block; }
+    .sidebar.sb-collapsed.sb-flyout .sidebar-footer > div,
+    .sidebar.sb-collapsed.sb-pinned .sidebar-footer > div { display: flex !important; }
     .sidebar-collapse-btn {
-        width: 100%; height: 32px;
+        width: 32px; height: 32px; margin-left: auto; flex-shrink: 0;
         display: flex; align-items: center; justify-content: center;
         background: transparent; border: none; border-radius: var(--radius-sm);
         color: var(--text-muted); cursor: pointer; font-size: 16px;
         transition: all var(--transition-fast);
     }
+    .sb-collapsed .sidebar-collapse-btn { margin-left: 0; }
     .sidebar-collapse-btn:hover { background: var(--bg-hover); color: var(--accent); }
     .sidebar-resizer {
         position: fixed; top: 0; left: var(--sidebar-w);
@@ -173,6 +198,8 @@
     }
     .sidebar-resizer:hover, .sidebar-resizer.dragging { background: var(--accent); opacity: 0.4; }
     .sb-collapsed ~ .sidebar-resizer { display: none; }
+    .sb-collapsed.sb-flyout ~ .sidebar-resizer,
+    .sb-collapsed.sb-pinned ~ .sidebar-resizer { display: block; }
     </style>
 
     <script>
@@ -255,11 +282,19 @@
         initThemeSelect();
 
         // ===== 侧边栏折叠 + 拖动调宽 =====
+        // 折叠态交互(方案B):窄栏只显图标,悬停整栏浮动展开,点击折叠按钮钉住/取消
         function toggleSidebar() {
             const sb = document.querySelector('.sidebar');
-            const collapsed = sb.classList.toggle('sb-collapsed');
-            localStorage.setItem('doukhub-sidebar-collapsed', collapsed ? '1' : '0');
-            if (!collapsed) restoreSidebarWidth();
+            if (sb.classList.contains('sb-collapsed')) {
+                // 展开
+                sb.classList.remove('sb-collapsed', 'sb-flyout', 'sb-pinned');
+                localStorage.setItem('doukhub-sidebar-collapsed', '0');
+                restoreSidebarWidth();
+            } else {
+                // 折叠
+                sb.classList.add('sb-collapsed');
+                localStorage.setItem('doukhub-sidebar-collapsed', '1');
+            }
         }
         function restoreSidebarWidth() {
             const saved = localStorage.getItem('doukhub-sidebar-width');
@@ -268,6 +303,37 @@
                 document.getElementById('sidebar-resizer').style.left = saved + 'px';
             }
         }
+        // 折叠态:悬停浮动展开,移动鼠标离开收回;点击折叠按钮钉住
+        (function initSidebarFlyout() {
+            const sb = document.querySelector('.sidebar');
+            const btn = document.getElementById('sidebar-collapse-btn');
+            let hoverTimer = null;
+            sb.addEventListener('mouseenter', () => {
+                if (!sb.classList.contains('sb-collapsed') || sb.classList.contains('sb-pinned')) return;
+                clearTimeout(hoverTimer);
+                sb.classList.add('sb-flyout');
+            });
+            sb.addEventListener('mouseleave', () => {
+                if (!sb.classList.contains('sb-collapsed')) return;
+                hoverTimer = setTimeout(() => {
+                    if (!sb.classList.contains('sb-pinned')) sb.classList.remove('sb-flyout');
+                }, 150);
+            });
+            // 点击折叠按钮:钉住/取消钉住(仅折叠态)
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                if (!sb.classList.contains('sb-collapsed')) return;
+                const pinned = sb.classList.toggle('sb-pinned');
+                sb.classList.remove('sb-flyout');
+                btn.title = pinned ? '取消钉住' : '钉住菜单/取消';
+            });
+        })();
+        // 钉住状态:点击外部区域取消钉住
+        document.addEventListener('click', e => {
+            const sb = document.querySelector('.sidebar');
+            if (!sb || !sb.classList.contains('sb-pinned')) return;
+            if (!sb.contains(e.target)) sb.classList.remove('sb-pinned');
+        });
         // 拖动调宽
         (function initSidebarResizer() {
             const resizer = document.getElementById('sidebar-resizer');
