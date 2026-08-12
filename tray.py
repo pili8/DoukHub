@@ -97,24 +97,54 @@ def get_service_manager():
     return _svc
 
 
+def start_downloaders():
+    """显式拉起下载器并持有进程句柄,使托盘能真正停/启下载器。
+
+    uvicorn 的 lifespan 也会在后台调用 start_all,但端口已占用时
+    DownloaderService.start() 幂等跳过,不冲突。
+    """
+    try:
+        svc = get_service_manager()
+        for r in svc.start_all():
+            logger.info(r.get("message", str(r)))
+    except Exception as e:
+        logger.warning(f"启动下载器异常: {e}")
+
+
 # --- 菜单动作 ---
 def open_ui(icon, item):
     webbrowser.open(URL)
+
+
+def _reopen_ui_after_ready():
+    """后台等待端口就绪后重开浏览器,不阻塞菜单"""
+    threading.Thread(
+        target=lambda: (wait_ready() and webbrowser.open(URL)),
+        daemon=True,
+    ).start()
 
 
 def restart_doukhub_only(icon, item):
     logger.info("只重启 DoukHub")
     stop_server()
     start_server()
+    _reopen_ui_after_ready()
 
 
 def restart_all(icon, item):
     logger.info("重启全部(含下载器)")
     svc = get_service_manager()
-    svc.stop_all()
+    try:
+        svc.stop_all()
+    except Exception as e:
+        logger.warning(f"停止下载器异常: {e}")
     stop_server()
     start_server()
-    svc.start_all()
+    try:
+        svc.start_all()
+    except Exception as e:
+        logger.warning(f"启动下载器异常: {e}")
+    _reopen_ui_after_ready()
 
 
 def quit_app(icon, item):
@@ -142,10 +172,10 @@ def main():
 
     # 启动服务并在就绪后打开浏览器
     if start_server():
-        threading.Thread(
-            target=lambda: (wait_ready() and webbrowser.open(URL)),
-            daemon=True,
-        ).start()
+        _reopen_ui_after_ready()
+
+    # 托盘显式拉起下载器并持有进程句柄(uvicorn lifespan 的 start_all 检测到端口已占用会跳过)
+    threading.Thread(target=start_downloaders, daemon=True).start()
 
     icon.run()
 
