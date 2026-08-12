@@ -653,9 +653,11 @@ class Database:
         with self._connect() as conn:
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
 
-            # 构造 WHERE（search 与 filter 为 AND 关系）
+            # 构造 WHERE（软删除过滤 + search 与 filter 为 AND 关系）
             params: list[Any] = []
             where_parts: list[str] = []
+            if "is_deleted" in cols:
+                where_parts.append('is_deleted = 0')
             if search:
                 where_parts.append("(" + " OR ".join([f'CAST("{c}" AS TEXT) LIKE ?' for c in cols]) + ")")
                 params += [f"%{search}%"] * len(cols)
