@@ -1,4 +1,5 @@
 """DoukHub 托盘启动程序"""
+import ctypes
 import logging
 import os
 import subprocess
@@ -224,7 +225,42 @@ def quit_app(icon, item):
     icon.stop()
 
 
+_SINGLE_INSTANCE_MUTEX = "Local\\DoukHub_Tray_Singleton"
+_MUTEX_HANDLE = None  # 持有互斥量句柄直到进程退出,防止重复实例
+
+
+def acquire_single_instance() -> bool:
+    """单实例锁:成功返回 True,已有实例在运行则返回 False。
+
+    底层原理:Windows 命名互斥量是一把全系统(当前会话)唯一的锁。
+    第一个进程创建并持有它;第二个进程创建同名互斥量时系统返回
+    ERROR_ALREADY_EXISTS(183),据此判定"已有实例在运行"。
+    进程退出时互斥量由系统自动释放,不会残留误判。
+    """
+    global _MUTEX_HANDLE
+    kernel32 = ctypes.windll.kernel32
+    _MUTEX_HANDLE = kernel32.CreateMutexW(None, False, _SINGLE_INSTANCE_MUTEX)
+    if not _MUTEX_HANDLE:
+        # 创建失败(极端情况),不阻塞启动
+        return True
+    return kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
+
+
+def _notify_already_running() -> None:
+    """已有实例在运行时:弹窗提示 + 写入日志。"""
+    logger.info("检测到 DoukHub 已在运行,拒绝重复启动")
+    ctypes.windll.user32.MessageBoxW(
+        None,
+        "DoukHub 已在运行中，请勿重复启动。",
+        "DoukHub",
+        0x40 | 0x40000,  # MB_ICONINFORMATION | MB_TOPMOST
+    )
+
+
 def main():
+    if not acquire_single_instance():
+        _notify_already_running()
+        return
     menu = pystray.Menu(
         pystray.MenuItem("打开界面", open_ui, default=True),
         pystray.MenuItem("重启服务", pystray.Menu(
