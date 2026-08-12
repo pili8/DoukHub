@@ -280,3 +280,60 @@ def test_old_db_migration_adds_enabled_column():
     assert acc["已获取信息"] in (1, True)  # 旧"已更新"的值迁过来
     assert acc["启用"] in (1, True)  # 默认值
     assert acc["采集类型"] == "发布"  # 默认值
+
+
+# ========== query_table 列级筛选 ==========
+
+def test_query_table_filter_contains(db):
+    db.insert_cookie({"record_id": "c1", "Cookie": "abc123"})
+    db.insert_cookie({"record_id": "c2", "Cookie": "def456"})
+    r = db.query_table("cookie_cache", filter_field="Cookie", filter_value="bc", filter_op="contains")
+    assert r["total"] == 1
+    assert r["records"][0]["record_id"] == "c1"
+
+
+def test_query_table_filter_equals(db):
+    db.insert_cookie({"record_id": "c1", "Cookie": "abc"})
+    db.insert_cookie({"record_id": "c2", "Cookie": "abd"})
+    r = db.query_table("cookie_cache", filter_field="Cookie", filter_value="abc", filter_op="equals")
+    assert r["total"] == 1
+    assert r["records"][0]["record_id"] == "c1"
+
+
+def test_query_table_filter_equals_chinese(db):
+    db.insert_cookie({"record_id": "c1", "Cookie": "aaa", "备注": "测试"})
+    db.insert_cookie({"record_id": "c2", "Cookie": "bbb", "备注": "其他"})
+    r = db.query_table("cookie_cache", filter_field="备注", filter_value="测试", filter_op="equals")
+    assert r["total"] == 1
+    assert r["records"][0]["record_id"] == "c1"
+
+
+def test_query_table_filter_invalid_field_ignored(db):
+    """筛选字段不存在时，应忽略筛选（不报错）"""
+    db.insert_cookie({"record_id": "c1", "Cookie": "aaa"})
+    r = db.query_table("cookie_cache", filter_field="不存在的字段", filter_value="x", filter_op="contains")
+    assert r["total"] == 1
+
+
+def test_query_table_filter_unknown_op_ignored(db):
+    """未识别的操作符应忽略筛选"""
+    db.insert_cookie({"record_id": "c1", "Cookie": "aaa"})
+    r = db.query_table("cookie_cache", filter_field="Cookie", filter_value="aaa", filter_op="regex")
+    assert r["total"] == 1
+
+
+def test_query_table_search_and_filter_combined(db):
+    """search 与 filter 应为 AND 关系"""
+    db.insert_cookie({"record_id": "c1", "Cookie": "abc", "备注": "测试"})
+    db.insert_cookie({"record_id": "c2", "Cookie": "abc", "备注": "其他"})
+    r = db.query_table("cookie_cache", search="abc", filter_field="备注", filter_value="测试", filter_op="equals")
+    assert r["total"] == 1
+    assert r["records"][0]["record_id"] == "c1"
+
+
+def test_query_table_filter_and_sort_combined(db):
+    db.insert_cookie({"record_id": "c1", "Cookie": "bbb", "备注": "测试"})
+    db.insert_cookie({"record_id": "c2", "Cookie": "aaa", "备注": "测试"})
+    r = db.query_table("cookie_cache", filter_field="备注", filter_value="测试", filter_op="equals", sort_field="Cookie", sort_order="asc")
+    cookies = [x["Cookie"] for x in r["records"]]
+    assert cookies == ["aaa", "bbb"]

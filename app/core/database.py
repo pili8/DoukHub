@@ -643,19 +643,30 @@ class Database:
         search: str = "",
         sort_field: Optional[str] = None,
         sort_order: str = "desc",
+        filter_field: Optional[str] = None,
+        filter_value: Optional[str] = None,
+        filter_op: Optional[str] = None,
     ) -> dict:
-        """通用表查询，支持搜索、排序、分页。
+        """通用表查询，支持搜索、排序、列级筛选、分页。
         返回 {records, total, limit, offset}
         """
         with self._connect() as conn:
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
 
-            # 构造 WHERE
+            # 构造 WHERE（search 与 filter 为 AND 关系）
             params: list[Any] = []
-            where = ""
+            where_parts: list[str] = []
             if search:
-                where = " WHERE " + " OR ".join([f'CAST("{c}" AS TEXT) LIKE ?' for c in cols])
-                params = [f"%{search}%"] * len(cols)
+                where_parts.append("(" + " OR ".join([f'CAST("{c}" AS TEXT) LIKE ?' for c in cols]) + ")")
+                params += [f"%{search}%"] * len(cols)
+            if filter_field and filter_field in cols and filter_value is not None:
+                if filter_op == "equals":
+                    where_parts.append(f'CAST("{filter_field}" AS TEXT) = ?')
+                    params.append(str(filter_value))
+                elif filter_op == "contains":
+                    where_parts.append(f'CAST("{filter_field}" AS TEXT) LIKE ?')
+                    params.append(f"%{filter_value}%")
+            where = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
 
             # 构造 ORDER BY
             order = " ORDER BY rowid DESC"
