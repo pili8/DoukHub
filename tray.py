@@ -1,10 +1,13 @@
 """DoukHub 托盘启动程序"""
 import logging
+import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
+import httpx
 import pystray
 from PIL import Image, ImageDraw
 
@@ -24,9 +27,60 @@ def make_icon() -> Image.Image:
     return img
 
 
-# --- 菜单动作(占位,Task 2/3 实现真实逻辑) ---
+SERVER_PROC: subprocess.Popen | None = None
+
+
+def start_server() -> bool:
+    """启动 uvicorn 服务子进程(reload=True, 隐藏窗口)。返回是否启动成功。"""
+    global SERVER_PROC
+    if SERVER_PROC and SERVER_PROC.poll() is None:
+        return True  # 已在运行
+    root = Path(__file__).resolve().parent
+    cmd = [
+        sys.executable, "-m", "uvicorn", "app.main:app",
+        "--host", "0.0.0.0", "--port", str(PORT), "--reload",
+    ]
+    try:
+        SERVER_PROC = subprocess.Popen(
+            cmd,
+            cwd=str(root),
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except Exception as e:
+        logger.error(f"启动服务失败: {e}")
+        return False
+
+
+def stop_server() -> None:
+    """停止 uvicorn 子进程"""
+    global SERVER_PROC
+    if SERVER_PROC and SERVER_PROC.poll() is None:
+        SERVER_PROC.terminate()
+        try:
+            SERVER_PROC.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            SERVER_PROC.kill()
+    SERVER_PROC = None
+
+
+def wait_ready(timeout: float = 20.0) -> bool:
+    """等待端口就绪"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            httpx.get(f"http://127.0.0.1:{PORT}/", timeout=1)
+            return True
+        except Exception:
+            time.sleep(0.5)
+    return False
+
+
+# --- 菜单动作 ---
 def open_ui(icon, item):
-    print("open_ui")
+    webbrowser.open(URL)
 
 
 def restart_doukhub_only(icon, item):
@@ -51,6 +105,14 @@ def main():
         pystray.MenuItem("退出", quit_app),
     )
     icon = pystray.Icon("doukhub", make_icon(), "DoukHub", menu)
+
+    # 启动服务并在就绪后打开浏览器
+    if start_server():
+        threading.Thread(
+            target=lambda: (wait_ready() and webbrowser.open(URL)),
+            daemon=True,
+        ).start()
+
     icon.run()
 
 
