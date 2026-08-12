@@ -77,6 +77,12 @@
   --sidebar-w: 220px;
   --sidebar-w-mobile: 160px;
   --content-max: 1280px;
+
+  /* --- 通用交互层变量(供表格菜单等共享组件引用) --- */
+  --surface-overlay: var(--bg-surface);
+  --surface-raised: var(--bg-surface);
+  --menu-hover: var(--accent-light);
+  --text-tertiary: var(--text-muted);
 }
 
 /* ===== Dark Mode ===== */

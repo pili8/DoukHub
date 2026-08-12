@@ -152,6 +152,12 @@
   --state-hover: 0.08;
   --state-focus: 0.12;
   --state-pressed: 0.12;
+
+  /* --- 通用交互层变量(供表格菜单等共享组件引用) --- */
+  --surface-overlay: var(--md-surface-container-high);
+  --surface-raised: var(--md-surface-container);
+  --menu-hover: var(--md-primary-container);
+  --text-tertiary: var(--md-on-surface-variant);
 }
 
 /* ===== Dark Mode (M3 Dark scheme) ===== */

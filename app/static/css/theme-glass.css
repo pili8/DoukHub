@@ -152,6 +152,12 @@
 
   /* Force light color-scheme for form controls */
   color-scheme: light;
+
+  /* --- 通用交互层变量(供表格菜单等共享组件引用) --- */
+  --surface-overlay: var(--glass-surface-elevated);
+  --surface-raised: var(--glass-surface-elevated);
+  --menu-hover: var(--glass-accent-light);
+  --text-tertiary: var(--glass-text-muted);
 }
 
 /* ===== 2. Reset & Base ===== */

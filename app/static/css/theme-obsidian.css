@@ -152,6 +152,12 @@
   --grid-texture: linear-gradient(rgba(45, 212, 191, 0.015) 1px, transparent 1px),
                   linear-gradient(90deg, rgba(45, 212, 191, 0.015) 1px, transparent 1px);
   --grid-size: 32px;
+
+  /* --- 通用交互层变量(供表格菜单等共享组件引用) --- */
+  --surface-overlay: var(--md-surface-container-high);
+  --surface-raised: var(--md-surface-container);
+  --menu-hover: var(--md-primary-container);
+  --text-tertiary: var(--md-on-surface-variant);
 }
 
 /* ===== 2. Reset & Base ===== */
