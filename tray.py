@@ -1,5 +1,6 @@
 """DoukHub 托盘启动程序"""
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -19,6 +20,10 @@ URL = f"http://127.0.0.1:{PORT}"
 
 ROOT = Path(__file__).resolve().parent
 APP_DIR = ROOT / "app"
+
+# 锁定 cwd 到项目根目录,避免 pythonw/pystray spawn 子进程时 cwd 漂移导致
+# 配置里的相对路径(./TikTokDownloader, ./data 等)解析到错误位置。
+os.chdir(ROOT)
 
 
 def make_icon() -> Image.Image:
