@@ -1289,8 +1289,11 @@ async def api_database_table(
     search: str = "",
     sort_field: str = "",
     sort_order: str = "desc",
+    filter_field: str = "",
+    filter_value: str = "",
+    filter_op: str = "",
 ):
-    """获取表数据，支持分页、搜索、排序。返回 {records, total, limit, offset}"""
+    """获取表数据，支持分页、搜索、排序、列级筛选。返回 {records, total, limit, offset}"""
     db = get_database()
 
     # 验证表名
@@ -1304,6 +1307,9 @@ async def api_database_table(
         search=search,
         sort_field=sort_field or None,
         sort_order=sort_order,
+        filter_field=filter_field or None,
+        filter_value=filter_value or None,
+        filter_op=filter_op or None,
     )
     return result
 

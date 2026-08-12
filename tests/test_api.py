@@ -224,3 +224,59 @@ class TestAPIEndpoints:
         assert data["total"] == 2
         assert data["success"] == 1
         assert data["failed"] == 1
+
+    def test_api_table_filter_contains(self, app_env, tmp_path):
+        """API 透传列级筛选：contains 生效"""
+        client, *_ = app_env
+        import app.main as app_main
+        from app.core.database import Database
+
+        # app_env 未替换 app_main.database（会连真实库），这里临时替换为隔离库并恢复
+        orig_db = app_main.database
+        try:
+            app_main.database = Database(tmp_path / "test.db")
+            db = app_main.database
+            db.insert_cookie({"record_id": "c1", "Cookie": "abc123"})
+            db.insert_cookie({"record_id": "c2", "Cookie": "def456"})
+
+            r = client.get(
+                "/api/database/table/cookie_cache",
+                params={"filter_field": "Cookie", "filter_value": "bc", "filter_op": "contains"},
+            )
+            assert r.status_code == 200
+            data = r.json()
+            assert "records" in data and "total" in data
+            assert data["total"] == 1
+            assert data["records"][0]["record_id"] == "c1"
+        finally:
+            app_main.database = orig_db
+
+    def test_api_table_filter_equals(self, app_env, tmp_path):
+        """API 透传列级筛选：equals 生效"""
+        client, *_ = app_env
+        import app.main as app_main
+        from app.core.database import Database
+
+        orig_db = app_main.database
+        try:
+            app_main.database = Database(tmp_path / "test.db")
+            db = app_main.database
+            db.insert_cookie({"record_id": "c1", "Cookie": "aaa", "备注": "测试"})
+            db.insert_cookie({"record_id": "c2", "Cookie": "bbb", "备注": "其他"})
+
+            r = client.get(
+                "/api/database/table/cookie_cache",
+                params={"filter_field": "备注", "filter_value": "测试", "filter_op": "equals"},
+            )
+            assert r.status_code == 200
+            data = r.json()
+            assert data["total"] == 1
+            assert data["records"][0]["record_id"] == "c1"
+        finally:
+            app_main.database = orig_db
+
+    def test_api_table_invalid_name(self, app_env):
+        """表名校验：无效表名返回 400"""
+        client, *_ = app_env
+        r = client.get("/api/database/table/unknown_table")
+        assert r.status_code == 400
