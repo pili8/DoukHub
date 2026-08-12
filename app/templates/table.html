@@ -974,6 +974,12 @@ input[type="checkbox"]:disabled {
     // =========================================================================
     // 自定义表头组件（点表头不排序，竖点按钮弹自写菜单）
     // =========================================================================
+    function htmlEscape(str) {
+        return String(str).replace(/[&<>"']/g, (c) => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+        ));
+    }
+
     class DoukHeaderComponent {
         init(params) {
             this.params = params;
@@ -987,12 +993,14 @@ input[type="checkbox"]:disabled {
             const isSorted = currentSortField === this.field;
             const order = isSorted ? currentSortOrder : '';
             const arrow = order === 'asc' ? '↑' : (order === 'desc' ? '↓' : '');
+            const safeName = htmlEscape(this.displayName);
+            const safeField = htmlEscape(this.field);
             this.gui.innerHTML =
                 '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' +
-                this.displayName.replace(/"/g, '&quot;') + '">' + this.displayName +
+                safeName + '">' + safeName +
                 (isSorted ? '<span style="color:var(--accent);margin-left:4px;font-weight:700;">' + arrow + '</span>' : '') +
                 '</span>' +
-                '<button class="tbl-header-menu-btn" data-field="' + this.field + '" title="菜单：排序/筛选" style="' +
+                '<button class="tbl-header-menu-btn" data-field="' + safeField + '" title="菜单：排序/筛选" style="' +
                 'flex-shrink:0;border:none;background:transparent;color:var(--text-muted);cursor:pointer;padding:2px 4px;border-radius:4px;font-size:13px;line-height:1;' +
                 '">⋮</button>';
             this.gui.querySelector('.tbl-header-menu-btn').addEventListener('click', (e) => {
@@ -1012,11 +1020,9 @@ input[type="checkbox"]:disabled {
     // 自写列菜单（排序 + 筛选）
     // =========================================================================
     let colMenuEl = null;
-    let colMenuField = '';
 
     function openColMenu(event, field) {
         closeColMenu();
-        colMenuField = field;
         const btn = event.target;
         const rect = btn.getBoundingClientRect();
         const menu = document.createElement('div');
@@ -1117,7 +1123,6 @@ input[type="checkbox"]:disabled {
 
     function closeColMenu() {
         if (colMenuEl) { colMenuEl.remove(); colMenuEl = null; }
-        colMenuField = '';
     }
 
     function applyColSort(field, order) {

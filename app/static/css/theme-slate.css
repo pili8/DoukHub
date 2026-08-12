@@ -54,6 +54,7 @@
   --info-text: #1d4ed8;
 
   /* Radius */
+  --radius-xs: 4px;
   --radius-sm: 6px;
   --radius: 8px;
   --radius-lg: 12px;
