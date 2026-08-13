@@ -144,8 +144,8 @@
   --font-mono: "Roboto Mono", "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
 
   /* --- Layout --- */
-  --sidebar-w: 240px;
-  --sidebar-w-mobile: 180px;
+  --sidebar-w: 210px;
+  --sidebar-w-mobile: 160px;
   --content-max: 1280px;
 
   /* --- M3 State Layer opacity --- */
@@ -244,11 +244,6 @@ code, pre { font-family: var(--font-mono); }
   background: var(--md-surface-container-low);
   color: var(--md-on-surface);
   flex-shrink: 0;
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  height: 100vh;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--md-outline-variant);

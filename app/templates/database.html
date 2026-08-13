@@ -79,7 +79,8 @@
 
 {% block scripts %}
 <script>
-    document.addEventListener('DOMContentLoaded', () => { refreshStats(); });
+    // SPA 友好:直接调用(脚本在 body 末尾,DOM 已就绪;SPA 二次进入由 rebindScripts 重执行)
+    refreshStats();
 
     async function refreshStats() {
         try {

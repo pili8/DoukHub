@@ -23,7 +23,7 @@
 {% endblock %}
 {% block scripts %}
 <script>
-    let duplicatesData = [];
+    var duplicatesData = [];
 
     async function syncAndCheck() {
         showToast('正在同步云端...', 'info');

@@ -144,8 +144,8 @@
   --font-mono: "Roboto Mono", "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
 
   /* --- Layout --- */
-  --sidebar-w: 240px;
-  --sidebar-w-mobile: 180px;
+  --sidebar-w: 210px;
+  --sidebar-w-mobile: 160px;
   --content-max: 1280px;
 
   /* --- M3 State Layer opacity --- */
@@ -161,9 +161,8 @@
   --text-on-accent: var(--md-on-primary);
 }
 
-/* ===== Dark Mode (M3 Dark scheme) ===== */
-@media (prefers-color-scheme: dark) {
-  :root {
+/* ===== Dark Mode (M3 Dark scheme,手动切换:html[data-theme="dark"]) ===== */
+:root[data-theme="dark"] {
     --md-primary: #9ECAFF;
     --md-on-primary: #003258;
     --md-primary-container: #00497D;
@@ -217,11 +216,9 @@
     --md-shadow-color: rgb(0 0 0);
     --md-scrim: rgb(0 0 0 / 0.6);
 
-    /* Legacy remap */
     --accent-hover: #B3D9FF;
     --accent-active: #9ECAFF;
   }
-}
 
 /* ===== 2. Reset & Base ===== */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -251,11 +248,6 @@ code, pre { font-family: var(--font-mono); }
   background: var(--md-surface-container-low);
   color: var(--md-on-surface);
   flex-shrink: 0;
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  height: 100vh;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--md-outline-variant);

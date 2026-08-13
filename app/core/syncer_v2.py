@@ -7,7 +7,8 @@ import logging
 
 from .database import Database
 from .collector import Collector
-from .link_resolver import build_profile_url
+from .link_resolver import build_profile_url, extract_sec_user_id
+from typing import Optional
 from .feishu import FeishuClient
 from .feishu_sync import FeishuSyncer
 
@@ -36,7 +37,7 @@ class SyncResult:
 class Syncer:
     """同步引擎"""
 
-    def __init__(self, feishu: FeishuClient, collector: Collector, config: dict):
+    def __init__(self, feishu: Optional[FeishuClient], collector: Collector, config: dict):
         self.feishu = feishu
         self.collector = collector
         self.config = config
@@ -154,7 +155,12 @@ class Syncer:
                     result.skipped += 1
                     continue
 
-                share = self.normalize_share(share)
+                # 如果是完整用户主页链接，直接提取 sec_user_id，跳过第二步
+                direct_sec_user_id = extract_sec_user_id(share, "")
+                if direct_sec_user_id:
+                    share = direct_sec_user_id
+                else:
+                    share = self.normalize_share(share)
 
                 # 检查是否已存在
                 existing = self.db.get_collection_by_share(share)
@@ -163,23 +169,33 @@ class Syncer:
                     new_level = self.merge_level(existing.get("等级"), level)
                     existing_tags = json.loads(existing.get("标签", "[]")) if existing.get("标签") else []
                     new_tags = self.merge_tags(existing_tags, tags)
-
-                    self.db.update_collection(existing["record_id"], {
+                    updates = {
                         "等级": new_level,
                         "标签": json.dumps(new_tags),
-                    })
+                    }
+                    # 如果新导入的直接提取了 sec_user_id，补上
+                    if direct_sec_user_id and not existing.get("sec_user_id"):
+                        updates["sec_user_id"] = direct_sec_user_id
+                        updates["已同步"] = True
+                        updates["同步错误"] = None
+                    self.db.update_collection(existing["record_id"], updates)
                     result.success += 1
                 else:
                     # 新增
                     record_id = f"rec_{datetime.now().strftime('%Y%m%d%H%M%S')}_{result.total}"
-                    self.db.insert_collection({
+                    insert_data = {
                         "record_id": record_id,
                         "share_code": share,
                         "平台": "抖音",  # 默认
                         "等级": level,
                         "标签": json.dumps(tags),
                         "已同步": False,
-                    })
+                    }
+                    # 如果直接提取了 sec_user_id，标记为已同步
+                    if direct_sec_user_id:
+                        insert_data["sec_user_id"] = direct_sec_user_id
+                        insert_data["已同步"] = True
+                    self.db.insert_collection(insert_data)
                     result.success += 1
 
             except Exception as e:

@@ -282,9 +282,9 @@ class Database:
             return [dict(row) for row in rows]
 
     def get_collection_by_share(self, share: str) -> Optional[dict]:
-        """根据 share_code 获取记录"""
+        """根据 share_code 获取记录（排除软删除）"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM collection_cache WHERE share_code = ?", (share,)).fetchone()
+            row = conn.execute("SELECT * FROM collection_cache WHERE share_code = ? AND is_deleted = 0", (share,)).fetchone()
             return dict(row) if row else None
 
     def get_collection_by_id(self, record_id: str) -> Optional[dict]:
@@ -294,9 +294,9 @@ class Database:
             return dict(row) if row else None
 
     def get_collection_by_sec_user_id(self, sec_user_id: str) -> Optional[dict]:
-        """根据 sec_user_id 获取记录"""
+        """根据 sec_user_id 获取记录（排除软删除）"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM collection_cache WHERE sec_user_id = ?", (sec_user_id,)).fetchone()
+            row = conn.execute("SELECT * FROM collection_cache WHERE sec_user_id = ? AND is_deleted = 0", (sec_user_id,)).fetchone()
             return dict(row) if row else None
 
     def insert_collection(self, data: dict) -> bool:
@@ -348,10 +348,26 @@ class Database:
             return [dict(row) for row in rows]
 
     def get_account_by_sec_user_id(self, sec_user_id: str) -> Optional[dict]:
-        """根据 sec_user_id 获取记录"""
+        """根据 sec_user_id 获取记录（排除软删除）"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM account_cache WHERE sec_user_id = ?", (sec_user_id,)).fetchone()
+            row = conn.execute("SELECT * FROM account_cache WHERE sec_user_id = ? AND is_deleted = 0", (sec_user_id,)).fetchone()
             return dict(row) if row else None
+
+    def revive_account_if_deleted(self, sec_user_id: str) -> Optional[str]:
+        """复活软删除的账号记录，返回 record_id（无软删除记录则返回 None）"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT record_id FROM account_cache WHERE sec_user_id = ? AND is_deleted = 1",
+                (sec_user_id,)
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE account_cache SET is_deleted = 0, deleted_at = NULL WHERE record_id = ?",
+                    (row["record_id"],)
+                )
+                conn.commit()
+                return row["record_id"]
+        return None
 
     def get_account_by_id(self, record_id: str) -> Optional[dict]:
         """根据记录ID获取账号表记录"""

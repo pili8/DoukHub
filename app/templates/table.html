@@ -15,14 +15,13 @@
 <div class="card tbl-toolbar-card">
     <div class="tbl-toolbar-row">
         <div id="table-tabs" class="tbl-tabs"></div>
-        <div class="tbl-search-group">
-            <div class="tbl-search-wrapper">
-                <i class="ph ph-magnifying-glass tbl-search-icon"></i>
-                <input type="text" id="search-keyword" class="tbl-search-input" placeholder="搜索当前表…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')doSearch()">
-                <button class="tbl-search-clear" id="search-clear-btn" onclick="clearSearch()" style="display:none;"><i class="ph ph-x"></i></button>
+<div class="tbl-search-group">
+                <div class="tbl-search-wrapper">
+                    <i class="ph ph-magnifying-glass tbl-search-icon"></i>
+                    <input type="text" id="search-keyword" class="tbl-search-input" placeholder="输入以搜索当前表…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')doSearch()">
+                    <button class="tbl-search-clear" id="search-clear-btn" onclick="clearSearch()" style="display:none;"><i class="ph ph-x"></i></button>
+                </div>
             </div>
-            <button class="btn btn-primary btn-sm" onclick="doSearch()"><i class="ph ph-magnifying-glass"></i> 搜索</button>
-        </div>
     </div>
 </div>
 
@@ -36,12 +35,25 @@
             <span id="tbl-cat-legend" class="tbl-cat-legend"></span>
         </div>
         <div class="tbl-action-group">
-            <button class="btn btn-success btn-sm" onclick="openAddModal()" id="btn-add-record"><i class="ph ph-plus"></i> 新增</button>
-            <button class="btn btn-secondary btn-sm" onclick="checkDuplicates()" id="btn-duplicates"><i class="ph ph-copy"></i> 查重</button>
-            <button class="btn btn-secondary btn-sm" onclick="validateCookies()" id="btn-validate-cookie" style="display:none;"><i class="ph ph-shield-check"></i> 验证Cookie</button>
-            <div class="tbl-divider-v"></div>
-            <button class="btn btn-secondary btn-sm" onclick="importCsv()"><i class="ph ph-upload-simple"></i> 导入</button>
-            <button class="btn btn-secondary btn-sm" onclick="exportCsv()"><i class="ph ph-download-simple"></i> 导出</button>
+            <div class="tbl-action-normal" id="action-normal">
+                <button class="btn btn-success btn-sm" onclick="openAddModal()" id="btn-add-record"><i class="ph ph-plus"></i> 新增</button>
+                <button class="btn btn-secondary btn-sm" onclick="checkDuplicates()" id="btn-duplicates"><i class="ph ph-copy"></i> 查重</button>
+                <button class="btn btn-secondary btn-sm" onclick="validateCookies()" id="btn-validate-cookie" style="display:none;"><i class="ph ph-shield-check"></i> 验证Cookie</button>
+                <div class="tbl-divider-v"></div>
+                <button class="btn btn-secondary btn-sm" onclick="importCsv()"><i class="ph ph-upload-simple"></i> 导入</button>
+                <button class="btn btn-secondary btn-sm" onclick="exportCsv()"><i class="ph ph-download-simple"></i> 导出</button>
+            </div>
+            <div id="batch-toolbar" class="tbl-batch-inline" style="display:none;">
+                <span id="batch-count" class="tbl-batch-count"></span>
+                <div class="tbl-divider-v"></div>
+                <button class="btn btn-danger btn-sm" onclick="batchDelete()"><i class="ph ph-trash"></i> 批量删除</button>
+                <div class="tbl-batch-edit">
+                    <select id="batch-field-select" class="tbl-batch-select"></select>
+                    <input type="text" id="batch-value-input" class="tbl-batch-input" placeholder="值…">
+                    <button class="btn btn-primary btn-sm" onclick="batchUpdate()"><i class="ph ph-pencil-simple"></i> 应用</button>
+                </div>
+                <button class="btn btn-secondary btn-sm tbl-batch-close" onclick="clearSelection()"><i class="ph ph-x"></i></button>
+            </div>
         </div>
     </div>
 
@@ -66,21 +78,6 @@
             <div id="cookie-validate-bar" class="progress-bar" style="width:0%;"></div>
         </div>
         <div id="cookie-validate-log" class="tbl-cookie-log"></div>
-    </div>
-</div>
-
-<!-- 浮动批量操作栏 -->
-<div id="batch-toolbar" class="tbl-batch-float">
-    <div class="tbl-batch-inner">
-        <span id="batch-count" class="tbl-batch-count"></span>
-        <div class="tbl-divider-v"></div>
-        <button class="btn btn-danger btn-sm" onclick="batchDelete()"><i class="ph ph-trash"></i> 批量删除</button>
-        <div class="tbl-batch-edit">
-            <select id="batch-field-select" class="tbl-batch-select"></select>
-            <input type="text" id="batch-value-input" class="tbl-batch-input" placeholder="值…">
-            <button class="btn btn-primary btn-sm" onclick="batchUpdate()"><i class="ph ph-pencil-simple"></i> 应用</button>
-        </div>
-        <button class="btn btn-secondary btn-sm tbl-batch-close" onclick="clearSelection()"><i class="ph ph-x"></i></button>
     </div>
 </div>
 
@@ -118,13 +115,20 @@
 }
 
 /* ===== 表选择 Tab ===== */
+/* 横向滚动:表多时不再折行堆叠,超出部分滚动查看 */
 .tbl-tabs {
-    display: flex; gap: 2px; flex-wrap: wrap;
+    display: flex; gap: 2px; flex-wrap: nowrap;
+    overflow-x: auto;
     padding: 3px;
     background: var(--surface-raised);
     border-radius: var(--radius);
     border: 1px solid var(--border-default);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-default) transparent;
 }
+.tbl-tabs::-webkit-scrollbar { height: 6px; }
+.tbl-tabs::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+.tbl-tabs::-webkit-scrollbar-track { background: transparent; }
 .tab-btn {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 6px 14px;
@@ -250,30 +254,17 @@
 .tbl-action-group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .tbl-divider-v { width: 1px; height: 20px; background: var(--border-default); }
 
-/* ===== 浮动批量操作栏 ===== */
-.tbl-batch-float {
-    display: none;
-    position: fixed;
-    bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 900;
-    animation: batch-slide-up 300ms cubic-bezier(0.16, 1, 0.3, 1);
+/* ===== 批量操作(并入工具栏) ===== */
+.tbl-action-normal,
+.tbl-batch-inline {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
 }
-@keyframes batch-slide-up {
-    from { transform: translate(-50%, 120%); opacity: 0; }
-    to { transform: translate(-50%, 0); opacity: 1; }
-}
-.tbl-batch-inner {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 16px;
+.tbl-batch-inline {
+    padding: 6px 10px;
     background: var(--surface-overlay);
     border: 1px solid var(--accent);
-    border-radius: var(--radius-full);
-    box-shadow: var(--shadow-xl), var(--glow-primary);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    flex-wrap: wrap;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-xs), var(--glow-primary);
 }
 .tbl-batch-count {
     font-size: 13px; color: var(--accent); font-weight: 700;
@@ -363,7 +354,13 @@
     text-transform: uppercase;
 }
 
-/* 表头菜单按钮（竖点） */
+/* 表头菜单按钮（竖点）：默认隐藏，悬停列头才显示——标题文字优先占满 */
+.tbl-header-menu-btn {
+    display: none !important;
+}
+.ag-header-cell:hover .tbl-header-menu-btn {
+    display: inline-flex !important;
+}
 .tbl-header-menu-btn:hover {
     background: var(--bg-hover);
     color: var(--accent) !important;
@@ -723,8 +720,6 @@ input[type="checkbox"]:disabled {
     .tbl-content-toolbar { flex-direction: column; align-items: stretch; }
     .tbl-action-group { justify-content: flex-end; }
     .tbl-grid { height: calc(100vh - 380px); }
-    .tbl-batch-float { left: 12px; right: 12px; transform: none; }
-    .tbl-batch-inner { border-radius: var(--radius); }
 }
 </style>
 
@@ -734,47 +729,67 @@ input[type="checkbox"]:disabled {
 <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@31/dist/ag-grid-community.min.js"></script>
 <script>
     // =========================================================================
+    // SPA 清理：由 loadPage 在替换 DOM 前调用，确保 Grid 在 DOM 仍挂载时被销毁
+    // =========================================================================
+    window._spaCleanup = function() {
+        if (typeof gridApi !== 'undefined' && gridApi && typeof gridApi.destroy === 'function') {
+            try { gridApi.destroy(); } catch(e) { console.warn('SPA: Grid destroy failed', e); }
+        }
+        if (typeof gridInitialized !== 'undefined') gridInitialized = false;
+        if (window._tblDocClick) {
+            document.removeEventListener('click', window._tblDocClick);
+            document.removeEventListener('keydown', window._tblDocKeydown);
+        }
+        if (typeof searchDebounceTimer !== 'undefined' && searchDebounceTimer) {
+            clearTimeout(searchDebounceTimer);
+        }
+        if (typeof colMenuEl !== 'undefined' && colMenuEl) {
+            try { colMenuEl.remove(); } catch(e) {}
+        }
+    };
+
+    // =========================================================================
     // 常量定义
     // =========================================================================
-    const TABLE_NAMES = {
+    var TABLE_NAMES = {
         'collection_cache': '采集表',
         'account_cache': '账号表',
         'cookie_cache': 'Cookie表',
         'collection_history': '采集历史',
         'scheduled_tasks': '定时任务'
     };
-    const TABLE_ICONS = {
+    var TABLE_ICONS = {
         'collection_cache': 'ph-clipboard-text',
         'account_cache': 'ph-user',
         'cookie_cache': 'ph-cookie',
         'collection_history': 'ph-clock-counter-clockwise',
         'scheduled_tasks': 'ph-calendar-clock'
     };
-    const TABLE_COLORS = {
+    var TABLE_COLORS = {
         'collection_cache': 'coll',
         'account_cache': 'acc',
         'cookie_cache': 'ck',
         'collection_history': 'hist',
         'scheduled_tasks': 'task'
     };
-    let PAGE_SIZE = parseInt(localStorage.getItem('doukhub-table-page-size')) || 50;
+    var PAGE_SIZE = parseInt(localStorage.getItem('doukhub-table-page-size')) || 50;
 
-    const HIDDEN_COLS = [];
+    var HIDDEN_COLS = [];
 
-    const SYSTEM_FIELDS = ['record_id', 'ID', 'created_at', 'updated_at', 'deleted_at',
+    var SYSTEM_FIELDS = ['record_id', 'ID', 'created_at', 'updated_at', 'deleted_at',
         'is_deleted', 'local_updated_at', 'local_created_at', 'feishu_record_id',
         '同步时间', '同步错误', 'synced'];
 
-    const TABLE_MODAL_ALWAYS_READONLY = {
+    var TABLE_MODAL_ALWAYS_READONLY = {
         'account_cache': ['链接', '账号名称', '粉丝数', '作品数', '签名', '头像'],
     };
 
-    const TABLE_MODAL_READONLY_ON_EDIT = {
+    var TABLE_MODAL_READONLY_ON_EDIT = {
         'collection_cache': ['sec_user_id'],
         'account_cache': ['sec_user_id'],
     };
 
-    const FIELD_EDITORS = {
+    var FIELD_EDITORS = {
         '等级': { editor: 'agSelectCellEditor', params: { values: [1, 2, 3, 4, 5] } },
         '采集类型': { editor: 'agSelectCellEditor', params: { values: ['发布', '喜欢'] } },
         '状态': { editor: 'agSelectCellEditor', params: { values: ['正常', '失效'] } },
@@ -788,11 +803,11 @@ input[type="checkbox"]:disabled {
         '作品数': { editor: 'agNumberCellEditor' },
     };
 
-    const FIELD_DISPLAY_NAMES = {
-        'share_code': '分享码',
+    var FIELD_DISPLAY_NAMES = {
+        'share_code': 'share',
     };
 
-    const TABLE_EDITABLE_FIELDS = {
+    var TABLE_EDITABLE_FIELDS = {
         'account_cache': ['平台', '等级', '标签', '备注', '已获取信息', '采集类型', '启用'],
         'collection_cache': ['share_code', '平台', '等级', '标签', '备注', '已同步', '账号名称', '粉丝数', '作品数'],
         'cookie_cache': ['状态', '启用', '备注', '平台'],
@@ -800,7 +815,7 @@ input[type="checkbox"]:disabled {
         'scheduled_tasks': ['任务名称', 'Cron表达式', '等级筛选', '启用'],
     };
 
-    const TABLE_HAS_ACTIONS = {
+    var TABLE_HAS_ACTIONS = {
         'account_cache': true,
         'collection_cache': true,
         'cookie_cache': true,
@@ -808,7 +823,7 @@ input[type="checkbox"]:disabled {
         'scheduled_tasks': false,
     };
 
-    const FIELD_WIDTHS = {
+    var FIELD_WIDTHS = {
         '等级': 80, '启用': 70, '采集类型': 90, '平台': 80, '状态': 80,
         '备注': 150, 'Cookie': 200, '链接': 200, '头像': 60, '标签': 150,
         '签名': 200, 'sec_user_id': 200, 'record_id': 200, '同步时间': 140,
@@ -821,12 +836,12 @@ input[type="checkbox"]:disabled {
         '错误信息': 150,
     };
 
-    const COLUMN_ORDER = {
+    var COLUMN_ORDER = {
         'account_cache': [
             'sec_user_id',
             '平台', '等级', '标签', '备注',
             '已获取信息', '采集类型', '启用',
-            '链接', '账号名称', '粉丝数', '作品数', '签名', '头像',
+            '账号名称', '粉丝数', '作品数', '签名', '链接', '头像',
             'created_at', 'record_id', '同步时间', 'synced', 'local_updated_at', 'is_deleted', 'deleted_at',
         ],
         'collection_cache': [
@@ -838,7 +853,7 @@ input[type="checkbox"]:disabled {
         ],
     };
 
-    const FIELD_CATEGORIES = {
+    var FIELD_CATEGORIES = {
         'account_cache': {
             'sec_user_id': 'original',
             '平台': 'edit', '等级': 'edit', '标签': 'edit', '备注': 'edit',
@@ -877,20 +892,20 @@ input[type="checkbox"]:disabled {
     // =========================================================================
     // 状态变量
     // =========================================================================
-    let currentTable = '';
-    let currentKeyword = '';
-    let currentPage = 1;
-    let schemaFields = [];
-    let pendingImportFile = null;
-    let currentTotal = 0;
-    let gridApi = null;
-    let gridInitialized = false;
-    let searchDebounceTimer = null;
-    let currentSortField = '';
-    let currentSortOrder = '';
-    let currentFilterField = '';
-    let currentFilterOp = '';
-    let currentFilterValue = '';
+    var currentTable = '';
+    var currentKeyword = '';
+    var currentPage = 1;
+    var schemaFields = [];
+    var pendingImportFile = null;
+    var currentTotal = 0;
+    var gridApi = null;
+    var gridInitialized = false;
+    var searchDebounceTimer = null;
+    var currentSortField = '';
+    var currentSortOrder = '';
+    var currentFilterField = '';
+    var currentFilterOp = '';
+    var currentFilterValue = '';
 
     // =========================================================================
     // 自定义单元格渲染器
@@ -1022,7 +1037,7 @@ input[type="checkbox"]:disabled {
         return html;
     }
 
-    const FIELD_RENDERERS = {
+    var FIELD_RENDERERS = {
         '等级': ratingRenderer,
         '链接': linkRenderer,
         '头像': avatarRenderer,
@@ -1041,7 +1056,7 @@ input[type="checkbox"]:disabled {
         ));
     }
 
-    class DoukHeaderComponent {
+    var DoukHeaderComponent = class {
         init(params) {
             this.params = params;
             this.field = params.column.getColDef().field;
@@ -1075,12 +1090,12 @@ input[type="checkbox"]:disabled {
         }
         getGui() { return this.gui; }
         destroy() { this.gui = null; }
-    }
+    };
 
     // =========================================================================
     // 自写列菜单（排序 + 筛选）
     // =========================================================================
-    let colMenuEl = null;
+    var colMenuEl = null;
 
     function openColMenu(event, field) {
         closeColMenu();
@@ -1212,20 +1227,22 @@ input[type="checkbox"]:disabled {
         showTable(currentTable, 1, currentKeyword);
     }
 
-    // 点击外部区域 / Esc 关闭菜单
-    document.addEventListener('click', (e) => {
+    // 点击外部区域 / Esc 关闭菜单（使用命名函数以便 SPA 重入时移除）
+    window._tblDocClick = function(e) {
         if (colMenuEl && !colMenuEl.contains(e.target) && !e.target.classList.contains('tbl-header-menu-btn')) {
             closeColMenu();
         }
-    });
-    document.addEventListener('keydown', (e) => {
+    };
+    window._tblDocKeydown = function(e) {
         if (e.key === 'Escape') closeColMenu();
-    });
+    };
+    document.addEventListener('click', window._tblDocClick);
+    document.addEventListener('keydown', window._tblDocKeydown);
 
     // =========================================================================
     // 标签多选编辑器
     // =========================================================================
-    class TagMultiSelectEditor {
+    var TagMultiSelectEditor = class {
         init(params) {
             this.params = params;
             this.selectedTags = new Set();
@@ -1334,7 +1351,7 @@ input[type="checkbox"]:disabled {
         }
         isPopup() { return true; }
         destroy() { this.gui = null; }
-    }
+    };
 
     // =========================================================================
     // 列定义构建
@@ -1448,6 +1465,10 @@ input[type="checkbox"]:disabled {
     function ensureGrid(colDefs) {
         if (!gridInitialized) {
             const gridDiv = document.getElementById('ag-grid-container');
+            if (!gridDiv) {
+                console.error('ensureGrid: #ag-grid-container 不存在');
+                return;
+            }
             gridApi = agGrid.createGrid(gridDiv, {
                 columnDefs: colDefs,
                 rowData: [],
@@ -1512,10 +1533,9 @@ input[type="checkbox"]:disabled {
     // =========================================================================
     // 数据加载
     // =========================================================================
-    document.addEventListener('DOMContentLoaded', () => {
-        renderTableTabs();
-        showTable('collection_cache');
-    });
+    // SPA 友好:直接调用(脚本在 body 末尾,DOM 已就绪;SPA 二次进入由 rebindScripts 重执行)
+    renderTableTabs();
+    showTable('collection_cache');
 
     function renderTableTabs() {
         const container = document.getElementById('table-tabs');
@@ -1680,14 +1700,17 @@ input[type="checkbox"]:disabled {
 
     function updateBatchToolbar() {
         const toolbar = document.getElementById('batch-toolbar');
+        const normal = document.getElementById('action-normal');
         const countSpan = document.getElementById('batch-count');
         const count = gridApi ? gridApi.getSelectedRows().length : 0;
         if (count > 0) {
-            toolbar.style.display = 'block';
+            toolbar.style.display = 'flex';
+            if (normal) normal.style.display = 'none';
             countSpan.innerHTML = '<i class="ph ph-check-square"></i> 已选 ' + count + ' 条';
             updateBatchFieldSelect();
         } else {
             toolbar.style.display = 'none';
+            if (normal) normal.style.display = 'flex';
         }
     }
 

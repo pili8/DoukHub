@@ -1,5 +1,7 @@
 """DoukHub 主入口 — FastAPI Web 应用"""
+import asyncio
 import logging
+import httpx
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +23,8 @@ from .core.database import Database
 from .core.feishu_sync import FeishuSyncer
 from .core.history import HistoryDB
 from .core.scheduler import TaskScheduler
+from .core.tasks import get_task_manager
+from .core.link_resolver import extract_sec_user_id, build_profile_url
 from .services.downloader import ServiceManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
@@ -95,18 +99,18 @@ def get_syncer() -> Syncer | None:
     return None
 
 
-def get_syncer_v2() -> SyncerV2 | None:
+def get_syncer_v2() -> SyncerV2:
+    """始终返回实例。三步同步只用本地 DB + TTD API，不依赖飞书。
+    飞书仅在云端同步时使用，未配置时 feishu=None，不影响三步同步。"""
     global syncer_v2
-    f = get_feishu()
-    if f:
-        if syncer_v2 is None:
-            syncer_v2 = SyncerV2(
-                feishu=f,
-                collector=get_collector(),
-                config=config.feishu,
-            )
-        return syncer_v2
-    return None
+    if syncer_v2 is None:
+        f = get_feishu()
+        syncer_v2 = SyncerV2(
+            feishu=f,
+            collector=get_collector(),
+            config=config.feishu,
+        )
+    return syncer_v2
 
 
 def get_history() -> HistoryDB:
@@ -200,7 +204,6 @@ def detect_platform(link: str) -> str:
 @app.get("/sync", response_class=HTMLResponse)
 async def page_sync(request: Request):
     """同步页面 - 本地数据流程（导入→解析→获取详情），飞书同步在数据管理页面"""
-    svc = get_services()
     db = get_database()
     # 从本地数据库读取账号列表
     accounts = db.get_all_accounts()
@@ -217,7 +220,6 @@ async def page_sync(request: Request):
             acc["tags_list"] = []
     return templates.TemplateResponse(request, "sync.html", context={
         "request": request,
-        "services": svc.status_all(),
         "accounts": accounts,
         "page": "sync",
     })
@@ -381,35 +383,30 @@ async def api_status():
         except Exception as e:
             feishu_status = {"connected": False, "message": str(e)}
 
-    # 检测 TTD 连通性（先检查内核是否安装）
+    # 检测 TTD/XHS 连通性:并发执行,避免串行 5s+5s 阻塞
     ttd_kernel = svc.ttd.source_exists
-    if not ttd_kernel:
-        ttd_status = {"connected": False, "message": "内核未安装"}
-    else:
-        ttd_status = {"connected": False, "message": "未启动"}
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.get(f"{collector.ttd_url}/")
-                if resp.status_code in (200, 307, 404):
-                    ttd_status = {"connected": True, "message": "运行中"}
-        except Exception as e:
-            ttd_status = {"connected": False, "message": str(e)}
-
-    # 检测 XHS 连通性（先检查内核是否安装）
     xhs_kernel = svc.xhs.source_exists
-    if not xhs_kernel:
-        xhs_status = {"connected": False, "message": "内核未安装"}
-    else:
-        xhs_status = {"connected": False, "message": "未启动"}
+
+    async def _check_service(url: str) -> dict:
+        """探测单个 downloader 服务是否在线"""
         try:
-            import httpx
             async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.get(f"{collector.xhs_url}/")
+                resp = await client.get(url)
                 if resp.status_code in (200, 307, 404):
-                    xhs_status = {"connected": True, "message": "运行中"}
+                    return {"connected": True, "message": "运行中"}
+                return {"connected": False, "message": f"HTTP {resp.status_code}"}
         except Exception as e:
-            xhs_status = {"connected": False, "message": str(e)}
+            return {"connected": False, "message": str(e)}
+
+    async def _ttd_task():
+        return {"connected": False, "message": "内核未安装"} if not ttd_kernel \
+            else await _check_service(f"{collector.ttd_url}/")
+
+    async def _xhs_task():
+        return {"connected": False, "message": "内核未安装"} if not xhs_kernel \
+            else await _check_service(f"{collector.xhs_url}/")
+
+    ttd_status, xhs_status = await asyncio.gather(_ttd_task(), _xhs_task())
 
     return {
         "feishu": feishu_status,
@@ -796,234 +793,265 @@ async def api_sync_v2_import(request: Request):
 
 @app.post("/api/sync/v2/update-collection")
 async def api_sync_v2_update_collection():
-    """步骤2：更新采集表（获取 sec_user_id）- SSE 实时进度"""
+    """步骤2:更新采集表(获取 sec_user_id) - 后台任务,立即返回 task_id"""
     s = get_syncer_v2()
     if not s:
-        return JSONResponse(
-            {"success": False, "message": "飞书未配置"},
-            status_code=400,
-        )
-    
+        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
+    tm = get_task_manager()
+    task = tm.create("update_collection")
+    asyncio.create_task(tm.run_serial(task, _run_update_collection))
+    return {"task_id": task.task_id, "status": "pending", "message": "已加入队列"}
+
+
+async def _run_update_collection(task):
+    """后台执行:解析账号标识(走 TTD API 拿 sec_user_id)。串行队列内运行。"""
     import json
-    
-    async def update_stream():
+    tm = get_task_manager()
+    s = get_syncer_v2()
+    if not s:
+        tm.add_log(task.task_id, "飞书未配置", "error")
+        tm.update(task.task_id, status="failed", error="飞书未配置")
+        return
+    tm.add_log(task.task_id, "开始更新采集表", "info")
+    # TTD 预检(避免逐条等 30s 超时)
+    ttd_available = False
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(f"{s.collector.ttd_url}/")
+            if resp.status_code in (200, 307, 404):
+                ttd_available = True
+    except Exception:
+        ttd_available = False
+    if not ttd_available:
+        tm.add_log(task.task_id, "TTD 服务未运行,无法解析短链接", "error")
+        tm.update(task.task_id, status="failed", error="TTD 服务未运行")
+        return
+    collections = s.db.get_all_collections()
+    to_process = [c for c in collections if not c.get("sec_user_id") and str(c.get("share_code", "")).strip()]
+    tm.update(task.task_id, total=len(to_process))
+    if not to_process:
+        tm.add_log(task.task_id, "没有需要解析的记录（所有采集记录已获取 sec_user_id）", "info")
+        tm.add_log(task.task_id, "完成: 0 条", "ok")
+        return
+    tm.add_log(task.task_id, f"需要处理 {len(to_process)} 条记录", "info")
+    success = 0
+    failed = 0
+    for i, collection in enumerate(to_process):
+        if tm.is_cancelled(task.task_id):
+            tm.update(task.task_id, status="cancelled")
+            return
+        share = collection["share_code"]
+        platform = collection.get("平台") or "抖音"
+        tm.add_log(task.task_id, f"[{i+1}/{len(to_process)}] {share}", "info")
         try:
-            yield f"data: {json.dumps({'type': 'start', 'message': '开始更新采集表'})}\n\n"
-            
-            # 获取所有未获取 sec_user_id 的记录
-            collections = s.db.get_all_collections()
-            to_process = [c for c in collections if not c.get("sec_user_id") and str(c.get("share_code", "")).strip()]
-            
-            yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': 0, 'failed': 0})}\n\n"
-            yield f"data: {json.dumps({'type': 'progress', 'message': f'需要处理 {len(to_process)} 条记录'})}\n\n"
-
-            # 加载 Cookie
-            db = get_database()
-            cookies = db.get_enabled_cookies()
-            cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
-            if not cookie_list:
-                yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': '⚠️ Cookie 表为空，无法获取账号详情。请在飞书 Cookie 表中添加有效的抖音 Cookie。'})}\n\n"
-                yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': 'Cookie 表为空，获取详情失败', 'total': len(to_process), 'success_count': 0, 'failed': len(to_process)})}\n\n"
-                return
-            yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': f'已加载 {len(cookie_list)} 个 Cookie'})}\n\n"
-
-            success = 0
-            failed = 0
-            errors = []
-            
-            for i, collection in enumerate(to_process):
-                yield f"data: {json.dumps({'type': 'progress', 'message': f'处理 [{i+1}/{len(to_process)}]: {collection["share_code"]}'})}\n\n"
-                
-                try:
-                    share = collection["share_code"]
-                    platform = collection.get("平台") or "抖音"
-
-                    # 调用 TTD API 解析短链接
-                    resolved_url = await s.collector.resolve_short_url(share, platform)
-                    sec_user_id = s._extract_sec_user_id(resolved_url, platform)
-                    
-                    if not sec_user_id:
-                        failed += 1
-                        errors.append(f"{share}: 无法提取 sec_user_id")
-                        s.db.update_collection(collection["record_id"], {
-                            "同步错误": "无法提取 sec_user_id",
-                        })
-                        yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {share}: 无法提取 sec_user_id'})}\n\n"
-                        continue
-                    
-                    # 检查是否已存在
-                    existing = s.db.get_collection_by_sec_user_id(sec_user_id)
-                    if existing and existing["record_id"] != collection["record_id"]:
-                        # 去重：等级取高的，标签合并
-                        new_level = s.merge_level(existing.get("等级"), collection.get("等级"))
-                        existing_tags = json.loads(existing.get("标签", "[]")) if existing.get("标签") else []
-                        new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
-                        merged_tags = s.merge_tags(existing_tags, new_tags)
-                        
-                        s.db.update_collection(existing["record_id"], {
-                            "等级": new_level,
-                            "标签": json.dumps(merged_tags),
-                        })
-                        # 删除重复记录
-                        s.db.delete_collection(collection["record_id"])
-                        success += 1
-                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ 合并重复记录'})}\n\n"
-                    else:
-                        # 更新 sec_user_id
-                        s.db.update_collection(collection["record_id"], {
-                            "sec_user_id": sec_user_id,
-                            "已同步": True,
-                            "同步错误": None,
-                        })
-                        success += 1
-                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ {share}: {sec_user_id}'})}\n\n"
-                    
-                    # 更新统计
-                    yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': success, 'failed': failed})}\n\n"
-                    
-                except Exception as e:
-                    failed += 1
-                    errors.append(f"{collection.get('share_code')}: {str(e)}")
-                    s.db.update_collection(collection["record_id"], {
-                        "同步错误": str(e),
-                    })
-                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {collection.get('share_code')}: {e}'})}\n\n"
-            
-            yield f"data: {json.dumps({'type': 'complete', 'success': failed == 0, 'message': f'更新完成: 成功 {success} 条，失败 {failed} 条', 'total': len(to_process), 'success_count': success, 'failed': failed, 'errors': errors[:5]})}\n\n"
-            
+            resolved_url = await s.collector.resolve_short_url(share, platform)
+            sec_user_id = extract_sec_user_id(resolved_url, platform)
+            if not sec_user_id:
+                failed += 1
+                if not resolved_url:
+                    reason = "TTD 返回空(服务不可用或超时)"
+                else:
+                    reason = f"URL 无法提取 sec_user_id: {resolved_url[:120]}"
+                s.db.update_collection(collection["record_id"], {"同步错误": reason})
+                tm.add_log(task.task_id, f"X {share}: {reason}", "error")
+                tm.update(task.task_id, success=success, failed=failed)
+                continue
+            existing = s.db.get_collection_by_sec_user_id(sec_user_id)
+            if existing and existing["record_id"] != collection["record_id"]:
+                new_level = s.merge_level(existing.get("等级"), collection.get("等级"))
+                existing_tags = json.loads(existing.get("标签", "[]")) if existing.get("标签") else []
+                new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
+                merged_tags = s.merge_tags(existing_tags, new_tags)
+                s.db.update_collection(existing["record_id"], {"等级": new_level, "标签": json.dumps(merged_tags)})
+                s.db.delete_collection(collection["record_id"])
+                success += 1
+                tm.add_log(task.task_id, "OK 合并重复记录", "ok")
+            else:
+                s.db.update_collection(collection["record_id"], {"sec_user_id": sec_user_id, "已同步": True, "同步错误": None})
+                success += 1
+                tm.add_log(task.task_id, f"OK {share}: {sec_user_id}", "ok")
+            tm.update(task.task_id, success=success, failed=failed)
+            await asyncio.sleep(0.3)
         except Exception as e:
-            logger.error(f"更新采集表失败: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'更新失败: {str(e)}', 'total': 0, 'success_count': 0, 'failed': 1, 'errors': [str(e)]})}\n\n"
-    
-    return StreamingResponse(update_stream(), media_type="text/event-stream")
+            failed += 1
+            s.db.update_collection(collection["record_id"], {"同步错误": str(e)})
+            tm.add_log(task.task_id, f"X {share}: {e}", "error")
+            tm.update(task.task_id, success=success, failed=failed)
+    tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed}", "info")
 
 
 @app.post("/api/sync/v2/sync-account")
 async def api_sync_v2_sync_account():
-    """步骤3：同步账号表 - SSE 实时进度"""
+    """步骤3:同步账号表 - 后台任务,立即返回 task_id"""
     s = get_syncer_v2()
     if not s:
-        return JSONResponse(
-            {"success": False, "message": "飞书未配置"},
-            status_code=400,
-        )
-    
+        return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
+    tm = get_task_manager()
+    task = tm.create("sync_account")
+    asyncio.create_task(tm.run_serial(task, _run_sync_account))
+    return {"task_id": task.task_id, "status": "pending", "message": "已加入队列"}
+
+
+async def _run_sync_account(task):
+    """后台执行:同步账号表(走 TTD API 拉账号详情)。串行队列内运行。"""
     import json
-    
-    async def sync_stream():
+    tm = get_task_manager()
+    s = get_syncer_v2()
+    if not s:
+        tm.add_log(task.task_id, "飞书未配置", "error")
+        tm.update(task.task_id, status="failed", error="飞书未配置")
+        return
+    tm.add_log(task.task_id, "开始同步账号表", "info")
+    collections = s.db.get_all_collections()
+    to_process = [c for c in collections if c.get("已同步") and c.get("sec_user_id")]
+    tm.update(task.task_id, total=len(to_process))
+    if not to_process:
+        tm.add_log(task.task_id, "没有需要同步的记录（请先执行第二步解析账号标识）", "info")
+        tm.add_log(task.task_id, "完成: 0 条", "ok")
+        return
+    tm.add_log(task.task_id, f"需要处理 {len(to_process)} 条记录", "info")
+    db = get_database()
+    cookies = db.get_enabled_cookies()
+    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+    if not cookie_list:
+        tm.add_log(task.task_id, "Cookie 表为空,无法获取账号详情", "error")
+        tm.update(task.task_id, status="failed", error="Cookie 表为空")
+        return
+    tm.add_log(task.task_id, f"已加载 {len(cookie_list)} 个 Cookie", "info")
+    # 预检 TTD 服务是否可用(避免逐条等 15s 超时)
+    ttd_available = False
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(f"{s.collector.ttd_url}/")
+            if resp.status_code in (200, 307, 404):
+                ttd_available = True
+    except Exception:
+        ttd_available = False
+    if not ttd_available:
+        tm.add_log(task.task_id, "TTD 服务未运行,将跳过需要获取详情的新账号", "error")
+    # 预加载已有账号,避免逐条查询
+    existing_accounts_map = {}
+    for a in db.get_all_accounts():
+        existing_accounts_map[a["sec_user_id"]] = a
+    success = 0
+    failed = 0
+    skipped = 0
+    for i, collection in enumerate(to_process):
+        if tm.is_cancelled(task.task_id):
+            tm.update(task.task_id, status="cancelled")
+            return
+        sec_user_id = collection["sec_user_id"]
+        platform = collection.get("平台") or "抖音"
+        existing_account = existing_accounts_map.get(sec_user_id)
+        # 已存在且已获取信息:跳过(避免重复处理)
+        if existing_account and existing_account.get("已获取信息"):
+            skipped += 1
+            tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
+            continue
+        tm.add_log(task.task_id, f"[{i+1}/{len(to_process)}] {sec_user_id}", "info")
         try:
-            yield f"data: {json.dumps({'type': 'start', 'message': '开始同步账号表'})}\n\n"
-            
-            # 获取所有已同步但账号表未更新的记录
-            collections = s.db.get_all_collections()
-            to_process = [c for c in collections if c.get("已同步") and c.get("sec_user_id")]
-            
-            yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': 0, 'failed': 0})}\n\n"
-            yield f"data: {json.dumps({'type': 'progress', 'message': f'需要处理 {len(to_process)} 条记录'})}\n\n"
-
-            # 加载 Cookie
-            db = get_database()
-            cookies = db.get_enabled_cookies()
-            cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
-            if not cookie_list:
-                yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': 'Cookie 表为空，无法获取账号详情。请在飞书 Cookie 表中添加有效的抖音 Cookie。'})}\n\n"
-                yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': 'Cookie 表为空，获取详情失败', 'total': len(to_process), 'success_count': 0, 'failed': len(to_process)})}\n\n"
-                return
-            yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': f'已加载 {len(cookie_list)} 个 Cookie'})}\n\n"
-
-            # 预检 TTD 服务是否可用（避免逐条等 15s 超时）
-            ttd_available = False
-            try:
-                import httpx
-                async with httpx.AsyncClient(timeout=3) as client:
-                    resp = await client.get(f"{s.collector.ttd_url}/")
-                    if resp.status_code in (200, 307, 404):
-                        ttd_available = True
-            except Exception:
-                ttd_available = False
-
+            if existing_account:
+                # 账号已存在但未获取信息:合并等级标签
+                new_level = s.merge_level(existing_account.get("等级"), collection.get("等级"))
+                existing_tags = json.loads(existing_account.get("标签", "[]")) if existing_account.get("标签") else []
+                new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
+                merged_tags = s.merge_tags(existing_tags, new_tags)
+                s.db.update_account(existing_account["record_id"], {
+                    "等级": new_level,
+                    "标签": json.dumps(merged_tags),
+                })
+                account_id = existing_account["record_id"]
+            else:
+                # 新账号:先复活软删除记录(如有),再插入
+                revived_id = db.revive_account_if_deleted(sec_user_id)
+                if revived_id:
+                    s.db.update_account(revived_id, {
+                        "账号名称": "",
+                        "平台": platform,
+                        "链接": build_profile_url(sec_user_id, platform),
+                        "等级": collection.get("等级"),
+                        "标签": collection.get("标签"),
+                        "已获取信息": False,
+                    })
+                    account_id = revived_id
+                else:
+                    record_id = f"acc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{i}"
+                    s.db.insert_account({
+                        "record_id": record_id,
+                        "账号名称": "",
+                        "平台": platform,
+                        "链接": build_profile_url(sec_user_id, platform),
+                        "sec_user_id": sec_user_id,
+                        "等级": collection.get("等级"),
+                        "标签": collection.get("标签"),
+                        "已获取信息": False,
+                    })
+                    account_id = record_id
+            # 获取账号详情
             if not ttd_available:
-                yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': '⚠️ TTD 服务未运行，将跳过需要获取详情的新账号。请先在「状态」页面启动 TTD 服务。'})}\n\n"
-
-            success = 0
-            failed = 0
-            skipped = 0
-            errors = []
-            
-            for i, collection in enumerate(to_process):
-                yield f"data: {json.dumps({'type': 'progress', 'message': f'处理 [{i+1}/{len(to_process)}]: {collection["sec_user_id"]}'})}\n\n"
-                
-                try:
-                    sec_user_id = collection["sec_user_id"]
-                    platform = collection.get("平台") or "抖音"
-                    
-                    # 检查账号表是否已存在
-                    existing_account = s.db.get_account_by_sec_user_id(sec_user_id)
-                    
-                    if existing_account:
-                        # 去重：等级取高的，标签合并
-                        new_level = s.merge_level(existing_account.get("等级"), collection.get("等级"))
-                        existing_tags = json.loads(existing_account.get("标签", "[]")) if existing_account.get("标签") else []
-                        new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
-                        merged_tags = s.merge_tags(existing_tags, new_tags)
-                        
-                        # 更新账号表
-                        s.db.update_account(existing_account["record_id"], {
-                            "等级": new_level,
-                            "标签": json.dumps(merged_tags),
-                            "已获取信息": True,
-                        })
-                        success += 1
-                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ 更新账号: {existing_account.get('账号名称')}'})}\n\n"
-                    else:
-                        # TTD 服务不可用时跳过新账号（避免逐条等 15s 超时）
-                        if not ttd_available:
-                            skipped += 1
-                            yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'⏭️ {sec_user_id}: 跳过（TTD 服务未运行）'})}\n\n"
-                            continue
-                        # 调用 API 获取账号信息
-                        cookie = cookie_list[success % len(cookie_list)]
-                        info = await s.collector.get_account_info(sec_user_id, platform, cookie)
-                        if not info:
-                            failed += 1
-                            errors.append(f"{sec_user_id}: 无法获取账号信息")
-                            yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {sec_user_id}: 无法获取账号信息'})}\n\n"
-                            continue
-                        
-                        # 创建账号记录
-                        record_id = f"acc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{success}"
-                        s.db.insert_account({
-                            "record_id": record_id,
-                            "账号名称": info.get("nickname", ""),
-                            "平台": platform,
-                            "链接": build_profile_url(sec_user_id, platform),
-                            "sec_user_id": sec_user_id,
-                            "等级": collection.get("等级"),
-                            "标签": collection.get("标签"),
-                            "粉丝数": info.get("follower_count", 0),
-                            "作品数": info.get("aweme_count", 0),
-                            "签名": info.get("signature", ""),
-                            "头像": info.get("avatar", ""),
-                            "已获取信息": True,
-                        })
-                        success += 1
-                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ 新增账号: {info.get('nickname')}'})}\n\n"
-                    
-                    # 更新统计
-                    yield f"data: {json.dumps({'type': 'stats', 'total': len(to_process), 'success': success, 'failed': failed})}\n\n"
-                    
-                except Exception as e:
-                    failed += 1
-                    errors.append(f"{collection.get('sec_user_id')}: {str(e)}")
-                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {collection.get('sec_user_id')}: {e}'})}\n\n"
-
-            yield f"data: {json.dumps({'type': 'complete', 'success': failed == 0, 'message': f'同步完成: 成功 {success} 条，失败 {failed} 条，跳过 {skipped} 条', 'total': len(to_process), 'success_count': success, 'failed': failed, 'skipped': skipped, 'errors': errors[:5]})}\n\n"
-            
+                skipped += 1
+                tm.add_log(task.task_id, f"SKIP {sec_user_id}: TTD 未运行", "error")
+                tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
+                continue
+            cookie = cookie_list[i % len(cookie_list)]
+            info = await s.collector.get_account_info(sec_user_id, platform, cookie)
+            if not info or not info.get("nickname"):
+                failed += 1
+                reason = "TTD 返回空账号信息(服务不可用或超时)"
+                s.db.update_collection(collection["record_id"], {"同步错误": reason})
+                tm.add_log(task.task_id, f"X {sec_user_id}: {reason}", "error")
+                tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
+                continue
+            s.db.update_account(account_id, {
+                "账号名称": info.get("nickname", ""),
+                "粉丝数": info.get("follower_count", 0),
+                "作品数": info.get("aweme_count", 0),
+                "签名": info.get("signature", ""),
+                "头像": info.get("avatar", ""),
+                "已获取信息": True,
+            })
+            # 更新内存缓存
+            existing_accounts_map[sec_user_id] = {
+                **(existing_account or {}),
+                "账号名称": info.get("nickname", ""),
+                "已获取信息": True,
+            }
+            success += 1
+            tm.add_log(task.task_id, f"OK 新增/更新账号: {info.get('nickname')}", "ok")
+            tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
+            await asyncio.sleep(0.5)
         except Exception as e:
-            logger.error(f"同步账号表失败: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'同步失败: {str(e)}', 'total': 0, 'success_count': 0, 'failed': 1, 'errors': [str(e)]})}\n\n"
-    
-    return StreamingResponse(sync_stream(), media_type="text/event-stream")
+            failed += 1
+            tm.add_log(task.task_id, f"X {sec_user_id}: {e}", "error")
+            tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
+    tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed} 跳过 {skipped}", "info")
+
+
+# ========== 后台任务查询 ==========
+
+@app.get("/api/tasks")
+async def api_tasks_list():
+    """列出所有任务(running/pending 在前,完成的按时间倒序)"""
+    tm = get_task_manager()
+    return {"tasks": [t.to_dict() for t in tm.list()]}
+
+
+@app.get("/api/tasks/{task_id}")
+async def api_task_detail(task_id: str):
+    """单任务详情(含日志)"""
+    tm = get_task_manager()
+    t = tm.get(task_id)
+    if not t:
+        return JSONResponse({"success": False, "message": "任务不存在"}, status_code=404)
+    return t.to_dict()
+
+
+@app.post("/api/tasks/{task_id}/cancel")
+async def api_task_cancel(task_id: str):
+    """取消任务(设标志位,任务循环里检查退出)"""
+    tm = get_task_manager()
+    ok = tm.request_cancel(task_id)
+    return {"success": ok, "message": "已请求取消" if ok else "任务不存在或已结束"}
 
 
 @app.post("/api/sync/v2/refresh-accounts")

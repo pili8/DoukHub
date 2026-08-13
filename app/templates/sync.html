@@ -197,7 +197,7 @@
         }
     }
 
-    let TAG_MAP = {};
+    var TAG_MAP = {};
 
     async function loadTags() {
         try {
@@ -229,7 +229,7 @@
         if (data.success) setTimeout(() => location.reload(), 1000);
     }
 
-    let parsedData = [];
+    var parsedData = [];
 
     function handleDrop(event) {
         event.preventDefault();
@@ -351,7 +351,7 @@
         }
     }
 
-    let syncV2AbortController = null;
+    var syncV2AbortController = null;
 
     async function startSyncV2() {
         const btn = document.getElementById('sync-btn');
@@ -433,82 +433,47 @@
         }
     }
 
+        // ===== 任务模式:启动后台任务,进度由 base 全局轮询驱动 =====
+    var currentTaskId = null;
+    var currentTaskType = null;
+    var _syncAllNext = null;
+
     async function updateCollectionV2() {
         const btn = document.getElementById('update-btn');
         const stopBtn = document.getElementById('stop-sync-btn');
         btn.disabled = true;
-        btn.innerHTML = '<i class="ph ph-spinner"></i> 更新中...';
+        btn.innerHTML = '<i class="ph ph-spinner"></i> 解析中...';
         stopBtn.style.display = 'inline-flex';
-
-        const progressDiv = document.getElementById('sync-progress');
-        const progressBar = document.getElementById('sync-progress-bar');
-        const progressText = document.getElementById('sync-progress-text');
+        document.getElementById('sync-progress').style.display = 'block';
+        document.getElementById('sync-log').style.display = 'block';
         const logBox = document.getElementById('sync-log');
-
-        progressDiv.style.display = 'block';
-        logBox.style.display = 'block';
         logBox.innerHTML = '';
-        progressBar.style.width = '0%';
-        progressBar.style.background = 'var(--accent)';
+        logBox._lastLogCount = 0;
+        document.getElementById('sync-progress-bar').style.width = '0%';
+        document.getElementById('sync-progress-bar').style.background = 'var(--accent)';
         document.getElementById('stat-total').textContent = '...';
         document.getElementById('stat-success').textContent = '0';
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
-
-        progressText.textContent = '步骤2: 解析账号标识';
-        addLog(logBox, '<div class="log-info">开始获取 sec_user_id...</div>');
-
-        syncV2AbortController = new AbortController();
-
+        document.getElementById('sync-progress-text').textContent = '步骤2: 解析账号标识';
+        addLog(logBox, '<div class="log-info">已提交后台任务,解析 sec_user_id...</div>');
         try {
-            const response = await fetch('/api/sync/v2/update-collection', {
-                method: 'POST',
-                signal: syncV2AbortController.signal
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                addLog(logBox, `<div class="log-err">${error.message}</div>`);
-                progressText.textContent = `失败: ${error.message}`;
-                progressBar.style.background = 'var(--danger)';
-                showToast(error.message, 'error');
+            const data = await apiCall('/api/sync/v2/update-collection', 'POST');
+            if (data.task_id) {
+                currentTaskId = data.task_id;
+                currentTaskType = 'update_collection';
+                showToast('已加入后台队列', 'info');
+            } else {
+                addLog(logBox, '<div class="log-err">' + (data.message || '启动失败') + '</div>');
                 btn.disabled = false;
                 btn.innerHTML = '<i class="ph ph-number-circle-two"></i> 解析账号标识';
                 stopBtn.style.display = 'none';
-                return;
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try { handleSyncEvent(JSON.parse(line.slice(6))); } catch (e) {}
-                    }
-                }
             }
         } catch (e) {
-            if (e.name === 'AbortError') {
-                addLog(logBox, '<div class="log-info">更新已停止</div>');
-                progressText.textContent = '更新已停止';
-                showToast('更新已停止', 'error');
-            } else {
-                addLog(logBox, `<div class="log-err">请求失败: ${e.message}</div>`);
-                progressText.textContent = '请求失败';
-                showToast('更新请求失败', 'error');
-            }
-        } finally {
+            addLog(logBox, '<div class="log-err">启动失败: ' + e.message + '</div>');
             btn.disabled = false;
             btn.innerHTML = '<i class="ph ph-number-circle-two"></i> 解析账号标识';
             stopBtn.style.display = 'none';
-            syncV2AbortController = null;
         }
     }
 
@@ -518,80 +483,40 @@
         btn.disabled = true;
         btn.innerHTML = '<i class="ph ph-spinner"></i> 同步中...';
         stopBtn.style.display = 'inline-flex';
-
-        const progressDiv = document.getElementById('sync-progress');
-        const progressBar = document.getElementById('sync-progress-bar');
-        const progressText = document.getElementById('sync-progress-text');
+        document.getElementById('sync-progress').style.display = 'block';
+        document.getElementById('sync-log').style.display = 'block';
         const logBox = document.getElementById('sync-log');
-
-        progressDiv.style.display = 'block';
-        logBox.style.display = 'block';
         logBox.innerHTML = '';
-        progressBar.style.width = '0%';
-        progressBar.style.background = 'var(--accent)';
+        logBox._lastLogCount = 0;
+        document.getElementById('sync-progress-bar').style.width = '0%';
+        document.getElementById('sync-progress-bar').style.background = 'var(--accent)';
         document.getElementById('stat-total').textContent = '...';
         document.getElementById('stat-success').textContent = '0';
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
-
-        progressText.textContent = '步骤3: 同步账号表';
-        addLog(logBox, '<div class="log-info">开始获取账号详细信息...</div>');
-
-        syncV2AbortController = new AbortController();
-
+        document.getElementById('sync-progress-text').textContent = '步骤3: 同步账号表';
+        addLog(logBox, '<div class="log-info">已提交后台任务,获取账号详情...</div>');
         try {
-            const response = await fetch('/api/sync/v2/sync-account', {
-                method: 'POST',
-                signal: syncV2AbortController.signal
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                addLog(logBox, `<div class="log-err">${error.message}</div>`);
-                progressText.textContent = `失败: ${error.message}`;
-                progressBar.style.background = 'var(--danger)';
-                showToast(error.message, 'error');
+            const data = await apiCall('/api/sync/v2/sync-account', 'POST');
+            if (data.task_id) {
+                currentTaskId = data.task_id;
+                currentTaskType = 'sync_account';
+                showToast('已加入后台队列', 'info');
+            } else {
+                addLog(logBox, '<div class="log-err">' + (data.message || '启动失败') + '</div>');
                 btn.disabled = false;
                 btn.innerHTML = '<i class="ph ph-number-circle-three"></i> 同步账号表';
                 stopBtn.style.display = 'none';
-                return;
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try { handleSyncEvent(JSON.parse(line.slice(6))); } catch (e) {}
-                    }
-                }
             }
         } catch (e) {
-            if (e.name === 'AbortError') {
-                addLog(logBox, '<div class="log-info">同步已停止</div>');
-                progressText.textContent = '同步已停止';
-                showToast('同步已停止', 'error');
-            } else {
-                addLog(logBox, `<div class="log-err">请求失败: ${e.message}</div>`);
-                progressText.textContent = '请求失败';
-                showToast('同步请求失败', 'error');
-            }
-        } finally {
+            addLog(logBox, '<div class="log-err">启动失败: ' + e.message + '</div>');
             btn.disabled = false;
             btn.innerHTML = '<i class="ph ph-number-circle-three"></i> 同步账号表';
             stopBtn.style.display = 'none';
-            syncV2AbortController = null;
         }
     }
 
-    async function refreshAccountsV2() {
+async function refreshAccountsV2() {
         const btn = document.getElementById('refresh-accounts-btn');
         const stopBtn = document.getElementById('stop-sync-btn');
         btn.disabled = true;
@@ -670,100 +595,56 @@
         }
     }
 
-    async function syncAllV2() {
+        async function syncAllV2() {
         const btn = document.getElementById('sync-all-btn');
         const stopBtn = document.getElementById('stop-sync-btn');
         btn.disabled = true;
         btn.innerHTML = '<i class="ph ph-spinner"></i> 同步中...';
         stopBtn.style.display = 'inline-flex';
-
-        const progressDiv = document.getElementById('sync-progress');
-        const progressBar = document.getElementById('sync-progress-bar');
-        const progressText = document.getElementById('sync-progress-text');
+        document.getElementById('sync-progress').style.display = 'block';
+        document.getElementById('sync-log').style.display = 'block';
         const logBox = document.getElementById('sync-log');
-
-        progressDiv.style.display = 'block';
-        logBox.style.display = 'block';
         logBox.innerHTML = '';
-        progressBar.style.width = '0%';
-        progressBar.style.background = 'var(--info)';
+        document.getElementById('sync-progress-bar').style.width = '0%';
+        document.getElementById('sync-progress-bar').style.background = 'var(--info)';
         document.getElementById('stat-total').textContent = '...';
         document.getElementById('stat-success').textContent = '0';
         document.getElementById('stat-api').textContent = '0';
         document.getElementById('stat-failed').textContent = '0';
-
-        progressText.textContent = '一键同步';
-        addLog(logBox, '<div class="log-info">开始一键同步（分步执行）...</div>');
-
+        document.getElementById('sync-progress-text').textContent = '一键同步';
+        addLog(logBox, '<div class="log-info">开始一键同步(步骤1: 导入采集表)...</div>');
         const text = document.getElementById('import-text').value;
-        syncV2AbortController = new AbortController();
-
-        async function runStep(url, body, label) {
-            addLog(logBox, `<div class="log-info">--- ${label} ---</div>`);
-            const opts = { method: 'POST', signal: syncV2AbortController.signal };
-            if (body !== null) {
-                opts.headers = { 'Content-Type': 'application/json' };
-                opts.body = JSON.stringify(body);
-            }
-            const response = await fetch(url, opts);
-            if (!response.ok) {
-                let msg = `HTTP ${response.status}`;
-                try { msg = (await response.json()).message || msg; } catch {}
-                throw new Error(msg);
-            }
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try { handleSyncEvent(JSON.parse(line.slice(6))); } catch {}
-                    }
-                }
-            }
-        }
-
-        window._syncAllMode = true;
         try {
-            await runStep('/api/sync/v2/import', { text }, '步骤1: 导入采集表');
-            await runStep('/api/sync/v2/update-collection', null, '步骤2: 解析短链接');
-            await runStep('/api/sync/v2/sync-account', null, '步骤3: 获取详情 + 回写云端');
-
-            progressBar.style.width = '100%';
-            progressBar.style.background = 'var(--success)';
-            progressText.innerHTML = '一键同步完成 <button onclick="location.reload()" style="margin-left:8px;padding:4px 12px;font-size:12px;background:var(--info);color:#fff;border:none;border-radius:4px;cursor:pointer;">刷新页面</button>';
-            addLog(logBox, '<div class="log-ok">全部步骤执行完成</div>');
-            showToast('一键同步完成', 'success');
-        } catch (e) {
-            if (e.name === 'AbortError') {
-                addLog(logBox, '<div class="log-info">同步已停止</div>');
-                progressText.textContent = '同步已停止';
-                showToast('同步已停止', 'error');
-            } else {
-                addLog(logBox, `<div class="log-err">请求失败: ${e.message}</div>`);
-                progressText.textContent = `失败: ${e.message}`;
-                progressBar.style.background = 'var(--danger)';
-                showToast('同步请求失败: ' + e.message, 'error');
+            const importData = await apiCall('/api/sync/v2/import', 'POST', { text: text });
+            addLog(logBox, '<div class="log-' + (importData.success ? 'ok' : 'err') + '">' + importData.message + '</div>');
+            if (!importData.success) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="ph ph-lightning"></i> 一键执行';
+                stopBtn.style.display = 'none';
+                return;
             }
-        } finally {
+        } catch (e) {
+            addLog(logBox, '<div class="log-err">导入失败: ' + e.message + '</div>');
             btn.disabled = false;
             btn.innerHTML = '<i class="ph ph-lightning"></i> 一键执行';
             stopBtn.style.display = 'none';
-            syncV2AbortController = null;
-            window._syncAllMode = false;
+            return;
         }
+        // 步骤2:启动解析任务,完成后由 onTasksUpdate 触发步骤3
+        _syncAllNext = 'sync_account';
+        await updateCollectionV2();
     }
 
     function stopSync() {
-        if (syncV2AbortController) syncV2AbortController.abort();
+        // 任务模式:取消后台任务;SSE 模式(refreshAccountsV2):abort fetch
+        if (currentTaskId) {
+            cancelTask(currentTaskId);
+        } else if (syncV2AbortController) {
+            syncV2AbortController.abort();
+        }
     }
 
-    function handleSyncEvent(data) {
+function handleSyncEvent(data) {
         const progressBar = document.getElementById('sync-progress-bar');
         const progressText = document.getElementById('sync-progress-text');
         const logBox = document.getElementById('sync-log');
@@ -808,5 +689,114 @@
                 break;
         }
     }
+
+    // ===== 任务进度回调(base 全局轮询 /api/tasks 驱动) =====
+    function onTasksUpdate(tasks) {
+        // 认领:无当前任务时,接管 running/pending 的 sync 类任务(切回页面/F5 恢复)
+        if (!currentTaskId) {
+            const t = tasks.find(x => (x.status === 'running' || x.status === 'pending') &&
+                       (x.type === 'update_collection' || x.type === 'sync_account'));
+            if (t) {
+                currentTaskId = t.task_id;
+                currentTaskType = t.type;
+                document.getElementById('sync-progress').style.display = 'block';
+                document.getElementById('sync-log').style.display = 'block';
+                document.getElementById('stop-sync-btn').style.display = 'inline-flex';
+                const btnId = t.type === 'update_collection' ? 'update-btn' : 'sync-account-btn';
+                const btn = document.getElementById(btnId);
+                if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ph ph-spinner"></i> 运行中...'; }
+            }
+        }
+        if (!currentTaskId) return;
+        const t = tasks.find(x => x.task_id === currentTaskId);
+        if (!t) return;
+        updateProgressUI(t);
+        if (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled') {
+            // 一键同步链:解析完成 -> 触发同步账号表
+            if (_syncAllNext === 'sync_account' && t.type === 'update_collection' && t.status === 'done') {
+                _syncAllNext = null;
+                syncAccountV2();
+                return;
+            }
+            // 最终完成:恢复所有按钮
+            var btnLabels = {
+                'update-btn': '<i class="ph ph-number-circle-two"></i> 解析账号标识',
+                'sync-account-btn': '<i class="ph ph-number-circle-three"></i> 同步账号表',
+                'sync-all-btn': '<i class="ph ph-lightning"></i> 一键执行'
+            };
+            for (var id in btnLabels) {
+                var b = document.getElementById(id);
+                if (b) { b.disabled = false; b.innerHTML = btnLabels[id]; }
+            }
+            document.getElementById('stop-sync-btn').style.display = 'none';
+            // 进度条满格
+            var progressBar = document.getElementById('sync-progress-bar');
+            if (t.status === 'done') {
+                progressBar.style.width = '100%';
+                progressBar.style.background = 'var(--success)';
+            }
+            // 完成摘要
+            var typeLabel = t.type === 'update_collection' ? '解析账号标识' : '同步账号表';
+            var summary = typeLabel + '完成 · 成功 ' + (t.success||0) + ' · 失败 ' + (t.failed||0) + (t.skipped ? ' · 跳过 ' + t.skipped : '');
+            if (t.status === 'failed') {
+                summary = typeLabel + '失败 · ' + (t.error || '未知错误');
+                progressBar.style.background = 'var(--danger)';
+                showToast(typeLabel + '失败: ' + (t.error || ''), 'error');
+            } else if (t.status === 'cancelled') {
+                summary = typeLabel + '已取消';
+                showToast(typeLabel + '已取消', 'error');
+            } else {
+                showToast(summary, 'success');
+            }
+            document.getElementById('sync-progress-text').textContent = summary;
+            // 不自动刷新，保留结果给用户看；页面底部提示手动刷新
+            currentTaskId = null;
+            currentTaskType = null;
+        }
+    }
+
+    function updateProgressUI(t) {
+        var progressBar = document.getElementById('sync-progress-bar');
+        var progressText = document.getElementById('sync-progress-text');
+        var logBox = document.getElementById('sync-log');
+        document.getElementById('stat-total').textContent = t.total || 0;
+        document.getElementById('stat-success').textContent = t.success || 0;
+        document.getElementById('stat-failed').textContent = t.failed || 0;
+        document.getElementById('stat-api').textContent = t.skipped || 0;
+        if (t.total > 0) {
+            var pct = ((t.success + t.failed + t.skipped) / t.total) * 100;
+            progressBar.style.width = pct + '%';
+        } else if (t.status === 'done') {
+            progressBar.style.width = '100%';
+            progressBar.style.background = 'var(--success)';
+        }
+        var typeLabel = t.type === 'update_collection' ? '解析标识' : '同步账号';
+        progressText.textContent = typeLabel + ': ' + t.success + '/' + t.total + (t.failed ? ' 失败' + t.failed : '');
+        // 增量日志:只追加新条目
+        if (!logBox._lastLogCount) logBox._lastLogCount = 0;
+        var logs = t.log || [];
+        if (logs.length > logBox._lastLogCount) {
+            var newLogs = logs.slice(logBox._lastLogCount);
+            logBox._lastLogCount = logs.length;
+            for (var i = 0; i < newLogs.length; i++) {
+                var l = newLogs[i];
+                var cls = l.level === 'ok' ? 'log-ok' : (l.level === 'error' ? 'log-err' : 'log-info');
+                addLog(logBox, '<div class="' + cls + '">' + l.message + '</div>');
+            }
+        } else if (logs.length < logBox._lastLogCount) {
+            logBox._lastLogCount = 0;
+        }
+        if (t.status === 'failed' || t.status === 'cancelled') {
+            progressBar.style.background = 'var(--danger)';
+        }
+    }
+
+    // 页面加载时主动认领 running 任务(不等下次轮询)
+    (async function() {
+        try {
+            var data = await apiCall('/api/tasks', 'GET');
+            onTasksUpdate(data.tasks || []);
+        } catch (e) {}
+    })();
 </script>
 {% endblock %}

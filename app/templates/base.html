@@ -4,23 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}DoukHub{% endblock %}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+    <link id="theme-css" rel="stylesheet" href="/static/css/theme-material.css?v=4">
     <script>
-      // Anti-FOUC: load theme CSS before first paint
+      // 明暗模式:localStorage 优先,否则跟随系统,首屏设定避免闪烁
       (function() {
-        var themes = {
-          obsidian:'/static/css/theme-obsidian.css',
-          slate:   '/static/css/theme-slate.css',
-          material:'/static/css/theme-material.css',
-          glass:   '/static/css/theme-glass.css'
-        };
-        var saved = localStorage.getItem('doukhub-theme') || 'obsidian';
-        if (!themes[saved]) saved = 'obsidian';
-        document.write('<link id="theme-css" rel="stylesheet" href="' + themes[saved] + '">');
+        var saved = localStorage.getItem('doukhub-mode');
+        if (!saved) saved = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         document.documentElement.setAttribute('data-theme', saved);
       })();
     </script>
@@ -36,42 +26,42 @@
                 </button>
             </div>
             <div class="sidebar-nav">
-                <a href="/status" class="{% if page == 'status' %}active{% endif %}">
+                <a href="/status" title="状态" class="{% if page == 'status' %}active{% endif %}">
                     <i class="ph ph-gauge"></i><span>状态</span>
                 </a>
-                <a href="/sync" class="{% if page == 'sync' %}active{% endif %}">
+                <a href="/sync" title="同步" class="{% if page == 'sync' %}active{% endif %}">
                     <i class="ph ph-arrows-clockwise"></i><span>同步</span>
                 </a>
-                <a href="/collect" class="{% if page == 'collect' %}active{% endif %}">
+                <a href="/collect" title="采集" class="{% if page == 'collect' %}active{% endif %}">
                     <i class="ph ph-download-simple"></i><span>采集</span>
                 </a>
-                <a href="/history" class="{% if page == 'history' %}active{% endif %}">
+                <a href="/history" title="记录" class="{% if page == 'history' %}active{% endif %}">
                     <i class="ph ph-clock-counter-clockwise"></i><span>记录</span>
                 </a>
-                <a href="/database" class="{% if page == 'database' %}active{% endif %}">
+                <a href="/database" title="数据" class="{% if page == 'database' %}active{% endif %}">
                     <i class="ph ph-database"></i><span>数据</span>
                 </a>
-                <a href="/table" class="{% if page == 'table' %}active{% endif %}">
+                <a href="/table" title="表浏览" class="{% if page == 'table' %}active{% endif %}">
                     <i class="ph ph-table"></i><span>表浏览</span>
                 </a>
-                <a href="/settings" class="{% if page == 'settings' %}active{% endif %}">
+                <a href="/settings" title="设置" class="{% if page == 'settings' %}active{% endif %}">
                     <i class="ph ph-gear"></i><span>设置</span>
                 </a>
             </div>
             <div class="sidebar-footer">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-                    <span class="sidebar-version" style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.05em;">v2.0</span>
-                    <select id="theme-select" onchange="switchTheme(this.value)" style="font-size:11px;padding:3px 8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-secondary);cursor:pointer;outline:none;font-family:inherit;">
-                        <option value="obsidian">Obsidian</option>
-                        <option value="slate">Slate</option>
-                        <option value="material">Material</option>
-                        <option value="glass">Glass</option>
-                    </select>
-                </div>
+            <div class="sidebar-footer">
+              <div style="display:flex;gap:6px;">
+                <button id="mode-toggle" onclick="toggleMode()" title="切换明/暗" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);cursor:pointer;font-size:16px;transition:all var(--transition-fast);">
+                    <i class="ph ph-moon"></i>
+                </button>
+                <button id="task-badge" onclick="openTaskPanel()" title="后台任务" style="width:32px;height:32px;display:none;align-items:center;justify-content:center;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);cursor:pointer;font-size:16px;transition:all var(--transition-fast);position:relative;">
+                    <i class="ph ph-list-checks"></i>
+                    <span id="task-badge-count" style="position:absolute;top:-6px;right:-6px;background:var(--accent);color:var(--text-on-accent,#fff);font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;line-height:1;"></span>
+                </button>
+              </div>
             </div>
         </nav>
-        <div id="sidebar-resizer" class="sidebar-resizer"></div>
-        <main class="main">
+        <main class="main" id="main-content">
             {% block content %}{% endblock %}
         </main>
     </div>
@@ -90,6 +80,20 @@
             <div class="dh-modal-actions">
                 <button class="dh-btn dh-btn-ghost" onclick="dhConfirmResolve(false)">取消</button>
                 <button id="dh-confirm-ok" class="dh-btn dh-btn-danger" onclick="dhConfirmResolve(true)">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 后台任务面板 -->
+    <div id="task-panel-overlay" class="dh-modal-overlay">
+        <div class="dh-modal-box" style="max-width:760px;">
+            <div class="dh-modal-header">
+                <h3><i class="ph ph-list-checks"></i> <span>后台任务</span></h3>
+                <button class="dh-modal-close" onclick="closeTaskPanel()"><i class="ph ph-x"></i></button>
+            </div>
+            <div id="task-panel-body" class="dh-modal-body" style="max-height:72vh;overflow-y:auto;"></div>
+            <div class="dh-modal-actions">
+                <button class="dh-btn dh-btn-ghost" onclick="closeTaskPanel()">关闭</button>
             </div>
         </div>
     </div>
@@ -146,47 +150,30 @@
     .dh-btn-danger:hover { background: var(--danger-light); color: var(--danger-text); }
     .dh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    /* ===== 侧边栏折叠 + 拖动调宽 ===== */
-    .sidebar { position: relative; transition: width 0.2s ease; }
+/* ===== 侧边栏折叠 ===== */
+    .sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; transition: width 0.2s ease; }
     .sidebar.sb-collapsed { width: 64px !important; }
-    .sb-collapsed .sidebar-brand { padding: 20px 0 16px; justify-content: center; }
+    /* 折叠态:隐藏文字,只留图标 */
     .sb-collapsed .sidebar-brand > span,
-    .sb-collapsed .sidebar-nav a span,
-    .sb-collapsed .sidebar-version,
-    .sb-collapsed #theme-select { display: none; }
-    /* 折叠态只显示图标:隐藏折叠按钮,避免与 logo 挤在一起 */
-    .sb-collapsed .sidebar-collapse-btn { display: none; }
+    .sb-collapsed .sidebar-nav a span { display: none; }
+    /* 折叠态:品牌区竖排,logo 在上、折叠按钮在下(展开入口) */
+    .sb-collapsed .sidebar-brand {
+        flex-direction: column; gap: 10px;
+        padding: 20px 0 14px;
+        justify-content: center; align-items: center;
+    }
+    .sb-collapsed .sidebar-brand > i { font-size: 24px; }
     .sb-collapsed .sidebar-nav a { justify-content: center; padding: 0; gap: 0; }
     .sb-collapsed .sidebar-footer { padding: 8px 0; border-top: none; }
     .sb-collapsed .sidebar-nav a::before { left: auto; right: 0; }
-    /* 折叠时悬停/钉住:整个侧边栏浮层展开 */
-    .sidebar.sb-collapsed.sb-flyout,
-    .sidebar.sb-collapsed.sb-pinned {
-        position: fixed; top: 0; left: 0; z-index: 2000;
-        width: var(--sidebar-w) !important;
-        box-shadow: var(--shadow-xl);
+    .sb-collapsed .sidebar-collapse-btn {
+        display: flex; margin-left: 0;
+        width: 28px; height: 28px; font-size: 14px;
     }
-    .sidebar.sb-collapsed.sb-flyout .sidebar-nav a,
-    .sidebar.sb-collapsed.sb-pinned .sidebar-nav a {
-        justify-content: flex-start; padding: 0 16px; gap: 12px;
-    }
-    .sidebar.sb-collapsed.sb-flyout .sidebar-brand,
-    .sidebar.sb-collapsed.sb-pinned .sidebar-brand {
-        justify-content: flex-start; padding: 24px 20px 16px;
-    }
-    .sidebar.sb-collapsed.sb-flyout .sidebar-brand > span,
-    .sidebar.sb-collapsed.sb-pinned .sidebar-brand > span,
-    .sidebar.sb-collapsed.sb-flyout .sidebar-version,
-    .sidebar.sb-collapsed.sb-pinned .sidebar-version { display: inline; }
-    .sidebar.sb-collapsed.sb-flyout .sidebar-nav a span,
-    .sidebar.sb-collapsed.sb-pinned .sidebar-nav a span { display: inline; }
-    .sidebar.sb-collapsed.sb-flyout #theme-select,
-    .sidebar.sb-collapsed.sb-pinned #theme-select { display: inline-block; }
-    .sidebar.sb-collapsed.sb-flyout .sidebar-footer > div,
-    .sidebar.sb-collapsed.sb-pinned .sidebar-footer > div { display: flex !important; }
-    /* 浮层展开时恢复折叠按钮,用于钉住/取消 */
-    .sidebar.sb-collapsed.sb-flyout .sidebar-collapse-btn,
-    .sidebar.sb-collapsed.sb-pinned .sidebar-collapse-btn { display: flex; }
+    /* 侧栏顶栏保护:拖窄时文字收成省略号,折叠按钮不被挤压/遮挡 */
+    .sidebar-brand { overflow: hidden; }
+    .sidebar-brand > span { flex-shrink: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .sidebar-brand .sidebar-collapse-btn { flex-shrink: 0; }
     .sidebar-collapse-btn {
         width: 32px; height: 32px; margin-left: auto; flex-shrink: 0;
         display: flex; align-items: center; justify-content: center;
@@ -194,17 +181,42 @@
         color: var(--text-muted); cursor: pointer; font-size: 16px;
         transition: all var(--transition-fast);
     }
-    .sb-collapsed .sidebar-collapse-btn { margin-left: 0; }
     .sidebar-collapse-btn:hover { background: var(--bg-hover); color: var(--accent); }
-    .sidebar-resizer {
-        position: fixed; top: 0; left: var(--sidebar-w);
-        width: 4px; height: 100vh; cursor: ew-resize;
-        z-index: 1000; transition: background 0.15s;
+
+    /* ===== 侧边栏导航项(统一四套主题:40px 扁平) ===== */
+    .sidebar-nav a {
+        display: flex; align-items: center; gap: 12px;
+        padding: 0 16px; height: 40px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 13px; font-weight: 500;
+        line-height: 1.25;
+        border-radius: var(--radius-sm);
+        margin-bottom: 2px;
+        position: relative;
+        overflow: hidden;
+        transition: background var(--transition-fast), color var(--transition-fast);
     }
-    .sidebar-resizer:hover, .sidebar-resizer.dragging { background: var(--accent); opacity: 0.4; }
-    .sb-collapsed ~ .sidebar-resizer { display: none; }
-    .sb-collapsed.sb-flyout ~ .sidebar-resizer,
-    .sb-collapsed.sb-pinned ~ .sidebar-resizer { display: block; }
+    .sidebar-nav a i {
+        font-size: 20px; flex-shrink: 0;
+        transition: transform var(--transition-fast), color var(--transition-fast);
+    }
+    .sidebar-nav a:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .sidebar-nav a:hover i { transform: scale(1.1); color: var(--accent); }
+    .sidebar-nav a.active {
+        background: var(--accent);
+        color: var(--text-on-accent, #fff);
+        font-weight: 600;
+    }
+    .sidebar-nav a.active i { color: var(--text-on-accent, #fff); }
+    .sidebar-nav a.active::before {
+        content: ""; position: absolute;
+        left: 0; top: 50%; transform: translateY(-50%);
+        width: 3px; height: 60%;
+        background: var(--text-on-accent, #fff);
+        border-radius: 0 3px 3px 0;
+        box-shadow: var(--glow-primary, none);
+    }
     </style>
 
     <script>
@@ -264,111 +276,33 @@
             const resp = await fetch(url, opts);
             return resp.json();
         }
-        // ===== Theme Switcher =====
-        var THEMES = {
-          obsidian:'/static/css/theme-obsidian.css',
-          slate:   '/static/css/theme-slate.css',
-          material:'/static/css/theme-material.css',
-          glass:   '/static/css/theme-glass.css'
-        };
-        function initThemeSelect() {
-          var saved = localStorage.getItem('doukhub-theme') || 'obsidian';
-          var sel = document.getElementById('theme-select');
-          if (sel) sel.value = saved;
+        // ===== 主题:仅 Material 单主题(多主题已废弃) =====
+        // 明暗模式切换:独立于系统设置,存 localStorage
+        function toggleMode() {
+            var cur = document.documentElement.getAttribute('data-theme') || 'light';
+            var next = cur === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('doukhub-mode', next);
+            updateModeToggle(next);
         }
-        function switchTheme(name) {
-          if (!THEMES[name]) return;
-          var link = document.getElementById('theme-css');
-          if (link) link.href = THEMES[name];
-          localStorage.setItem('doukhub-theme', name);
-          document.documentElement.setAttribute('data-theme', name);
-          showToast('皮肤已切换: ' + name, 'info');
+        function updateModeToggle(mode) {
+            var btn = document.getElementById('mode-toggle');
+            if (!btn) return;
+            btn.innerHTML = '<i class="ph ph-' + (mode === 'dark' ? 'sun' : 'moon') + '"></i>';
+            btn.title = mode === 'dark' ? '当前暗色 — 点击切到亮色' : '当前亮色 — 点击切到暗色';
         }
-        initThemeSelect();
+        updateModeToggle(document.documentElement.getAttribute('data-theme') || 'light');
 
-        // ===== 侧边栏折叠 + 拖动调宽 =====
-        // 折叠态交互(方案B):窄栏只显图标,悬停整栏浮动展开,点击折叠按钮钉住/取消
+        // ===== 侧边栏折叠(仅一个折叠/展开按钮) =====
         function toggleSidebar() {
             const sb = document.querySelector('.sidebar');
-            if (sb.classList.contains('sb-collapsed')) {
-                // 展开
-                sb.classList.remove('sb-collapsed', 'sb-flyout', 'sb-pinned');
-                localStorage.setItem('doukhub-sidebar-collapsed', '0');
-                restoreSidebarWidth();
-            } else {
-                // 折叠
-                sb.classList.add('sb-collapsed');
-                localStorage.setItem('doukhub-sidebar-collapsed', '1');
-            }
+            const collapsed = sb.classList.toggle('sb-collapsed');
+            localStorage.setItem('doukhub-sidebar-collapsed', collapsed ? '1' : '0');
         }
-        function restoreSidebarWidth() {
-            const saved = localStorage.getItem('doukhub-sidebar-width');
-            if (saved) {
-                document.querySelector('.sidebar').style.width = saved + 'px';
-                document.getElementById('sidebar-resizer').style.left = saved + 'px';
-            }
+        // 恢复上次折叠状态
+        if (localStorage.getItem('doukhub-sidebar-collapsed') === '1') {
+            document.querySelector('.sidebar').classList.add('sb-collapsed');
         }
-        // 折叠态:悬停浮动展开,移动鼠标离开收回;点击折叠按钮钉住
-        (function initSidebarFlyout() {
-            const sb = document.querySelector('.sidebar');
-            const btn = document.getElementById('sidebar-collapse-btn');
-            let hoverTimer = null;
-            sb.addEventListener('mouseenter', () => {
-                if (!sb.classList.contains('sb-collapsed') || sb.classList.contains('sb-pinned')) return;
-                clearTimeout(hoverTimer);
-                sb.classList.add('sb-flyout');
-            });
-            sb.addEventListener('mouseleave', () => {
-                if (!sb.classList.contains('sb-collapsed')) return;
-                hoverTimer = setTimeout(() => {
-                    if (!sb.classList.contains('sb-pinned')) sb.classList.remove('sb-flyout');
-                }, 150);
-            });
-            // 点击折叠按钮:钉住/取消钉住(仅折叠态)
-            btn.addEventListener('click', e => {
-                e.stopPropagation();
-                if (!sb.classList.contains('sb-collapsed')) return;
-                const pinned = sb.classList.toggle('sb-pinned');
-                sb.classList.remove('sb-flyout');
-                btn.title = pinned ? '取消钉住' : '钉住菜单/取消';
-            });
-        })();
-        // 钉住状态:点击外部区域取消钉住
-        document.addEventListener('click', e => {
-            const sb = document.querySelector('.sidebar');
-            if (!sb || !sb.classList.contains('sb-pinned')) return;
-            if (!sb.contains(e.target)) sb.classList.remove('sb-pinned');
-        });
-        // 拖动调宽
-        (function initSidebarResizer() {
-            const resizer = document.getElementById('sidebar-resizer');
-            const sb = document.querySelector('.sidebar');
-            let dragging = false;
-            resizer.addEventListener('mousedown', e => {
-                dragging = true;
-                resizer.classList.add('dragging');
-                e.preventDefault();
-            });
-            document.addEventListener('mousemove', e => {
-                if (!dragging) return;
-                const w = Math.max(120, Math.min(480, e.clientX));
-                sb.style.width = w + 'px';
-                resizer.style.left = w + 'px';
-            });
-            document.addEventListener('mouseup', () => {
-                if (!dragging) return;
-                dragging = false;
-                resizer.classList.remove('dragging');
-                const w = Math.max(120, Math.min(480, sb.offsetWidth));
-                localStorage.setItem('doukhub-sidebar-width', w);
-            });
-            // 恢复折叠状态
-            if (localStorage.getItem('doukhub-sidebar-collapsed') === '1') {
-                sb.classList.add('sb-collapsed');
-            } else {
-                restoreSidebarWidth();
-            }
-        })();
 
         async function restartSystem() {
             if (!await confirmDialog('服务将重启，正在进行的任务会中断。', { title: '重启确认', confirmText: '重启', danger: false })) return;
@@ -384,7 +318,171 @@
                 document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-size:16px;color:var(--text-muted);">DoukHub 已退出，可以关闭此窗口</div>';
             }, 1500);
         }
+
+        // ===== SPA Router: 局部刷新,避免整页重载 =====
+        // 思路:fetch 整页 → DOMParser 抽取 #main-content + #page-scripts → 局部替换 → 重执行脚本
+        // 已加载的外部脚本(src)不会重复执行,避免库重复初始化导致事件监听器累积
+        var _loadedScripts = new Set();
+        async function loadPage(url, pushState = true) {
+            try {
+                // 导航前清理:在 DOM 被替换前销毁当前页面的资源(Grid实例、事件监听等)
+                if (typeof window._spaCleanup === 'function') {
+                    try { window._spaCleanup(); } catch(e) { console.warn('SPA cleanup failed', e); }
+                    window._spaCleanup = null;
+                }
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const html = await resp.text();
+                const doc = new DOMParser().parseFromString(html, 'text/html');
+                const newMain = doc.getElementById('main-content');
+                if (!newMain) { window.location.href = url; return; } // 非 SPA 友好响应,回退整页
+                const main = document.getElementById('main-content');
+                main.innerHTML = newMain.innerHTML;
+                await rebindScripts(main);
+                // 替换页面脚本块并重执行
+                const newScripts = doc.getElementById('page-scripts');
+                const ps = document.getElementById('page-scripts');
+                if (newScripts && ps) {
+                    ps.innerHTML = newScripts.innerHTML;
+                    await rebindScripts(ps);
+                }
+                document.title = doc.title;
+                if (pushState) history.pushState({ url }, '', url);
+                updateActiveNav(url);
+                window.scrollTo(0, 0);
+            } catch (e) {
+                console.error('SPA loadPage 失败,回退整页:', e);
+                window.location.href = url;
+            }
+        }
+        // innerHTML 替换后浏览器不会执行其中的 <script>,需手动重建标签触发执行
+        // 外部脚本(src)仅首次加载,后续 SPA 切换跳过(全局对象已存在,无需重新执行)
+        async function rebindScripts(container) {
+            const scripts = Array.from(container.querySelectorAll('script'));
+            for (const old of scripts) {
+                const s = document.createElement('script');
+                if (old.src) {
+                    // 已加载过的外部脚本:跳过(库已定义全局对象,重复执行会导致事件监听器累积)
+                    if (_loadedScripts.has(old.src)) {
+                        old.remove();
+                        continue;
+                    }
+                    _loadedScripts.add(old.src);
+                    await new Promise(resolve => {
+                        s.onload = resolve;
+                        s.onerror = resolve;
+                        s.src = old.src;
+                        old.replaceWith(s);
+                    });
+                } else {
+                    // 内联脚本:同步执行
+                    s.textContent = old.textContent;
+                    old.replaceWith(s);
+                }
+            }
+        }
+        function updateActiveNav(url) {
+            document.querySelectorAll('.sidebar-nav a').forEach(a => {
+                a.classList.toggle('active', a.getAttribute('href') === url);
+            });
+        }
+        // 拦截内部链接:仅同源 GET 跳转,排除修饰键/外链/锚点/新窗口
+        document.addEventListener('click', e => {
+            const a = e.target.closest('a');
+            if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            const href = a.getAttribute('href');
+            if (!href) return;
+            if (href.startsWith('#') || href.startsWith('http://') || href.startsWith('https://') || href.startsWith('//') || href.startsWith('mailto:') || href.startsWith('javascript:')) return;
+            if (a.target === '_blank' || a.hasAttribute('download')) return;
+            e.preventDefault();
+            loadPage(href);
+        });
+        window.addEventListener('popstate', () => loadPage(location.pathname + location.search, false));
+
+        // ===== 后台任务:全局轮询 + 徽标 + 面板 =====
+        // base 脚本不随 SPA 切换重载,定时器持续;F5 后重建
+        var _taskPanelOpen = false;
+        var _taskPollTimer = null;
+        var _lastTasks = [];
+        var TASK_TYPE_LABEL = {update_collection: '解析账号标识', sync_account: '同步账号表'};
+        var TASK_STATUS_LABEL = {pending: '排队', running: '运行', done: '完成', failed: '失败', cancelled: '已取消'};
+
+        async function pollTasks() {
+            try {
+                const data = await apiCall('/api/tasks', 'GET');
+                _lastTasks = data.tasks || [];
+                updateTaskBadge(_lastTasks);
+                if (_taskPanelOpen) renderTaskPanel(_lastTasks);
+                // 通知 sync 页(如果开着)刷新进度
+                if (typeof onTasksUpdate === 'function') onTasksUpdate(_lastTasks);
+            } catch (e) { /* 静默,下次重试 */ }
+        }
+        function updateTaskBadge(tasks) {
+            const active = tasks.filter(t => t.status === 'pending' || t.status === 'running');
+            const badge = document.getElementById('task-badge');
+            const count = document.getElementById('task-badge-count');
+            if (!badge || !count) return;
+            if (active.length > 0) {
+                badge.style.display = 'flex';
+                count.textContent = active.length;
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+        function openTaskPanel() {
+            _taskPanelOpen = true;
+            document.getElementById('task-panel-overlay').classList.add('dh-show');
+            renderTaskPanel(_lastTasks);
+        }
+        function closeTaskPanel() {
+            _taskPanelOpen = false;
+            document.getElementById('task-panel-overlay').classList.remove('dh-show');
+        }
+        function renderTaskPanel(tasks) {
+            const body = document.getElementById('task-panel-body');
+            if (!body) return;
+            if (!tasks.length) {
+                body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:24px;font-size:13px;">暂无任务</div>';
+                return;
+            }
+            body.innerHTML = tasks.map(t => {
+                const done = t.success + t.failed + t.skipped;
+                const pct = t.total > 0 ? Math.round(done / t.total * 100) : 0;
+                const statusLabel = TASK_STATUS_LABEL[t.status] || t.status;
+                const typeLabel = TASK_TYPE_LABEL[t.type] || t.type;
+                const logHtml = (t.log || []).slice(-5).map(l => {
+                    const cls = l.level === 'ok' ? 'log-ok' : (l.level === 'error' ? 'log-err' : 'log-info');
+                    return '<div class="' + cls + '">' + l.message + '</div>';
+                }).join('');
+                const canCancel = t.status === 'pending' || t.status === 'running';
+                const cancelBtn = canCancel ? ' · <a onclick="cancelTask(\'' + t.task_id + '\')" style="color:var(--danger);cursor:pointer;text-decoration:underline;font-size:11px;">取消</a>' : '';
+                return '<div style="border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+                    '<b style="font-size:13px;">' + typeLabel + '</b>' +
+                    '<span style="font-size:11px;color:var(--text-muted);">' + statusLabel + cancelBtn + '</span>' +
+                    '</div>' +
+                    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">总 ' + t.total + ' · 成功 ' + t.success + ' · 失败 ' + t.failed + (t.skipped ? ' · 跳过 ' + t.skipped : '') + '</div>' +
+                    '<div style="height:4px;background:var(--bg-hover);border-radius:2px;overflow:hidden;margin-bottom:6px;"><div style="width:' + pct + '%;height:100%;background:var(--accent);transition:width .3s;"></div></div>' +
+                    (logHtml ? '<div style="font-family:var(--font-mono);font-size:11px;line-height:1.5;max-height:80px;overflow-y:auto;background:#0f172a;color:#cbd5e1;padding:6px 8px;border-radius:var(--radius-xs);">' + logHtml + '</div>' : '') +
+                    '</div>';
+            }).join('');
+        }
+        async function cancelTask(taskId) {
+            await apiCall('/api/tasks/' + taskId + '/cancel', 'POST');
+            pollTasks();
+        }
+        // 启动轮询(2.5s 一次,本地接口开销极小)
+        if (!_taskPollTimer) {
+            _taskPollTimer = setInterval(pollTasks, 2500);
+            pollTasks();
+        }
     </script>
-    {% block scripts %}{% endblock %}
+    <div id="page-scripts" style="display:none">{% block scripts %}{% endblock %}</div>
+    <script>
+        // 注册首屏已加载的外部脚本,防止 SPA 首次切换时重复执行
+        document.querySelectorAll('script[src]').forEach(function(s) {
+            _loadedScripts.add(s.src);
+        });
+    </script>
 </body>
 </html>
