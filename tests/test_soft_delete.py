@@ -57,7 +57,7 @@ def test_v2_no_legacy_update_time(db):
 
 def test_soft_delete_collection(db):
     """delete_collection 应打墓碑而非真删"""
-    db.insert_collection({"record_id": "c1", "分享码": "abc", "等级": 3})
+    db.insert_collection({"record_id": "c1", "share_code": "abc", "等级": 3})
     assert len(db.get_all_collections()) == 1
 
     db.delete_collection("c1")
@@ -85,9 +85,9 @@ def test_soft_delete_cookie(db):
 # ========== 墓碑 ID 查询 ==========
 
 def test_get_deleted_ids(db):
-    db.insert_collection({"record_id": "c1", "分享码": "aaa", "等级": 3})
-    db.insert_collection({"record_id": "c2", "分享码": "bbb", "等级": 3})
-    db.insert_collection({"record_id": "c3", "分享码": "ccc", "等级": 3})
+    db.insert_collection({"record_id": "c1", "share_code": "aaa", "等级": 3})
+    db.insert_collection({"record_id": "c2", "share_code": "bbb", "等级": 3})
+    db.insert_collection({"record_id": "c3", "share_code": "ccc", "等级": 3})
 
     db.delete_collection("c1")
     db.delete_collection("c3")
@@ -97,8 +97,8 @@ def test_get_deleted_ids(db):
 
 
 def test_get_active_ids(db):
-    db.insert_collection({"record_id": "c1", "分享码": "aaa", "等级": 3})
-    db.insert_collection({"record_id": "c2", "分享码": "bbb", "等级": 3})
+    db.insert_collection({"record_id": "c1", "share_code": "aaa", "等级": 3})
+    db.insert_collection({"record_id": "c2", "share_code": "bbb", "等级": 3})
     db.delete_collection("c1")
 
     active = db.get_active_ids("collection_cache")
@@ -116,7 +116,7 @@ def test_get_active_ids_invalid_table(db):
 # ========== hard_delete（真删）==========
 
 def test_hard_delete(db):
-    db.insert_collection({"record_id": "c1", "分享码": "aaa", "等级": 3})
+    db.insert_collection({"record_id": "c1", "share_code": "aaa", "等级": 3})
     db.hard_delete("collection_cache", "c1")
     assert db.get_collection_by_id("c1") is None
 
@@ -128,7 +128,7 @@ def test_hard_delete_invalid_table(db):
 # ========== purge_tombstone ==========
 
 def test_purge_tombstone(db):
-    db.insert_collection({"record_id": "c1", "分享码": "aaa", "等级": 3})
+    db.insert_collection({"record_id": "c1", "share_code": "aaa", "等级": 3})
     db.delete_collection("c1")
 
     # 墓碑还在
@@ -142,7 +142,7 @@ def test_purge_tombstone(db):
 
 def test_purge_tombstone_only_deletes_marked(db):
     """purge_tombstone 不应删除未标记删除的记录"""
-    db.insert_collection({"record_id": "c1", "分享码": "aaa", "等级": 3})
+    db.insert_collection({"record_id": "c1", "share_code": "aaa", "等级": 3})
     db.purge_tombstone("collection_cache", "c1")
     # 正常记录不受影响
     assert db.get_collection_by_id("c1") is not None
@@ -180,22 +180,22 @@ def test_synced_field_exists(db):
 
 def test_new_record_not_synced_by_default(db):
     """本地新建的记录默认 synced=0"""
-    db.insert_collection({"record_id": "local_rec1", "分享码": "aaa", "等级": 3})
+    db.insert_collection({"record_id": "local_rec1", "share_code": "aaa", "等级": 3})
     synced_ids = db.get_synced_active_ids("collection_cache")
     assert "local_rec1" not in synced_ids
 
 
 def test_synced_record_appears_in_synced_ids(db):
     """标记为 synced=1 的记录出现在 get_synced_active_ids 中"""
-    db.insert_collection({"record_id": "rec1", "分享码": "aaa", "等级": 3, "synced": True})
+    db.insert_collection({"record_id": "rec1", "share_code": "aaa", "等级": 3, "synced": True})
     synced_ids = db.get_synced_active_ids("collection_cache")
     assert "rec1" in synced_ids
 
 
 def test_unsynced_record_not_in_synced_ids(db):
     """synced=0 的记录不出现在 get_synced_active_ids 中"""
-    db.insert_collection({"record_id": "rec1", "分享码": "aaa", "等级": 3})
-    db.insert_collection({"record_id": "rec2", "分享码": "bbb", "等级": 3, "synced": True})
+    db.insert_collection({"record_id": "rec1", "share_code": "aaa", "等级": 3})
+    db.insert_collection({"record_id": "rec2", "share_code": "bbb", "等级": 3, "synced": True})
     synced_ids = db.get_synced_active_ids("collection_cache")
     assert "rec1" not in synced_ids
     assert "rec2" in synced_ids
@@ -203,7 +203,7 @@ def test_unsynced_record_not_in_synced_ids(db):
 
 def test_deleted_record_not_in_synced_ids(db):
     """已删除的记录不出现在 get_synced_active_ids 中"""
-    db.insert_collection({"record_id": "rec1", "分享码": "aaa", "等级": 3, "synced": True})
+    db.insert_collection({"record_id": "rec1", "share_code": "aaa", "等级": 3, "synced": True})
     db.delete_collection("rec1")
     synced_ids = db.get_synced_active_ids("collection_cache")
     assert "rec1" not in synced_ids
@@ -270,7 +270,7 @@ def test_migration_v2_rename_legacy_columns():
     # 数据应保留
     rec = d.get_collection_by_id("rec1")
     assert rec is not None
-    assert rec["分享码"] == "aaa"
+    assert rec["share_code"] == "aaa"
 
 
 def test_migration_marks_existing_synced():

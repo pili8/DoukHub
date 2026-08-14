@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% block title %}导入采集表 - DoukHub{% endblock %}
+{% block content %}
+<style>
+.sync-textarea { width: 100%; min-height: 120px; resize: vertical; padding: 9px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font-mono); background: var(--bg-input); color: var(--text-primary); }
+.sync-textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.sync-log-box { max-height: 300px; overflow-y: auto; background: #0f172a; color: #cbd5e1; border-radius: var(--radius); padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; border: 1px solid #1e293b; }
+.sync-log-box .log-ok { color: #34d399; }
+.sync-log-box .log-err { color: #f87171; }
+.sync-log-box .log-info { color: #60a5fa; }
+.sync-log-box .log-warn { color: #fbbf24; }
+.sync-stats-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(96px,1fr)); gap: 12px; text-align: center; margin-top: 12px; }
+.sync-stat-card { padding:10px; background:var(--bg-muted); border-radius:var(--radius-sm); border:1px solid var(--border-default); }
+.sync-stat-card .num { font-size:20px; font-weight:700; }
+.sync-stat-card .label { font-size:11px; color:var(--text-muted); }
+.history-item { border: 1px solid var(--border-default); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }
+.history-header { padding: 10px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: var(--bg-muted); font-size: 13px; }
+.history-header:hover { background: var(--bg-hover); }
+.history-detail { max-height: 0; overflow: hidden; transition: max-height 0.3s; }
+.history-detail.expanded { max-height: 500px; }
+.history-log { background: #0f172a; color: #cbd5e1; padding: 10px 14px; font-family: var(--font-mono); font-size: 11px; line-height: 1.6; max-height: 400px; overflow-y: auto; }
+.history-log .log-ok { color: #34d399; }
+.history-log .log-err { color: #f87171; }
+.history-log .log-info { color: #60a5fa; }
+.history-log .log-warn { color: #fbbf24; }
+.status-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+.status-done { background: var(--success-light); color: var(--success); }
+.status-failed { background: var(--danger-light); color: var(--danger); }
+.status-cancelled { background: var(--warning-light); color: var(--warning); }
+</style>
+
+<div class="page-header">
+    <h2>导入采集表</h2>
+</div>
+
+<!-- 执行区 -->
+<div class="card">
+    <h3 style="font-size:15px;margin-bottom:12px;"><i class="ph ph-download"></i> 数据导入</h3>
+    <div class="form-group">
+        <label>粘贴数据或拖拽文件（支持多种格式）</label>
+        <textarea id="import-text" rows="8" class="sync-textarea" placeholder="格式1: 个2@iMLuCKjq&#10;格式2: {&quot;地址&quot;:&quot;xxx&quot;,&quot;等级&quot;:&quot;个2，图&quot;,&quot;用户&quot;:&quot;xxx&quot;} | ..." ondrop="handleDrop(event)" ondragover="event.preventDefault()" ondragenter="this.style.borderColor='var(--accent)'" ondragleave="this.style.borderColor=''"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+        <button class="btn btn-secondary" onclick="parseImport()"><i class="ph ph-magnifying-glass"></i> 解析预览</button>
+        <button class="btn btn-primary" onclick="doImport()" id="exec-btn"><i class="ph ph-download"></i> 执行导入</button>
+        <span id="import-status" style="font-size:13px;color:var(--text-muted);"></span>
+    </div>
+    <div id="import-preview" style="display:none;margin-bottom:12px;">
+        <div class="table-scroll"><table>
+            <thead><tr><th>原始内容</th><th>地址</th><th>等级</th><th>标签</th><th>名称</th></tr></thead>
+            <tbody id="preview-body"></tbody>
+        </table></div>
+    </div>
+</div>
+
+<!-- 执行结果 -->
+<div class="card" id="result-card" style="display:none;">
+    <h3 style="font-size:15px;margin-bottom:12px;"><i class="ph ph-chart-bar"></i> 执行结果</h3>
+    <div class="sync-stats-grid">
+        <div class="sync-stat-card"><div class="num" id="stat-total" style="color:var(--accent);">0</div><div class="label">总记录</div></div>
+        <div class="sync-stat-card"><div class="num" id="stat-created" style="color:var(--success);">0</div><div class="label">新增</div></div>
+        <div class="sync-stat-card"><div class="num" id="stat-updated" style="color:var(--success);">0</div><div class="label">更新/恢复</div></div>
+        <div class="sync-stat-card"><div class="num" id="stat-duplicate" style="color:var(--warning);">0</div><div class="label">重复</div></div>
+        <div class="sync-stat-card"><div class="num" id="stat-skipped" style="color:var(--warning);">0</div><div class="label">跳过</div></div>
+        <div class="sync-stat-card"><div class="num" id="stat-failed" style="color:var(--danger);">0</div><div class="label">失败</div></div>
+    </div>
+    <div class="sync-log-box" id="exec-log" style="margin-top:12px;"></div>
+</div>
+
+<!-- 历史记录 -->
+<div class="card">
+    <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
+        <span><i class="ph ph-clock-counter-clockwise"></i> 历史记录 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;margin-left:8px;">（{{ history|length }} 条）</span></span>
+        <span class="collapse-icon"><i class="ph ph-caret-down"></i></span>
+    </h3>
+    <div class="card-content">
+    {% if history %}
+    {% for h in history %}
+    <div class="history-item">
+        <div class="history-header" onclick="toggleHistory(this)">
+            <span>
+                <span class="status-badge status-{{ h.status }}">{{ h.status }}</span>
+                成功 {{ h.success }} / 失败 {{ h.failed }}{% if h.skipped %} / 跳过 {{ h.skipped }}{% endif %}
+            </span>
+            <span style="color:var(--text-muted);">{{ h.created_at }}</span>
+        </div>
+        <div class="history-detail">
+            <div class="history-log" id="history-log-{{ h.id }}" data-log="{{ h.log_json }}"></div>
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state"><i class="ph ph-clock-counter-clockwise"></i>暂无历史记录</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleCard(header) {
+        const content = header.nextElementSibling;
+        const icon = header.querySelector('.collapse-icon i');
+        content.classList.toggle('collapsed');
+        if (icon) icon.className = content.classList.contains('collapsed') ? 'ph ph-caret-right' : 'ph ph-caret-down';
+    }
+    function toggleHistory(el) {
+        var detail = el.nextElementSibling;
+        var expanded = detail.classList.toggle('expanded');
+        if (expanded && !detail.dataset.loaded) {
+            var logDiv = detail.querySelector('.history-log');
+            try {
+                var logs = JSON.parse(logDiv.dataset.log || '[]');
+                logs.forEach(function(item) {
+                    var div = document.createElement('div');
+                    div.className = item.level === 'ok' ? 'log-ok' : item.level === 'error' ? 'log-err' : item.level === 'warning' ? 'log-warn' : 'log-info';
+                    div.textContent = item.message;
+                    logDiv.appendChild(div);
+                });
+                if (!logs.length) logDiv.textContent = '暂无日志';
+            } catch (e) {
+                logDiv.textContent = '暂无日志';
+            }
+            detail.dataset.loaded = '1';
+        }
+    }
+    function addLog(html) {
+        var logBox = document.getElementById('exec-log');
+        logBox.innerHTML += html;
+        logBox.scrollTop = logBox.scrollHeight;
+    }
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    var parsedData = [];
+    function handleDrop(event) {
+        event.preventDefault();
+        event.target.style.borderColor = '';
+        var files = event.dataTransfer.files;
+        if (files.length > 0) {
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('import-text').value = e.target.result;
+                document.getElementById('import-status').textContent = '已加载: ' + files[0].name;
+            };
+            reader.readAsText(files[0]);
+        }
+    }
+    var TAGS_MAPPING = {};
+    function mapTag(t) {
+        var key = Object.keys(TAGS_MAPPING).find(function(k) { return k.toLowerCase() === String(t).trim().toLowerCase(); });
+        return key ? TAGS_MAPPING[key] : t;
+    }
+    function isMappedTag(t) {
+        var lower = String(t).trim().toLowerCase();
+        return Object.keys(TAGS_MAPPING).some(function(k) {
+            return TAGS_MAPPING[k].toLowerCase() === lower || k.toLowerCase() === lower;
+        });
+    }
+    async function loadTagsMapping() {
+        try {
+            var r = await fetch('/api/settings');
+            var cfg = await r.json();
+            TAGS_MAPPING = cfg.tags || {};
+        } catch(e) { TAGS_MAPPING = {}; }
+    }
+    loadTagsMapping();
+    function normalizePreviewLink(link) {
+        var value = String(link || '').trim();
+        var sec = value.match(/sec_uid=([^&]+)/) || value.match(/sec_user_id[=\/]([^&/?]+)/);
+        if (sec) return sec[1];
+        return value
+            .replace(/^https?:\/\/v\.douyin\.com\//, '')
+            .replace(/^https?:\/\/www\.iesdouyin\.com\/share\/user\//, '')
+            .split('?')[0].replace(/\/+$/, '');
+    }
+    async function parseImport() {
+        await loadTagsMapping();
+        var text = document.getElementById('import-text').value.trim();
+        if (!text) { showToast('请输入数据', 'error'); return; }
+        if (text.includes('{')) parseJsonFormat(text); else parseSimpleFormat(text);
+        if (parsedData.length === 0) { showToast('未解析到有效数据', 'error'); return; }
+        var seenLinks = {};
+        var duplicateCount = 0;
+        parsedData.forEach(function(item) {
+            var key = normalizePreviewLink(item.link);
+            item.duplicate = seenLinks.hasOwnProperty(key);
+            if (item.duplicate) duplicateCount++;
+            else seenLinks[key] = true;
+        });
+        document.getElementById('preview-body').innerHTML = parsedData.map(function(item) {
+            var duplicateBadge = item.duplicate ? ' <span class="status-badge status-cancelled">重复</span>' : '';
+            return '<tr><td style="font-size:12px;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escapeHtml(item.raw)+'">'+escapeHtml(item.raw || '-')+'</td><td><code style="font-size:12px;">'+escapeHtml(item.link)+'</code>'+duplicateBadge+'</td><td>'+('⭐'.repeat(item.rating))+'</td><td>'+item.tags.map(function(t){var mapped=isMappedTag(t);return '<span class="tag" title="'+(mapped?'':'未匹配映射')+'" style="'+(mapped?'background:rgba(34,197,94,.07);color:var(--success);border-color:rgba(34,197,94,.22);':'background:var(--warning-light);color:var(--warning);border-color:var(--warning);')+'">'+escapeHtml(t)+'</span>';}).join('')+'</td><td>'+escapeHtml(item.name || '-')+'</td></tr>';
+        }).join('');
+        document.getElementById('import-preview').style.display = 'block';
+        document.getElementById('import-status').innerHTML = '解析完成: <b>'+parsedData.length+'</b> 条' + (duplicateCount ? '，重复 <b>'+duplicateCount+'</b> 条' : '');
+    }
+    function parseSimpleFormat(text) {
+        var lines = text.split('\n').filter(function(l){return l.trim();});
+        parsedData = [];
+        for (var i=0; i<lines.length; i++) {
+            var match = lines[i].match(/^(.+?)@(.+)$/);
+            if (match) {
+                var prefix = match[1].trim(), link = match[2].trim();
+                var parts = prefix.split(/[,，]/).map(function(s){return s.trim();}).filter(function(s){return s;});
+                var rating = 1, tags = [];
+                for (var j=0; j<parts.length; j++) {
+                    var numMatch = parts[j].match(/(\d+)$/);
+                    if (numMatch) { rating = Math.max(1, Math.min(4, parseInt(numMatch[1]))); var tagPart = parts[j].slice(0, -numMatch[1].length).trim(); if (tagPart) tags.push(mapTag(tagPart)); }
+                    else if (/^\d+$/.test(parts[j])) { rating = Math.max(1, Math.min(4, parseInt(parts[j]))); }
+                    else { tags.push(mapTag(parts[j])); }
+                }
+                parsedData.push({link:link, rating:rating, tags:tags, name:'', raw:lines[i].trim()});
+            }
+        }
+    }
+    function parseJsonFormat(text) {
+        var items = text.split('|').map(function(s){return s.trim();}).filter(function(s){return s.startsWith('{');});
+        parsedData = [];
+        for (var i=0; i<items.length; i++) {
+            try {
+                var data = JSON.parse(items[i]);
+                var link = data['地址'] || '';
+                if (!link) continue;
+                var grade = data['等级'] || '';
+                var name = data['用户'] || '';
+                var parts = grade.split(/[,，]/).map(function(s){return s.trim();}).filter(function(s){return s;});
+                var rating = 1, tags = [];
+                for (var j=0; j<parts.length; j++) {
+                    var numMatch = parts[j].match(/(\d+)$/);
+                    if (numMatch) { rating = Math.max(1, Math.min(4, parseInt(numMatch[1]))); var tagPart = parts[j].slice(0, -numMatch[1].length).trim(); if (tagPart) tags.push(mapTag(tagPart)); }
+                    else if (/^\d+$/.test(parts[j])) { rating = Math.max(1, Math.min(4, parseInt(parts[j]))); }
+                    else { tags.push(mapTag(parts[j])); }
+                }
+                parsedData.push({link:link, rating:rating, tags:tags, name:name, raw:items[i].trim()});
+            } catch(e) {}
+        }
+    }
+
+    async function doImport() {
+        var text = document.getElementById('import-text').value;
+        if (!text.trim()) { showToast('请先输入要导入的文本', 'error'); return; }
+        var btn = document.getElementById('exec-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="ph ph-spinner"></i> 导入中...';
+        document.getElementById('result-card').style.display = 'block';
+        document.getElementById('exec-log').innerHTML = '<div class="log-info">开始导入...</div>';
+        document.getElementById('stat-total').textContent = '...';
+        document.getElementById('stat-created').textContent = '0';
+        document.getElementById('stat-updated').textContent = '0';
+        document.getElementById('stat-duplicate').textContent = '0';
+        document.getElementById('stat-skipped').textContent = '0';
+        document.getElementById('stat-failed').textContent = '0';
+        try {
+            var data = await apiCall('/api/sync/v2/import', 'POST', { text: text });
+            document.getElementById('stat-total').textContent = data.total || 0;
+            document.getElementById('stat-created').textContent = data.created || 0;
+            document.getElementById('stat-updated').textContent = (data.updated || 0) + (data.revived || 0);
+            document.getElementById('stat-duplicate').textContent = data.duplicates || 0;
+            document.getElementById('stat-skipped').textContent = data.skipped || 0;
+            document.getElementById('stat-failed').textContent = data.failed || 0;
+            (data.warnings || []).forEach(function(warning) {
+                var div = document.createElement('div');
+                div.className = 'log-warn';
+                div.textContent = warning;
+                document.getElementById('exec-log').appendChild(div);
+            });
+            (data.errors || []).forEach(function(err) {
+                var div = document.createElement('div');
+                div.className = 'log-err';
+                div.textContent = err;
+                document.getElementById('exec-log').appendChild(div);
+            });
+            if (data.failed === 0) {
+                addLog('<div class="log-ok">' + data.message + '</div>');
+                if (data.duplicates) addLog('<div class="log-warn">重复输入 ' + data.duplicates + ' 条，已合并，不重复新增。</div>');
+                showToast('导入完成', 'success');
+            } else {
+                addLog('<div class="log-err">' + data.message + '</div>');
+                showToast(data.message, 'error');
+            }
+        } catch (e) {
+            addLog('<div class="log-err">请求失败: ' + e.message + '</div>');
+            showToast('导入请求失败', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="ph ph-download"></i> 执行导入';
+        }
+    }
+</script>
+{% endblock %}

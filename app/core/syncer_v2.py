@@ -20,27 +20,38 @@ class SyncResult:
     def __init__(self):
         self.total = 0
         self.success = 0
+        self.created = 0
+        self.updated = 0
+        self.revived = 0
         self.failed = 0
         self.skipped = 0
+        self.duplicates = 0
         self.errors = []
+        self.warnings = []
 
     def to_dict(self):
         return {
             "total": self.total,
             "success": self.success,
+            "created": self.created,
+            "updated": self.updated,
+            "revived": self.revived,
             "failed": self.failed,
             "skipped": self.skipped,
+            "duplicates": self.duplicates,
             "errors": self.errors,
+            "warnings": self.warnings,
         }
 
 
 class Syncer:
     """同步引擎"""
 
-    def __init__(self, feishu: Optional[FeishuClient], collector: Collector, config: dict):
+    def __init__(self, feishu: Optional[FeishuClient], collector: Collector, config: dict, tags_mapping: dict = None):
         self.feishu = feishu
         self.collector = collector
         self.config = config
+        self.tags_mapping = tags_mapping or {}
         self.db = Database()
 
         # 飞书表 ID
@@ -66,6 +77,45 @@ class Syncer:
         share = share.rstrip("/")
         return share.strip()
 
+    @staticmethod
+    def parse_count(val) -> int:
+        """解析粉丝数/作品数，支持 '1.2万'/'3500' 等格式"""
+        if isinstance(val, (int, float)):
+            return int(val)
+        s = str(val).strip()
+        if not s:
+            return 0
+        try:
+            if "万" in s:
+                return int(float(s.replace("万", "")) * 10000)
+            if "亿" in s:
+                return int(float(s.replace("亿", "")) * 100000000)
+            return int(float(s))
+        except (ValueError, TypeError):
+            return 0
+
+    @staticmethod
+    def detect_platform(share: str) -> str:
+        """根据链接内容自动判断平台"""
+        s = share.lower()
+        if "tiktok.com" in s:
+            return "TikTok"
+        if "xiaohongshu.com" in s or "xhslink.com" in s or "rednote.com" in s:
+            return "小红书"
+        return "抖音"
+
+    def map_tags(self, tags: list) -> list:
+        """Apply tag mapping from config, ignoring case (e.g. '个' -> '个人')"""
+        mapping = self.tags_mapping or {}
+        folded = {key.lower(): value for key, value in mapping.items()}
+        result = []
+        for tag in tags:
+            t = tag.strip()
+            if not t:
+                continue
+            result.append(folded.get(t.lower(), t))
+        return result
+
     def merge_tags(self, existing_tags: list, new_tags: list) -> list:
         """合并标签（去重，大小写不敏感，保留原样）"""
         merged = {}
@@ -79,32 +129,48 @@ class Syncer:
         """合并等级（取高的）"""
         return max(existing_level or 0, new_level or 0)
 
+    @staticmethod
+    def is_ready_for_account(collection: dict) -> bool:
+        """账号表同步只看 sec_user_id；已解析只是步骤2的动作反馈。"""
+        return bool(str(collection.get("sec_user_id") or "").strip())
+
     # ========== 步骤1：导入采集表 ==========
 
     def import_to_collection(self, text: str) -> SyncResult:
         """导入文本到采集表，支持多种格式"""
         result = SyncResult()
 
+        def skip(reason: str):
+            result.skipped += 1
+            result.warnings.append(f"{line}: {reason}")
+
         lines = [line.strip() for line in text.split("\n") if line.strip()]
+        seen_shares = set()
 
         for line in lines:
             result.total += 1
             try:
                 share = ""
-                level = 3
+                level = 1
                 tags = []
+                import_name = ""
+                import_fans = 0
+                import_works = 0
 
                 if line.startswith("{"):
                     # JSON 格式: {"地址":"xxx","等级":"个2","用户":"name"}
                     try:
                         data = json.loads(line.split("|")[0].strip())
                     except json.JSONDecodeError:
-                        result.skipped += 1
+                        skip("JSON 格式错误")
                         continue
                     share = data.get("地址", "") or data.get("Share", "")
                     if not share:
-                        result.skipped += 1
+                        skip("缺少地址")
                         continue
+                    import_name = data.get("用户", "") or data.get("名称", "") or ""
+                    import_fans = self.parse_count(data.get("粉丝", 0) or data.get("粉丝数", 0))
+                    import_works = self.parse_count(data.get("作品", 0) or data.get("作品数", 0))
                     grade = data.get("等级", "") or data.get("等級", "")
                     parts = re.split(r"[,\uff0c]", grade) if grade else []
                     for part in parts:
@@ -123,7 +189,7 @@ class Syncer:
                     prefix = line[:at_idx].strip()
                     share = line[at_idx + 1:].strip()
                     if not share:
-                        result.skipped += 1
+                        skip("缺少地址")
                         continue
                     parts = re.split(r"[,，]", prefix)
                     for part in parts:
@@ -144,7 +210,7 @@ class Syncer:
                     # 兼容旧格式: 分享码 等级 标签（空格分隔）
                     parts = line.split()
                     if len(parts) < 1:
-                        result.skipped += 1
+                        skip("空行")
                         continue
                     share = parts[0]
                     if len(parts) > 1 and parts[1].isdigit():
@@ -152,7 +218,7 @@ class Syncer:
                     tags = parts[2:] if len(parts) > 2 else []
 
                 if not share:
-                    result.skipped += 1
+                    skip("缺少地址")
                     continue
 
                 # 如果是完整用户主页链接，直接提取 sec_user_id，跳过第二步
@@ -162,41 +228,100 @@ class Syncer:
                 else:
                     share = self.normalize_share(share)
 
+                if share in seen_shares:
+                    existing = self.db.get_collection_by_share(share)
+                    if existing:
+                        existing_tags = json.loads(existing.get("标签", "[]")) if existing.get("标签") else []
+                        updates = {
+                            "等级": self.merge_level(existing.get("等级"), level),
+                            "标签": json.dumps(self.merge_tags(existing_tags, self.map_tags(tags))),
+                        }
+                        if import_name:
+                            updates["账号名称"] = import_name
+                        if import_fans:
+                            updates["粉丝数"] = import_fans
+                        if import_works:
+                            updates["作品数"] = import_works
+                        if direct_sec_user_id and not existing.get("sec_user_id"):
+                            updates.update({"sec_user_id": direct_sec_user_id, "已解析": True, "同步错误": None})
+                        self.db.update_collection(existing["record_id"], updates)
+                    result.duplicates += 1
+                    continue
+                seen_shares.add(share)
+
                 # 检查是否已存在
                 existing = self.db.get_collection_by_share(share)
+                if not existing and direct_sec_user_id:
+                    existing = self.db.get_collection_by_sec_user_id(direct_sec_user_id)
                 if existing:
                     # 去重：等级取高的，标签合并
                     new_level = self.merge_level(existing.get("等级"), level)
                     existing_tags = json.loads(existing.get("标签", "[]")) if existing.get("标签") else []
-                    new_tags = self.merge_tags(existing_tags, tags)
+                    new_tags = self.merge_tags(existing_tags, self.map_tags(tags))
                     updates = {
                         "等级": new_level,
                         "标签": json.dumps(new_tags),
                     }
+                    if import_name:
+                        updates["账号名称"] = import_name
+                    if import_fans:
+                        updates["粉丝数"] = import_fans
+                    if import_works:
+                        updates["作品数"] = import_works
                     # 如果新导入的直接提取了 sec_user_id，补上
                     if direct_sec_user_id and not existing.get("sec_user_id"):
                         updates["sec_user_id"] = direct_sec_user_id
-                        updates["已同步"] = True
+                        updates["已解析"] = True
                         updates["同步错误"] = None
                     self.db.update_collection(existing["record_id"], updates)
                     result.success += 1
+                    result.updated += 1
                 else:
+                    revived_id = self.db.revive_collection_if_deleted(share)
+                    if revived_id:
+                        revived_data = {
+                            "平台": self.detect_platform(share),
+                            "等级": level,
+                            "标签": json.dumps(self.map_tags(tags)),
+                            "已解析": False,
+                        }
+                        if import_name:
+                            revived_data["账号名称"] = import_name
+                        if import_fans:
+                            revived_data["粉丝数"] = import_fans
+                        if import_works:
+                            revived_data["作品数"] = import_works
+                        if direct_sec_user_id:
+                            revived_data.update({"sec_user_id": direct_sec_user_id, "已解析": True, "同步错误": None})
+                        self.db.update_collection(revived_id, revived_data)
+                        result.success += 1
+                        result.revived += 1
+                        continue
+
                     # 新增
                     record_id = f"rec_{datetime.now().strftime('%Y%m%d%H%M%S')}_{result.total}"
                     insert_data = {
                         "record_id": record_id,
                         "share_code": share,
-                        "平台": "抖音",  # 默认
+                        "平台": self.detect_platform(share),
                         "等级": level,
-                        "标签": json.dumps(tags),
-                        "已同步": False,
+                        "标签": json.dumps(self.map_tags(tags)),
+                        "已解析": False,
                     }
-                    # 如果直接提取了 sec_user_id，标记为已同步
+                    if import_name:
+                        insert_data["账号名称"] = import_name
+                    if import_fans:
+                        insert_data["粉丝数"] = import_fans
+                    if import_works:
+                        insert_data["作品数"] = import_works
+
+                    # 如果直接提取了 sec_user_id，标记为已解析
                     if direct_sec_user_id:
                         insert_data["sec_user_id"] = direct_sec_user_id
-                        insert_data["已同步"] = True
+                        insert_data["已解析"] = True
                     self.db.insert_collection(insert_data)
                     result.success += 1
+                    result.created += 1
 
             except Exception as e:
                 result.failed += 1
@@ -253,7 +378,7 @@ class Syncer:
                     # 更新 sec_user_id
                     self.db.update_collection(collection["record_id"], {
                         "sec_user_id": sec_user_id,
-                        "已同步": True,
+                        "已解析": True,
                         "同步错误": None,
                     })
                     result.success += 1
@@ -280,9 +405,9 @@ class Syncer:
         """同步到账号表"""
         result = SyncResult()
 
-        # 获取所有已同步但账号表未更新的记录
+        # 获取已有用户标识的记录；已解析动作反馈不参与筛选
         collections = self.db.get_all_collections()
-        to_process = [c for c in collections if c.get("已同步") and c.get("sec_user_id")]
+        to_process = [c for c in collections if self.is_ready_for_account(c)]
 
         result.total = len(to_process)
 

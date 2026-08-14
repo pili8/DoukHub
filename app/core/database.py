@@ -20,7 +20,7 @@ class Database:
         """初始化数据库表结构
 
         字段命名规范（v2）：
-        - 业务字段：中文，与飞书表 100% 一致（分享码/平台/等级/标签/已同步/...）
+        - 业务字段：中文，与飞书表 100% 一致（分享码/平台/等级/标签/已解析/...）
         - 系统字段：英文，本地专用不进飞书（record_id/is_deleted/deleted_at/synced/created_at）
         """
         with self._connect() as conn:
@@ -32,9 +32,9 @@ class Database:
                     平台 TEXT,
                     等级 INTEGER,
                     标签 TEXT,
-                    sec_user_id TEXT,
-                    已同步 BOOLEAN DEFAULT 0,
-                    同步错误 TEXT,
+sec_user_id TEXT,
+                    已解析 BOOLEAN DEFAULT 0,
+同步错误 TEXT,
                     备注 TEXT,
                     粉丝数 INTEGER,
                     作品数 INTEGER,
@@ -66,6 +66,7 @@ class Database:
                     签名 TEXT,
                     头像 TEXT,
                     已获取信息 BOOLEAN DEFAULT 0,
+                    获取错误 TEXT,
                     同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     is_deleted BOOLEAN DEFAULT 0,
@@ -114,7 +115,26 @@ class Database:
                 )
             """)
 
-            # 表5：定时任务
+            # 表6：同步历史（记录每次同步任务执行的摘要+日志）
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sync_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    total INTEGER DEFAULT 0,
+                    success INTEGER DEFAULT 0,
+                    failed INTEGER DEFAULT 0,
+                    skipped INTEGER DEFAULT 0,
+                    error TEXT,
+                    log_json TEXT,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    duration_sec REAL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 表7：定时任务
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS scheduled_tasks (
                     ID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,6 +161,8 @@ class Database:
                 "CREATE INDEX IF NOT EXISTS idx_account_sec_user_id ON account_cache(sec_user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_history_sec_user_id ON collection_history(sec_user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_history_created_at ON collection_history(created_at)",
+                "CREATE INDEX IF NOT EXISTS idx_sync_history_type ON sync_history(task_type)",
+                "CREATE INDEX IF NOT EXISTS idx_sync_history_created ON sync_history(created_at)",
             ]:
                 try:
                     conn.execute(sql)
@@ -164,7 +186,7 @@ class Database:
 
         v2 新增字段：
         - 三张同步表：is_deleted / deleted_at / synced（如缺失则添加）
-        - 旧 synced 字段首次添加时把现有记录全部标记为已同步
+        - 旧 synced 字段首次添加时把现有记录全部标记为已解析
 
         v2 废弃字段（不主动删除，保留兼容）：
         - 最后更新时间（旧增量同步遗留，新方案不再使用）
@@ -175,6 +197,7 @@ class Database:
                 ("账号标识", "sec_user_id"),
                 ("更新时间", "同步时间"),
                 ("分享码", "share_code"),
+                ("已同步", "已解析"),
             ],
             "account_cache": [
                 ("账号标识", "sec_user_id"),
@@ -202,9 +225,13 @@ class Database:
         }
         # v2 新增字段
         add_columns = {
+            "collection_cache": [
+                ("账号名称", "TEXT"),
+            ],
             "account_cache": [
                 ("启用", "BOOLEAN DEFAULT 1"),
                 ("采集类型", "TEXT DEFAULT '发布'"),
+                ("获取错误", "TEXT"),
             ],
         }
         # 软删除字段（墓碑）：三张同步表都加上
@@ -263,9 +290,10 @@ class Database:
             for col, ddl in additions:
                 if col not in cols:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
-                    # synced 字段首次添加时，把现有记录全部标记为已同步
+                    # synced 字段首次添加时，把现有记录全部标记为已解析
                     if col == "synced":
                         conn.execute(f"UPDATE {table} SET synced = 1")
+
 
     def _connect(self) -> sqlite3.Connection:
         """创建数据库连接"""
@@ -286,6 +314,22 @@ class Database:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM collection_cache WHERE share_code = ? AND is_deleted = 0", (share,)).fetchone()
             return dict(row) if row else None
+
+    def revive_collection_if_deleted(self, share: str) -> Optional[str]:
+        """复活软删除的采集记录，返回 record_id"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT record_id FROM collection_cache WHERE share_code = ? AND is_deleted = 1",
+                (share,),
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE collection_cache SET is_deleted = 0, deleted_at = NULL WHERE record_id = ?",
+                    (row["record_id"],),
+                )
+                conn.commit()
+                return row["record_id"]
+        return None
 
     def get_collection_by_id(self, record_id: str) -> Optional[dict]:
         """根据记录ID获取采集表记录"""
@@ -552,7 +596,7 @@ class Database:
             return [row["record_id"] for row in rows]
 
     def get_synced_active_ids(self, table: str) -> list[str]:
-        """获取已同步且未删除的 record_id 列表（删除检测专用）"""
+        """获取已解析且未删除的 record_id 列表（删除检测专用）"""
         if table not in self._SYNC_TABLES:
             return []
         with self._connect() as conn:
@@ -569,7 +613,7 @@ class Database:
             return True
 
     def purge_tombstone(self, table: str, record_id: str) -> bool:
-        """清除已同步删除的墓碑"""
+        """清除已解析删除的墓碑"""
         if table not in self._SYNC_TABLES:
             return False
         with self._connect() as conn:
@@ -586,12 +630,15 @@ class Database:
             "account_cache",
             "cookie_cache",
             "collection_history",
-            "scheduled_tasks"
+            "scheduled_tasks",
+            "sync_history",
         ]
+        soft_delete_tables = {"collection_cache", "account_cache", "cookie_cache"}
         counts = {}
         with self._connect() as conn:
             for table in tables:
-                row = conn.execute(f"SELECT COUNT(*) as count FROM {table}").fetchone()
+                where = " WHERE is_deleted = 0" if table in soft_delete_tables else ""
+                row = conn.execute(f"SELECT COUNT(*) as count FROM {table}{where}").fetchone()
                 counts[table] = row["count"] if row else 0
         return counts
 
@@ -616,7 +663,7 @@ class Database:
     # 允许操作的表白名单
     VALID_TABLES = {
         "collection_cache", "account_cache", "cookie_cache",
-        "collection_history", "scheduled_tasks",
+        "collection_history", "scheduled_tasks", "sync_history",
     }
 
     def get_record_by_id(self, table: str, record_id: str) -> Optional[dict]:
@@ -1007,10 +1054,10 @@ class Database:
         with self._connect() as conn:
             # 采集表
             stats["collection_cache"] = {
-                "total": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0").fetchone()[0],
-                "synced": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND 已同步=1").fetchone()[0],
-                "not_synced": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND (已同步=0 OR 已同步 IS NULL)").fetchone()[0],
-                "has_error": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND 同步错误 IS NOT NULL AND 同步错误 != ''").fetchone()[0],
+"total": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0").fetchone()[0],
+"resolved": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND 已解析=1").fetchone()[0],
+"not_synced": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND (已解析=0 OR 已解析 IS NULL)").fetchone()[0],
+"has_error": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND 同步错误 IS NOT NULL AND 同步错误 != ''").fetchone()[0],
             }
             # 账号表
             stats["account_cache"] = {
@@ -1035,4 +1082,44 @@ class Database:
                 "total": conn.execute("SELECT COUNT(*) FROM scheduled_tasks").fetchone()[0],
                 "enabled": conn.execute("SELECT COUNT(*) FROM scheduled_tasks WHERE 启用=1").fetchone()[0],
             }
+            # 同步历史
+            stats["sync_history"] = {
+                "total": conn.execute("SELECT COUNT(*) FROM sync_history").fetchone()[0],
+            }
         return stats
+
+    # ========== 同步历史操作 ==========
+
+    def add_sync_history(self, data: dict) -> int:
+        """添加一条同步历史记录，返回 id"""
+        with self._connect() as conn:
+            fields = ", ".join(data.keys())
+            placeholders = ", ".join(["?" for _ in data])
+            cursor = conn.execute(f"INSERT INTO sync_history ({fields}) VALUES ({placeholders})", list(data.values()))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_sync_history(self, task_type: Optional[str] = None, limit: int = 50) -> list[dict]:
+        """获取同步历史记录。可按 task_type 过滤，默认返回全部。"""
+        with self._connect() as conn:
+            if task_type:
+                rows = conn.execute(
+                    "SELECT * FROM sync_history WHERE task_type = ? ORDER BY created_at DESC LIMIT ?",
+                    (task_type, limit)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM sync_history ORDER BY created_at DESC LIMIT ?",
+                    (limit,)
+                ).fetchall()
+            return [dict(row) for row in rows]
+
+    def cleanup_sync_history(self, days: int = 7) -> int:
+        """清理 N 天前的同步历史，返回删除条数"""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM sync_history WHERE created_at < datetime('now', ?)",
+                (f"-{days} days",)
+            )
+            conn.commit()
+            return cursor.rowcount

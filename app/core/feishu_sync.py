@@ -56,7 +56,7 @@ class FeishuSyncer:
             # LWW 字段：两端都能改，比较时间戳谁新谁赢
             "lww": ["等级", "标签", "备注", "账号名称", "粉丝数", "作品数"],
             # 本地赢字段：DoukHub 是权威源
-            "local_wins": ["sec_user_id", "已同步"],
+            "local_wins": ["sec_user_id", "已解析"],
             # 元数据：创建后不变
             "immutable": ["share_code", "平台"],
             # 同步产生
@@ -171,7 +171,7 @@ class FeishuSyncer:
         if isinstance(value, (int, float)):
             return value != 0
         if isinstance(value, str):
-            return value.lower() in ("true", "1", "是", "yes", "已同步")
+            return value.lower() in ("true", "1", "是", "yes", "已解析")
         return default
 
     @staticmethod
@@ -263,7 +263,7 @@ class FeishuSyncer:
         if field in ("等级", "粉丝数", "作品数"):
             v = self._safe_int(feishu_val)
             return v if v > 0 else None
-        if field in ("已同步", "已获取信息", "启用"):
+        if field in ("已解析", "已获取信息", "启用"):
             return self._safe_bool(feishu_val)
         if field == "状态":
             v = self._parse_text_value(feishu_val)
@@ -297,7 +297,7 @@ class FeishuSyncer:
             "分享码": record.get("share_code", ""),
             "平台": record.get("平台", ""),
             "等级": record.get("等级", 3),
-            "已同步": bool(record.get("已同步", False)),
+            "已解析": bool(record.get("已解析", False)),
         }
         tags = self._normalize_tags(record.get("标签"))
         if tags:
@@ -392,7 +392,7 @@ class FeishuSyncer:
             "share_code": share,
             "平台": self._parse_text_value(fields.get("平台", "")),
             "等级": self._safe_int(fields.get("等级", 3), 3),
-            "已同步": self._safe_bool(fields.get("已同步"), False),
+            "已解析": self._safe_bool(fields.get("已解析"), False),
         }
         if fields.get("sec_user_id"):
             data["sec_user_id"] = self._parse_text_value(fields.get("sec_user_id"))
@@ -486,7 +486,7 @@ class FeishuSyncer:
         if field in ("等级", "粉丝数", "作品数"):
             return self._safe_int(local_val) == self._safe_int(feishu_val)
         # 布尔字段
-        if field in ("已同步", "已获取信息", "启用"):
+        if field in ("已解析", "已获取信息", "启用"):
             return self._safe_bool(local_val) == self._safe_bool(feishu_val)
         # 文本字段：去空格比较
         local_str = self._parse_text_value(local_val).strip() if local_val is not None else ""

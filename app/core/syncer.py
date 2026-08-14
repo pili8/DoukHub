@@ -288,7 +288,7 @@ class Syncer:
                         logger.info(f"  新增账号: {account.name or sec_user_id}")
 
                     # 更新采集表状态（包含 sec_user_id）
-                    self._update_collection_status(record_id, "已同步", "", sec_user_id)
+                    self._update_collection_status(record_id, "已解析", "", sec_user_id)
 
                 except Exception as e:
                     self._update_collection_status(record_id, "失败", str(e))

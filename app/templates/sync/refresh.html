@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+{% block title %}更新账号表 - DoukHub{% endblock %}
+{% block content %}
+<style>
+.sync-log-box { max-height: 400px; overflow-y: auto; background: #0f172a; color: #cbd5e1; border-radius: var(--radius); padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; border: 1px solid #1e293b; }
+.sync-log-box .log-ok { color: #34d399; }
+.sync-log-box .log-err { color: #f87171; }
+.sync-log-box .log-info { color: #60a5fa; }
+.sync-stats-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; text-align: center; margin-top: 12px; }
+.sync-stat-card { padding:10px; background:var(--bg-muted); border-radius:var(--radius-sm); border:1px solid var(--border-default); }
+.sync-stat-card .num { font-size:20px; font-weight:700; }
+.sync-stat-card .label { font-size:11px; color:var(--text-muted); }
+.history-item { border: 1px solid var(--border-default); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }
+.history-header { padding: 10px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: var(--bg-muted); font-size: 13px; }
+.history-header:hover { background: var(--bg-hover); }
+.history-detail { max-height: 0; overflow: hidden; transition: max-height 0.3s; }
+.history-detail.expanded { max-height: 500px; }
+.history-log { background: #0f172a; color: #cbd5e1; padding: 10px 14px; font-family: var(--font-mono); font-size: 11px; line-height: 1.6; max-height: 400px; overflow-y: auto; }
+.history-log .log-ok { color: #34d399; }
+.history-log .log-err { color: #f87171; }
+.history-log .log-info { color: #60a5fa; }
+.status-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+.status-done { background: var(--success-light); color: var(--success); }
+.status-failed { background: var(--danger-light); color: var(--danger); }
+.status-cancelled { background: var(--warning-light); color: var(--warning); }
+</style>
+
+<div class="page-header">
+    <h2>更新账号表</h2>
+</div>
+
+<div class="card" style="background:var(--info-light);border-left:4px solid var(--info);margin-bottom:16px;">
+    <div style="display:flex;align-items:center;gap:8px;">
+        <i class="ph ph-info" style="font-size:18px;color:var(--info);"></i>
+        <span style="font-size:13px;color:var(--info-text);">获取账号表中未获取信息的账号的资料（名称、粉丝数、作品数、签名、头像）。需要 TTD 服务和 Cookie。</span>
+    </div>
+</div>
+
+<!-- 执行区 -->
+<div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h3 style="margin:0;font-size:15px;"><i class="ph ph-arrow-clockwise"></i> 执行</h3>
+        <div>
+            <button class="btn btn-warning" onclick="execStep()" id="exec-btn"><i class="ph ph-play"></i> 执行</button>
+            <button class="btn btn-danger" onclick="cancelStep()" id="cancel-btn" style="display:none;"><i class="ph ph-stop"></i> 取消</button>
+        </div>
+    </div>
+    <div id="exec-progress" style="display:none;">
+        <div class="progress-bar-container"><div class="progress-bar" id="progress-bar" style="width:0%"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-top:4px;">
+            <span id="progress-text"></span>
+            <span id="progress-count"></span>
+        </div>
+        <div class="sync-stats-grid">
+            <div class="sync-stat-card"><div class="num" id="stat-total" style="color:var(--accent);">0</div><div class="label">总账号</div></div>
+            <div class="sync-stat-card"><div class="num" id="stat-success" style="color:var(--success);">0</div><div class="label">成功</div></div>
+            <div class="sync-stat-card"><div class="num" id="stat-failed" style="color:var(--danger);">0</div><div class="label">失败</div></div>
+        </div>
+        <div class="sync-log-box" id="exec-log" style="margin-top:12px;"></div>
+    </div>
+</div>
+
+<!-- 历史记录 -->
+<div class="card">
+    <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
+        <span><i class="ph ph-clock-counter-clockwise"></i> 历史记录 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;margin-left:8px;">（{{ history|length }} 条）</span></span>
+        <span class="collapse-icon"><i class="ph ph-caret-down"></i></span>
+    </h3>
+    <div class="card-content">
+    {% if history %}
+    {% for h in history %}
+    <div class="history-item">
+        <div class="history-header" onclick="toggleHistory(this)">
+            <span><span class="status-badge status-{{ h.status }}">{{ h.status }}</span> 成功 {{ h.success }} / 失败 {{ h.failed }}</span>
+            <span style="color:var(--text-muted);">{{ h.created_at }}</span>
+        </div>
+        <div class="history-detail"><div class="history-log" data-log="{{ h.log_json }}"></div></div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state"><i class="ph ph-clock-counter-clockwise"></i>暂无历史记录</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    var STEP_TASK_TYPE = 'refresh_accounts';
+    var STEP_API = '/api/sync/v2/refresh-accounts';
+</script>
+<script>
+/* sync-step.js — 步骤页面通用逻辑(执行/日志/历史)
+ * 依赖: base.html 的 apiCall(), _stepCancel(), _stepToast(), pollTasks()
+ * 页面需设置: STEP_TASK_TYPE, STEP_API, 然后调用 initStepPage()
+ */
+
+function _stepToast(msg, type) {
+    var t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.className = 'toast toast-' + (type || 'success');
+    t.style.display = 'block';
+    setTimeout(function() { t.style.display = 'none'; }, 3000);
+}
+function _stepCancel(taskId) {
+    fetch('/api/tasks/' + taskId + '/cancel', {method: 'POST'}).catch(function(){});
+}
+
+function toggleCard(header) {
+    var content = header.nextElementSibling;
+    var icon = header.querySelector('.collapse-icon i');
+    content.classList.toggle('collapsed');
+    if (icon) icon.className = content.classList.contains('collapsed') ? 'ph ph-caret-right' : 'ph ph-caret-down';
+}
+
+function toggleHistory(el) {
+    var detail = el.nextElementSibling;
+    var expanded = detail.classList.toggle('expanded');
+    if (expanded) {
+        var logDiv = detail.querySelector('.history-log');
+        if (logDiv && !logDiv.dataset.rendered) {
+            try {
+                var logs = JSON.parse(logDiv.dataset.log || '[]');
+                logDiv.innerHTML = logs.map(function(l) {
+                    var cls = l.level === 'ok' ? 'log-ok' : (l.level === 'error' ? 'log-err' : 'log-info');
+                    return '<div class="' + cls + '">' + l.message + '</div>';
+                }).join('');
+                logDiv.dataset.rendered = '1';
+            } catch(e) {
+                logDiv.innerHTML = '<div class="log-info">无日志</div>';
+            }
+        }
+    }
+}
+
+var currentTaskId = null;
+var _lastLogCount = 0;
+
+function addLog(html) {
+    var logBox = document.getElementById('exec-log');
+    logBox.innerHTML += html;
+    logBox.scrollTop = logBox.scrollHeight;
+}
+
+async function execStep() {
+    var btn = document.getElementById('exec-btn');
+    var cancelBtn = document.getElementById('cancel-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ph ph-spinner"></i> 执行中...';
+    cancelBtn.style.display = 'inline-flex';
+    document.getElementById('exec-progress').style.display = 'block';
+    document.getElementById('exec-log').innerHTML = '';
+    _lastLogCount = 0;
+    document.getElementById('progress-bar').style.width = '0%';
+    document.getElementById('progress-bar').style.background = 'var(--accent)';
+    document.getElementById('stat-total').textContent = '...';
+    document.getElementById('stat-success').textContent = '0';
+    var _sk = document.getElementById('stat-skipped'); if (_sk) _sk.textContent = '0';
+    document.getElementById('stat-failed').textContent = '0';
+    document.getElementById('progress-text').textContent = '提交中...';
+    document.getElementById('progress-count').textContent = '';
+    try {
+        var _r = await fetch(STEP_API, {method:'POST'}); var data = await _r.json();
+        if (data.task_id) {
+            currentTaskId = data.task_id;
+            document.getElementById('progress-text').textContent = '已加入队列';
+            _stepToast('已加入后台队列', 'info');
+        } else {
+            addLog('<div class="log-err">' + (data.message || '启动失败') + '</div>');
+            resetButtons();
+        }
+    } catch (e) {
+        addLog('<div class="log-err">启动失败: ' + e.message + '</div>');
+        resetButtons();
+    }
+}
+
+function cancelStep() {
+    if (currentTaskId) _stepCancel(currentTaskId);
+}
+
+function resetButtons() {
+    var btn = document.getElementById('exec-btn');
+    var cancelBtn = document.getElementById('cancel-btn');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ph ph-play"></i> 执行';
+    cancelBtn.style.display = 'none';
+}
+
+// 用 var 引用保存，防止其他页面(function onTasksUpdate)覆盖后丢失
+var _stepTaskHandler = function(tasks) {
+    var otherActive = tasks.find(function(x) {
+        return (x.status === 'running' || x.status === 'pending') &&
+               x.type !== STEP_TASK_TYPE;
+    });
+    if (!currentTaskId) {
+        var t = tasks.find(function(x) {
+            return (x.status === 'running' || x.status === 'pending') && x.type === STEP_TASK_TYPE;
+        });
+        if (t) {
+            currentTaskId = t.task_id;
+            var btn = document.getElementById('exec-btn');
+            var cancelBtn = document.getElementById('cancel-btn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ph ph-spinner"></i> 执行中...'; }
+            if (cancelBtn) cancelBtn.style.display = 'inline-flex';
+            document.getElementById('exec-progress').style.display = 'block';
+        }
+    }
+    if (!currentTaskId) return;
+    var t = tasks.find(function(x) { return x.task_id === currentTaskId; });
+    if (!t) return;
+
+    document.getElementById('stat-total').textContent = t.total || 0;
+    document.getElementById('stat-success').textContent = t.success || 0;
+    var _sk2 = document.getElementById('stat-skipped'); if (_sk2) _sk2.textContent = t.skipped || 0;
+    document.getElementById('stat-failed').textContent = t.failed || 0;
+    if (t.total > 0) {
+        var pct = Math.round(((t.success + t.failed + t.skipped) / t.total) * 100);
+        document.getElementById('progress-bar').style.width = pct + '%';
+        document.getElementById('progress-count').textContent = pct + '%';
+    }
+    var typeLabel = STEP_TASK_TYPE === 'update_collection' ? '解析' :
+                    STEP_TASK_TYPE === 'sync_account' ? '同步' :
+                    STEP_TASK_TYPE === 'refresh_accounts' ? '刷新' : '任务';
+    document.getElementById('progress-text').textContent = typeLabel + ': ' + (t.success||0) + '/' + (t.total||0);
+
+    var logs = t.log || [];
+    if (logs.length > _lastLogCount) {
+        for (var i = _lastLogCount; i < logs.length; i++) {
+            var l = logs[i];
+            var cls = l.level === 'ok' ? 'log-ok' : (l.level === 'error' ? 'log-err' : 'log-info');
+            addLog('<div class="' + cls + '">' + l.message + '</div>');
+        }
+        _lastLogCount = logs.length;
+    }
+
+    if (['done','failed','cancelled'].includes(t.status)) {
+        var bar = document.getElementById('progress-bar');
+        var summary = '完成: 成功 ' + (t.success||0) + ' 失败 ' + (t.failed||0) + (t.skipped ? ' 跳过 ' + t.skipped : '');
+        if (t.status === 'done' && t.failed === 0 && (t.success > 0 || t.total === 0)) {
+            bar.style.width = '100%'; bar.style.background = 'var(--success)';
+            addLog('<div class="log-ok">' + summary + '</div>');
+            _stepToast(typeLabel + '完成', 'success');
+        } else if (t.status === 'done' && (t.failed > 0 || t.skipped > 0)) {
+            var hasFail = t.failed > 0;
+            bar.style.width = '100%'; bar.style.background = hasFail ? 'var(--danger)' : 'var(--warning)';
+            addLog('<div class="' + (hasFail ? 'log-err' : 'log-info') + '">' + summary + '</div>');
+            // 提取第一条 error 日志作为提示
+            var firstErr = '';
+            for (var j = 0; j < logs.length; j++) {
+                if (logs[j].level === 'error') { firstErr = logs[j].message; break; }
+            }
+            var detail = hasFail ? ('失败 ' + t.failed + ' 条') : ('全部 ' + t.skipped + ' 条被跳过');
+            if (firstErr) {
+                var short = firstErr.length > 100 ? firstErr.substring(0, 100) + '...' : firstErr;
+                detail += ': ' + short;
+            }
+            _stepToast(typeLabel + detail, 'error');
+        } else if (t.status === 'failed') {
+            bar.style.background = 'var(--danger)';
+            addLog('<div class="log-err">失败: ' + (t.error||'') + '</div>');
+            var em = t.error ? (t.error.length > 100 ? t.error.substring(0,100) + '...' : t.error) : '未知错误';
+            _stepToast(typeLabel + '失败: ' + em, 'error');
+        } else {
+            bar.style.background = 'var(--warning)';
+            addLog('<div class="log-info">已取消</div>');
+            _stepToast(typeLabel + '已取消', 'info');
+        }
+        resetButtons();
+        currentTaskId = null;
+    }
+};
+
+// SPA 导航后重新初始化:重置状态 + 夺回 onTasksUpdate + 认领 running 任务
+function initStepPage() {
+    currentTaskId = null;
+    _lastLogCount = 0;
+    window.onTasksUpdate = _stepTaskHandler;
+    (async function() {
+        try {
+            var _r2 = await fetch('/api/tasks'); var data = await _r2.json();
+            _stepTaskHandler(data.tasks || []);
+        } catch (e) {}
+    })();
+}
+setTimeout(function() { initStepPage(); }, 0);
+</script>
+{% endblock %}

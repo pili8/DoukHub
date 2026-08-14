@@ -281,7 +281,7 @@ class Collector:
             if cookie:
                 payload["cookie"] = cookie
 
-            resp = await self._client.post(endpoint, json=payload, timeout=15)
+            resp = await self._client.post(endpoint, json=payload, timeout=30)
             resp.raise_for_status()
             data = resp.json()
             if data.get("data"):
@@ -304,10 +304,15 @@ class Collector:
                     "uid": d.get("uid", ""),
                     "unique_id": d.get("unique_id", ""),
                 }
-            return {"sec_user_id": sec_user_id}
+            # TTD 返回了但 data 为空
+            return {"sec_user_id": sec_user_id, "_error": f"TTD 返回无 data 字段: {str(data)[:200]}"}
 
-        except Exception:
-            return {"sec_user_id": sec_user_id}
+        except httpx.ReadTimeout:
+            return {"sec_user_id": sec_user_id, "_error": "TTD 接口超时(30s)，可能服务负载高或网络慢"}
+        except httpx.ConnectError as e:
+            return {"sec_user_id": sec_user_id, "_error": f"TTD 连接失败: {e}"}
+        except Exception as e:
+            return {"sec_user_id": sec_user_id, "_error": f"TTD 请求异常: {type(e).__name__}: {e}"}
 
     async def validate_cookie(self, cookie: str, platform: str = "抖音") -> dict:
         """验证 Cookie 是否有效，返回详细状态。

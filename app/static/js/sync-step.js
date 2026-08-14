@@ -1,0 +1,195 @@
+/* sync-step.js — 步骤页面通用逻辑(执行/日志/历史)
+ * 依赖: base.html 的 apiCall(), _stepCancel(), _stepToast(), pollTasks()
+ * 页面需设置: STEP_TASK_TYPE, STEP_API, 然后调用 initStepPage()
+ */
+
+function _stepToast(msg, type) {
+    var t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.className = 'toast toast-' + (type || 'success');
+    t.style.display = 'block';
+    setTimeout(function() { t.style.display = 'none'; }, 3000);
+}
+function _stepCancel(taskId) {
+    fetch('/api/tasks/' + taskId + '/cancel', {method: 'POST'}).catch(function(){});
+}
+
+function toggleCard(header) {
+    var content = header.nextElementSibling;
+    var icon = header.querySelector('.collapse-icon i');
+    content.classList.toggle('collapsed');
+    if (icon) icon.className = content.classList.contains('collapsed') ? 'ph ph-caret-right' : 'ph ph-caret-down';
+}
+
+function toggleHistory(el) {
+    var detail = el.nextElementSibling;
+    var expanded = detail.classList.toggle('expanded');
+    if (expanded) {
+        var logDiv = detail.querySelector('.history-log');
+        if (logDiv && !logDiv.dataset.rendered) {
+            try {
+                var logs = JSON.parse(logDiv.dataset.log || '[]');
+                logDiv.innerHTML = logs.map(function(l) {
+                    var cls = l.level === 'ok' ? 'log-ok' : (l.level === 'error' ? 'log-err' : 'log-info');
+                    return '<div class="' + cls + '">' + l.message + '</div>';
+                }).join('');
+                logDiv.dataset.rendered = '1';
+            } catch(e) {
+                logDiv.innerHTML = '<div class="log-info">无日志</div>';
+            }
+        }
+    }
+}
+
+var currentTaskId = null;
+var _lastLogCount = 0;
+
+function addLog(html) {
+    var logBox = document.getElementById('exec-log');
+    logBox.innerHTML += html;
+    logBox.scrollTop = logBox.scrollHeight;
+}
+
+async function execStep() {
+    var btn = document.getElementById('exec-btn');
+    var cancelBtn = document.getElementById('cancel-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ph ph-spinner"></i> 执行中...';
+    cancelBtn.style.display = 'inline-flex';
+    document.getElementById('exec-progress').style.display = 'block';
+    document.getElementById('exec-log').innerHTML = '';
+    _lastLogCount = 0;
+    document.getElementById('progress-bar').style.width = '0%';
+    document.getElementById('progress-bar').style.background = 'var(--accent)';
+    document.getElementById('stat-total').textContent = '...';
+    document.getElementById('stat-success').textContent = '0';
+    var _sk = document.getElementById('stat-skipped'); if (_sk) _sk.textContent = '0';
+    document.getElementById('stat-failed').textContent = '0';
+    document.getElementById('progress-text').textContent = '提交中...';
+    document.getElementById('progress-count').textContent = '';
+    try {
+        var _r = await fetch(STEP_API, {method:'POST'}); var data = await _r.json();
+        if (data.task_id) {
+            currentTaskId = data.task_id;
+            document.getElementById('progress-text').textContent = '已加入队列';
+            _stepToast('已加入后台队列', 'info');
+        } else {
+            addLog('<div class="log-err">' + (data.message || '启动失败') + '</div>');
+            resetButtons();
+        }
+    } catch (e) {
+        addLog('<div class="log-err">启动失败: ' + e.message + '</div>');
+        resetButtons();
+    }
+}
+
+function cancelStep() {
+    if (currentTaskId) _stepCancel(currentTaskId);
+}
+
+function resetButtons() {
+    var btn = document.getElementById('exec-btn');
+    var cancelBtn = document.getElementById('cancel-btn');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ph ph-play"></i> 执行';
+    cancelBtn.style.display = 'none';
+}
+
+// 用 var 引用保存，防止其他页面(function onTasksUpdate)覆盖后丢失
+var _stepTaskHandler = function(tasks) {
+    var otherActive = tasks.find(function(x) {
+        return (x.status === 'running' || x.status === 'pending') &&
+               x.type !== STEP_TASK_TYPE;
+    });
+    if (!currentTaskId) {
+        var t = tasks.find(function(x) {
+            return (x.status === 'running' || x.status === 'pending') && x.type === STEP_TASK_TYPE;
+        });
+        if (t) {
+            currentTaskId = t.task_id;
+            var btn = document.getElementById('exec-btn');
+            var cancelBtn = document.getElementById('cancel-btn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ph ph-spinner"></i> 执行中...'; }
+            if (cancelBtn) cancelBtn.style.display = 'inline-flex';
+            document.getElementById('exec-progress').style.display = 'block';
+        }
+    }
+    if (!currentTaskId) return;
+    var t = tasks.find(function(x) { return x.task_id === currentTaskId; });
+    if (!t) return;
+
+    document.getElementById('stat-total').textContent = t.total || 0;
+    document.getElementById('stat-success').textContent = t.success || 0;
+    var _sk2 = document.getElementById('stat-skipped'); if (_sk2) _sk2.textContent = t.skipped || 0;
+    document.getElementById('stat-failed').textContent = t.failed || 0;
+    if (t.total > 0) {
+        var pct = Math.round(((t.success + t.failed + t.skipped) / t.total) * 100);
+        document.getElementById('progress-bar').style.width = pct + '%';
+        document.getElementById('progress-count').textContent = pct + '%';
+    }
+    var typeLabel = STEP_TASK_TYPE === 'update_collection' ? '解析' :
+                    STEP_TASK_TYPE === 'sync_account' ? '同步' :
+                    STEP_TASK_TYPE === 'refresh_accounts' ? '刷新' : '任务';
+    document.getElementById('progress-text').textContent = typeLabel + ': ' + (t.success||0) + '/' + (t.total||0);
+
+    var logs = t.log || [];
+    if (logs.length > _lastLogCount) {
+        for (var i = _lastLogCount; i < logs.length; i++) {
+            var l = logs[i];
+            var cls = l.level === 'ok' ? 'log-ok' : (l.level === 'error' ? 'log-err' : 'log-info');
+            addLog('<div class="' + cls + '">' + l.message + '</div>');
+        }
+        _lastLogCount = logs.length;
+    }
+
+    if (['done','failed','cancelled'].includes(t.status)) {
+        var bar = document.getElementById('progress-bar');
+        var summary = '完成: 成功 ' + (t.success||0) + ' 失败 ' + (t.failed||0) + (t.skipped ? ' 跳过 ' + t.skipped : '');
+        if (t.status === 'done' && t.failed === 0 && (t.success > 0 || t.total === 0)) {
+            bar.style.width = '100%'; bar.style.background = 'var(--success)';
+            addLog('<div class="log-ok">' + summary + '</div>');
+            _stepToast(typeLabel + '完成', 'success');
+        } else if (t.status === 'done' && (t.failed > 0 || t.skipped > 0)) {
+            var hasFail = t.failed > 0;
+            bar.style.width = '100%'; bar.style.background = hasFail ? 'var(--danger)' : 'var(--warning)';
+            addLog('<div class="' + (hasFail ? 'log-err' : 'log-info') + '">' + summary + '</div>');
+            // 提取第一条 error 日志作为提示
+            var firstErr = '';
+            for (var j = 0; j < logs.length; j++) {
+                if (logs[j].level === 'error') { firstErr = logs[j].message; break; }
+            }
+            var detail = hasFail ? ('失败 ' + t.failed + ' 条') : ('全部 ' + t.skipped + ' 条被跳过');
+            if (firstErr) {
+                var short = firstErr.length > 100 ? firstErr.substring(0, 100) + '...' : firstErr;
+                detail += ': ' + short;
+            }
+            _stepToast(typeLabel + detail, 'error');
+        } else if (t.status === 'failed') {
+            bar.style.background = 'var(--danger)';
+            addLog('<div class="log-err">失败: ' + (t.error||'') + '</div>');
+            var em = t.error ? (t.error.length > 100 ? t.error.substring(0,100) + '...' : t.error) : '未知错误';
+            _stepToast(typeLabel + '失败: ' + em, 'error');
+        } else {
+            bar.style.background = 'var(--warning)';
+            addLog('<div class="log-info">已取消</div>');
+            _stepToast(typeLabel + '已取消', 'info');
+        }
+        resetButtons();
+        currentTaskId = null;
+    }
+};
+
+// SPA 导航后重新初始化:重置状态 + 夺回 onTasksUpdate + 认领 running 任务
+function initStepPage() {
+    currentTaskId = null;
+    _lastLogCount = 0;
+    window.onTasksUpdate = _stepTaskHandler;
+    (async function() {
+        try {
+            var _r2 = await fetch('/api/tasks'); var data = await _r2.json();
+            _stepTaskHandler(data.tasks || []);
+        } catch (e) {}
+    })();
+}
+setTimeout(function() { initStepPage(); }, 0);

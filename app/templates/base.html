@@ -29,21 +29,54 @@
                 <a href="/status" title="状态" class="{% if page == 'status' %}active{% endif %}">
                     <i class="ph ph-gauge"></i><span>状态</span>
                 </a>
-                <a href="/sync" title="同步" class="{% if page == 'sync' %}active{% endif %}">
-                    <i class="ph ph-arrows-clockwise"></i><span>同步</span>
-                </a>
+
+                <!-- 同步父级:手风琴式展开/收起子项 -->
+                <div class="nav-group{% if page in ('sync_overview','sync_import','sync_resolve','sync_account','sync_refresh') %} expanded{% endif %}">
+                    <a href="/sync/overview" title="同步" class="nav-group-toggle" onclick="toggleNavGroup(event, this)">
+                        <i class="ph ph-arrows-clockwise"></i><span>同步</span>
+                        <i class="ph ph-caret-right nav-arrow"></i>
+                    </a>
+                    <div class="nav-submenu">
+                        <a href="/sync/overview" title="概览" class="{% if page == 'sync_overview' %}active{% endif %}">
+                            <i class="ph ph-house"></i><span>概览</span>
+                        </a>
+                        <a href="/sync/import" title="导入采集表" class="{% if page == 'sync_import' %}active{% endif %}">
+                            <i class="ph ph-download"></i><span>导入采集表</span>
+                        </a>
+                        <a href="/sync/resolve" title="解析采集表" class="{% if page == 'sync_resolve' %}active{% endif %}">
+                            <i class="ph ph-keyhole"></i><span>解析采集表</span>
+                        </a>
+                        <a href="/sync/account" title="同步账号表" class="{% if page == 'sync_account' %}active{% endif %}">
+                            <i class="ph ph-users"></i><span>同步账号表</span>
+                        </a>
+                        <a href="/sync/refresh" title="更新账号表" class="{% if page == 'sync_refresh' %}active{% endif %}">
+                            <i class="ph ph-arrow-clockwise"></i><span>更新账号表</span>
+                        </a>
+                    </div>
+                </div>
+
                 <a href="/collect" title="采集" class="{% if page == 'collect' %}active{% endif %}">
                     <i class="ph ph-download-simple"></i><span>采集</span>
                 </a>
-                <a href="/history" title="记录" class="{% if page == 'history' %}active{% endif %}">
-                    <i class="ph ph-clock-counter-clockwise"></i><span>记录</span>
-                </a>
-                <a href="/database" title="数据" class="{% if page == 'database' %}active{% endif %}">
-                    <i class="ph ph-database"></i><span>数据</span>
-                </a>
-                <a href="/table" title="表浏览" class="{% if page == 'table' %}active{% endif %}">
-                    <i class="ph ph-table"></i><span>表浏览</span>
-                </a>
+
+                <!-- 数据父级:手风琴式展开/收起子项 -->
+                <div class="nav-group{% if page in ('database','table','sync_cloud') %} expanded{% endif %}">
+                    <a href="/database" title="数据" class="nav-group-toggle" onclick="toggleNavGroup(event, this)">
+                        <i class="ph ph-database"></i><span>数据</span>
+                        <i class="ph ph-caret-right nav-arrow"></i>
+                    </a>
+                    <div class="nav-submenu">
+                        <a href="/database" title="数据概览" class="{% if page == 'database' %}active{% endif %}">
+                            <i class="ph ph-squares-four"></i><span>数据概览</span>
+                        </a>
+                        <a href="/sync/cloud" title="云端同步" class="{% if page == 'sync_cloud' %}active{% endif %}">
+                            <i class="ph ph-cloud-arrow-up"></i><span>云端同步</span>
+                        </a>
+                        <a href="/table" title="表浏览" class="{% if page == 'table' %}active{% endif %}">
+                            <i class="ph ph-table"></i><span>表浏览</span>
+                        </a>
+                    </div>
+                </div>
                 <a href="/settings" title="设置" class="{% if page == 'settings' %}active{% endif %}">
                     <i class="ph ph-gear"></i><span>设置</span>
                 </a>
@@ -217,6 +250,55 @@
         border-radius: 0 3px 3px 0;
         box-shadow: var(--glow-primary, none);
     }
+
+    /* ===== 嵌套子菜单(手风琴式) ===== */
+    .nav-group .nav-group-toggle {
+        display: flex; align-items: center; gap: 12px;
+        padding: 0 16px; height: 40px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 13px; font-weight: 500;
+        border-radius: var(--radius-sm);
+        margin-bottom: 2px;
+        position: relative;
+        transition: background var(--transition-fast), color var(--transition-fast);
+    }
+    .nav-group .nav-group-toggle i:first-child { font-size: 20px; flex-shrink: 0; }
+    .nav-group .nav-arrow {
+        margin-left: auto; font-size: 14px; transition: transform 0.2s ease;
+        opacity: 0.6;
+    }
+    .nav-group.expanded .nav-arrow { transform: rotate(90deg); }
+    .nav-group .nav-group-toggle:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .nav-group .nav-group-toggle.active {
+        background: var(--accent); color: var(--text-on-accent, #fff); font-weight: 600;
+    }
+    .nav-group .nav-group-toggle.active i { color: var(--text-on-accent, #fff); }
+    .nav-group .nav-submenu {
+        max-height: 0; overflow: hidden;
+        transition: max-height 0.25s ease-out;
+    }
+    .nav-group.expanded .nav-submenu { max-height: 320px; }
+    .nav-group .nav-submenu a {
+        display: flex; align-items: center; gap: 10px;
+        padding: 0 16px 0 40px; height: 36px;
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 12px; font-weight: 500;
+        border-radius: var(--radius-sm);
+        margin-bottom: 1px;
+        transition: background var(--transition-fast), color var(--transition-fast);
+    }
+    .nav-group .nav-submenu a i { font-size: 16px; flex-shrink: 0; }
+    .nav-group .nav-submenu a:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .nav-group .nav-submenu a.active {
+        background: var(--accent); color: var(--text-on-accent, #fff); font-weight: 600;
+    }
+    .nav-group .nav-submenu a.active i { color: var(--text-on-accent, #fff); }
+    /* 折叠态:隐藏子菜单,箭头隐藏 */
+    .sb-collapsed .nav-submenu { display: none !important; }
+    .sb-collapsed .nav-arrow { display: none; }
+    .sb-collapsed .nav-group-toggle { justify-content: center; padding: 0; gap: 0; }
     </style>
 
     <script>
@@ -304,6 +386,22 @@
             document.querySelector('.sidebar').classList.add('sb-collapsed');
         }
 
+        // ===== 嵌套子菜单:手风琴式展开/收起 =====
+        function toggleNavGroup(e, el) {
+            e.preventDefault();
+            e.stopPropagation();
+            var group = el.closest('.nav-group');
+            if (group) group.classList.toggle('expanded');
+            // 折叠态下不拦截(让 SPA 路由正常跳转)
+            var sb = document.querySelector('.sidebar');
+            if (sb && sb.classList.contains('sb-collapsed')) return;
+            // 展开态下点击切换,不跳转(除非已经是展开的)
+            if (group && group.classList.contains('expanded')) {
+                // 已展开,允许跳转到概览页
+                loadPage('/sync/overview');
+            }
+        }
+
         async function restartSystem() {
             if (!await confirmDialog('服务将重启，正在进行的任务会中断。', { title: '重启确认', confirmText: '重启', danger: false })) return;
             showToast('正在重启...', 'info');
@@ -362,20 +460,27 @@
             for (const old of scripts) {
                 const s = document.createElement('script');
                 if (old.src) {
-                    // 已加载过的外部脚本:跳过(库已定义全局对象,重复执行会导致事件监听器累积)
+                    if (old.dataset.reload === 'true') {
+                        s.src = old.src;
+                        old.replaceWith(s);
+                        await new Promise(resolve => {
+                            s.onload = resolve;
+                            s.onerror = resolve;
+                        });
+                        continue;
+                    }
                     if (_loadedScripts.has(old.src)) {
                         old.remove();
                         continue;
                     }
                     _loadedScripts.add(old.src);
                     await new Promise(resolve => {
-                        s.onload = resolve;
+                       s.onload = resolve;
                         s.onerror = resolve;
                         s.src = old.src;
                         old.replaceWith(s);
                     });
                 } else {
-                    // 内联脚本:同步执行
                     s.textContent = old.textContent;
                     old.replaceWith(s);
                 }
@@ -383,8 +488,25 @@
         }
         function updateActiveNav(url) {
             document.querySelectorAll('.sidebar-nav a').forEach(a => {
+                // nav-group-toggle(父级)不参与 active 匹配,避免和同 href 子项同时高亮
+                if (a.classList.contains('nav-group-toggle')) {
+                    a.classList.remove('active');
+                    return;
+                }
                 a.classList.toggle('active', a.getAttribute('href') === url);
             });
+            // 同步父级:任意子页面都展开
+            var syncPages = ['/sync/overview','/sync/import','/sync/resolve','/sync/account','/sync/refresh'];
+            if (syncPages.indexOf(url) >= 0) {
+                var groups = document.querySelectorAll('.nav-group');
+                if (groups[0]) groups[0].classList.add('expanded');
+            }
+            // 数据父级:任意子页面都展开
+            var dataPages = ['/database','/sync/cloud','/table'];
+            if (dataPages.indexOf(url) >= 0) {
+                var groups = document.querySelectorAll('.nav-group');
+                if (groups[1]) groups[1].classList.add('expanded');
+            }
         }
         // 拦截内部链接:仅同源 GET 跳转,排除修饰键/外链/锚点/新窗口
         document.addEventListener('click', e => {
@@ -404,7 +526,7 @@
         var _taskPanelOpen = false;
         var _taskPollTimer = null;
         var _lastTasks = [];
-        var TASK_TYPE_LABEL = {update_collection: '解析账号标识', sync_account: '同步账号表'};
+        var TASK_TYPE_LABEL = {update_collection: '解析账号标识', sync_account: '同步账号表', refresh_accounts: '刷新账号资料', cloud_sync: '云端同步', cloud_sync_full: '全盘同步'};
         var TASK_STATUS_LABEL = {pending: '排队', running: '运行', done: '完成', failed: '失败', cancelled: '已取消'};
 
         async function pollTasks() {

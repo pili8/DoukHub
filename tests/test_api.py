@@ -78,11 +78,11 @@ class TestPageRoutes:
         assert r.status_code == 200
         assert "采集" in r.text
 
-    def test_history_page(self, app_env):
+    def test_sync_overview_page(self, app_env):
         client, *_ = app_env
-        r = client.get("/history")
+        r = client.get("/sync/overview")
         assert r.status_code == 200
-        assert "记录" in r.text
+        assert "同步" in r.text
 
     def test_settings_page(self, app_env):
         client, *_ = app_env

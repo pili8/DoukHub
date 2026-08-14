@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}同步概览 - DoukHub{% endblock %}
+{% block content %}
+<style>
+.sync-step-card {
+    padding: 16px; border-radius: var(--radius); background: var(--bg-muted);
+    border: 1px solid var(--border-default); cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; gap: 14px;
+}
+.sync-step-card:hover { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.sync-step-card .step-icon { font-size: 28px; color: var(--accent); flex-shrink: 0; }
+.sync-step-card .step-info h4 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.sync-step-card .step-info p { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); }
+</style>
+
+<div class="page-header">
+    <h2>同步概览</h2>
+</div>
+
+<!-- 一键执行 -->
+<div class="card" style="margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h3 style="margin:0;font-size:15px;"><i class="ph ph-lightning"></i> 一键执行</h3>
+        <button class="btn btn-primary" onclick="syncAll()" id="sync-all-btn"><i class="ph ph-lightning"></i> 一键同步</button>
+        <button class="btn btn-danger" onclick="stopSync()" id="stop-sync-btn" style="display:none;"><i class="ph ph-stop"></i> 停止</button>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);line-height:1.8;">
+        依次执行：导入采集表 → 解析采集表 → 同步账号表（链式自动触发）
+    </div>
+    <div id="sync-progress" style="display:none;margin-top:12px;">
+        <div class="progress-bar-container">
+            <div class="progress-bar" id="sync-progress-bar" style="width:0%"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);">
+            <span id="sync-progress-text"></span>
+            <span id="sync-progress-count"></span>
+        </div>
+    </div>
+</div>
+
+<!-- 步骤导航卡片 -->
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:16px;">
+    <div class="sync-step-card" onclick="loadPage('/sync/import')">
+        <i class="ph ph-download step-icon"></i>
+        <div class="step-info"><h4>1. 导入采集表</h4><p>粘贴分享链接/等级/标签，写入本地数据库</p></div>
+    </div>
+    <div class="sync-step-card" onclick="loadPage('/sync/resolve')">
+        <i class="ph ph-keyhole step-icon"></i>
+        <div class="step-info"><h4>2. 解析采集表</h4><p>调用 TTD API 解析短链接，获取 sec_user_id</p></div>
+    </div>
+    <div class="sync-step-card" onclick="loadPage('/sync/account')">
+        <i class="ph ph-users step-icon"></i>
+        <div class="step-info"><h4>3. 同步账号表</h4><p>将采集表记录同步到账号表，获取账号详情</p></div>
+    </div>
+    <div class="sync-step-card" onclick="loadPage('/sync/refresh')">
+        <i class="ph ph-arrow-clockwise step-icon"></i>
+        <div class="step-info"><h4>4. 更新账号表</h4><p>获取未获取信息的账号的最新资料</p></div>
+    </div>
+</div>
+
+<!-- 账号列表 -->
+<div class="card">
+    <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
+        <span><i class="ph ph-users"></i> 账号列表 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;margin-left:8px;">（{{ accounts|length }} 个）</span></span>
+        <span class="collapse-icon"><i class="ph ph-caret-down"></i></span>
+    </h3>
+    <div class="card-content">
+    <div class="table-scroll"><table>
+        <thead>
+            <tr>
+                <th>名称</th>
+                <th>平台</th>
+                <th>等级</th>
+                <th>粉丝</th>
+                <th>标签</th>
+                <th>同步时间</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for acc in accounts %}
+            <tr>
+                <td>{{ acc['账号名称'] or '-' }}</td>
+                <td><span class="platform-tag platform-{{ acc['平台'] }}">{{ acc['平台'] or '-' }}</span></td>
+                <td>{{ '⭐' * acc['等级'] if acc['等级'] else '-' }}</td>
+                <td>{{ acc['粉丝数'] if acc['粉丝数'] else '-' }}</td>
+                <td>
+                    {% for tag in acc['tags_list'][:3] %}
+                    <span class="tag">{{ tag }}</span>
+                    {% endfor %}
+                </td>
+                <td style="font-size:12px;color:var(--text-muted);">{{ acc['同步时间'] or '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table></div>
+    {% if not accounts %}
+    <div class="empty-state"><i class="ph ph-users"></i>暂无账号, 请先导入数据并执行同步</div>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleCard(header) {
+        const content = header.nextElementSibling;
+        const icon = header.querySelector('.collapse-icon i');
+        content.classList.toggle('collapsed');
+        if (icon) icon.className = content.classList.contains('collapsed') ? 'ph ph-caret-right' : 'ph ph-caret-down';
+    }
+
+    var currentTaskId = null;
+    var _syncAllNext = null;
+
+    async function syncAll() {
+        var btn = document.getElementById('sync-all-btn');
+        var stopBtn = document.getElementById('stop-sync-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="ph ph-spinner"></i> 同步中...';
+        stopBtn.style.display = 'inline-flex';
+        document.getElementById('sync-progress').style.display = 'block';
+        document.getElementById('sync-progress-bar').style.width = '0%';
+        document.getElementById('sync-progress-text').textContent = '步骤1: 导入采集表';
+
+        // 步骤1: 直接调用导入 API（空文本=跳过实际导入，直接进入步骤2）
+        try {
+            var importData = await apiCall('/api/sync/v2/import', 'POST', { text: '' });
+            document.getElementById('sync-progress-text').textContent = '步骤1完成: ' + (importData.message || '');
+            // 步骤2: 启动解析任务,完成后由 onTasksUpdate 触发步骤3
+            _syncAllNext = 'sync_account';
+            await startStep2();
+        } catch (e) {
+            document.getElementById('sync-progress-text').textContent = '导入失败: ' + e.message;
+            btn.disabled = false;
+            btn.innerHTML = '<i class="ph ph-lightning"></i> 一键同步';
+            stopBtn.style.display = 'none';
+        }
+    }
+
+    async function startStep2() {
+        document.getElementById('sync-progress-text').textContent = '步骤2: 解析账号标识';
+        document.getElementById('sync-progress-bar').style.width = '33%';
+        try {
+            var data = await apiCall('/api/sync/v2/update-collection', 'POST');
+            if (data.task_id) {
+                currentTaskId = data.task_id;
+            }
+        } catch (e) {
+            document.getElementById('sync-progress-text').textContent = '解析启动失败: ' + e.message;
+        }
+    }
+
+    async function startStep3() {
+        document.getElementById('sync-progress-text').textContent = '步骤3: 同步账号表';
+        document.getElementById('sync-progress-bar').style.width = '66%';
+        try {
+            var data = await apiCall('/api/sync/v2/sync-account', 'POST');
+            if (data.task_id) {
+                currentTaskId = data.task_id;
+            }
+        } catch (e) {
+            document.getElementById('sync-progress-text').textContent = '同步启动失败: ' + e.message;
+        }
+    }
+
+    function stopSync() {
+        if (currentTaskId) cancelTask(currentTaskId);
+    }
+
+    function onTasksUpdate(tasks) {
+        if (!currentTaskId) {
+            // 认领 running 的任务
+            var t = tasks.find(x => (x.status === 'running' || x.status === 'pending') &&
+                       ['update_collection','sync_account','refresh_accounts','cloud_sync'].includes(x.type));
+            if (t) currentTaskId = t.task_id;
+        }
+        if (!currentTaskId) return;
+        var t = tasks.find(x => x.task_id === currentTaskId);
+        if (!t) return;
+
+        if (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled') {
+            // 一键链式: 解析完 -> 触发同步账号表
+            if (_syncAllNext === 'sync_account' && t.type === 'update_collection' && t.status === 'done') {
+                _syncAllNext = null;
+                currentTaskId = null;
+                startStep3();
+                return;
+            }
+            // 最终完成
+            var btn = document.getElementById('sync-all-btn');
+            var stopBtn = document.getElementById('stop-sync-btn');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="ph ph-lightning"></i> 一键同步';
+            stopBtn.style.display = 'none';
+            var bar = document.getElementById('sync-progress-bar');
+            bar.style.width = '100%';
+            if (t.status === 'done') {
+                bar.style.background = 'var(--success)';
+                document.getElementById('sync-progress-text').textContent = '完成: 成功 ' + (t.success||0) + ' 失败 ' + (t.failed||0);
+                showToast('同步完成', 'success');
+                setTimeout(function() { loadPage('/sync/overview'); }, 2000);
+            } else if (t.status === 'failed') {
+                bar.style.background = 'var(--danger)';
+                document.getElementById('sync-progress-text').textContent = '失败: ' + (t.error || '');
+                showToast('同步失败', 'error');
+            } else {
+                bar.style.background = 'var(--danger)';
+                document.getElementById('sync-progress-text').textContent = '已取消';
+            }
+            currentTaskId = null;
+            _syncAllNext = null;
+        }
+    }
+
+    // 页面加载时认领 running 任务
+    (async function() {
+        try {
+            var data = await apiCall('/api/tasks', 'GET');
+            onTasksUpdate(data.tasks || []);
+        } catch (e) {}
+    })();
+</script>
+{% endblock %}

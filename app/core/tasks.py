@@ -8,6 +8,7 @@
 参考 EntHub tasks.py 的进程内任务跟踪模式。
 """
 import asyncio
+import json
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -43,6 +44,30 @@ class Task:
             "finished_at": self.finished_at,
             "error": self.error,
         }
+
+    def _save_history(self):
+        """任务完成时持久化到 sync_history 表（best-effort, 不影响主流程）。"""
+        try:
+            from .database import Database
+            db = Database()
+            started = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.started_at)) if self.started_at else None
+            finished = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.finished_at)) if self.finished_at else None
+            dur = (self.finished_at - self.started_at) if (self.started_at and self.finished_at) else None
+            db.add_sync_history({
+                "task_type": self.type,
+                "status": self.status,
+                "total": self.total,
+                "success": self.success,
+                "failed": self.failed,
+                "skipped": self.skipped,
+                "error": self.error,
+                "log_json": json.dumps(list(self.log), ensure_ascii=False),
+                "started_at": started,
+                "finished_at": finished,
+                "duration_sec": round(dur, 1) if dur else None,
+            })
+        except Exception:
+            pass  # 持久化失败不影响任务流程
 
 
 class TaskManager:
@@ -126,6 +151,7 @@ class TaskManager:
         async with self._lock:
             if self.is_cancelled(task.task_id):
                 self.update(task.task_id, status="cancelled")
+                task._save_history()
                 return
             self.update(task.task_id, status="running")
             try:
@@ -135,6 +161,7 @@ class TaskManager:
             except Exception as e:
                 self.update(task.task_id, status="failed", error=str(e))
             finally:
+                task._save_history()
                 self._trim()
 
 

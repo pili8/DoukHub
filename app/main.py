@@ -1,5 +1,6 @@
 """DoukHub 主入口 — FastAPI Web 应用"""
 import asyncio
+import json
 import logging
 import httpx
 from contextlib import asynccontextmanager
@@ -109,6 +110,7 @@ def get_syncer_v2() -> SyncerV2:
             feishu=f,
             collector=get_collector(),
             config=config.feishu,
+            tags_mapping=config._data.get("tags", {}),
         )
     return syncer_v2
 
@@ -158,6 +160,20 @@ async def lifespan(app: FastAPI):
     sched = get_scheduler()
     sched.start()
 
+    # TTD/XHS 心跳监控：30秒检查一次，连续2次失败自动重启
+    def _health_loop():
+        import time as _t
+        _t.sleep(15)
+        while True:
+            try:
+                _svc = get_services()
+                for _s in _svc.services:
+                    _s.health_check()
+            except Exception:
+                pass
+            _t.sleep(30)
+    threading.Thread(target=_health_loop, daemon=True).start()
+
     # 启动后自动增量同步（不阻塞 UI）
     fs = get_feishu_syncer()
     if fs:
@@ -180,7 +196,7 @@ async def lifespan(app: FastAPI):
         await c.close()
 
 
-app = FastAPI(title="DoukHub", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="DoukHub", version="2.2.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -201,13 +217,30 @@ def detect_platform(link: str) -> str:
 # ========== 页面路由 ==========
 
 @app.get("/", response_class=HTMLResponse)
+async def page_sync_overview_redirect(request: Request):
+    """根路径重定向到同步概览页"""
+    return templates.TemplateResponse(request, "sync/overview.html", context={
+        "request": request,
+        "page": "sync_overview",
+        "accounts": [],
+    })
+
+
 @app.get("/sync", response_class=HTMLResponse)
-async def page_sync(request: Request):
-    """同步页面 - 本地数据流程（导入→解析→获取详情），飞书同步在数据管理页面"""
+async def page_sync_overview_redirect2(request: Request):
+    """旧 /sync 重定向到 /sync/overview"""
+    return templates.TemplateResponse(request, "sync/overview.html", context={
+        "request": request,
+        "page": "sync_overview",
+        "accounts": [],
+    })
+
+
+@app.get("/sync/overview", response_class=HTMLResponse)
+async def page_sync_overview(request: Request):
+    """同步概览页 - 一键执行 + 账号列表"""
     db = get_database()
-    # 从本地数据库读取账号列表
     accounts = db.get_all_accounts()
-    # 解析标签 JSON 字符串为列表，方便模板渲染
     import json as _json
     for acc in accounts:
         tags_str = acc.get("标签", "")
@@ -218,10 +251,72 @@ async def page_sync(request: Request):
                 acc["tags_list"] = []
         else:
             acc["tags_list"] = []
-    return templates.TemplateResponse(request, "sync.html", context={
+    return templates.TemplateResponse(request, "sync/overview.html", context={
         "request": request,
         "accounts": accounts,
-        "page": "sync",
+        "page": "sync_overview",
+    })
+
+
+@app.get("/sync/import", response_class=HTMLResponse)
+async def page_sync_import(request: Request):
+    """导入采集表页面"""
+    db = get_database()
+    history = db.get_sync_history("import_collection", limit=20)
+    return templates.TemplateResponse(request, "sync/import.html", context={
+        "request": request,
+        "history": history,
+        "page": "sync_import",
+    })
+
+
+@app.get("/sync/resolve", response_class=HTMLResponse)
+async def page_sync_resolve(request: Request):
+    """解析账号标识页面"""
+    db = get_database()
+    history = db.get_sync_history("update_collection", limit=20)
+    return templates.TemplateResponse(request, "sync/resolve.html", context={
+        "request": request,
+        "history": history,
+        "page": "sync_resolve",
+    })
+
+
+@app.get("/sync/account", response_class=HTMLResponse)
+async def page_sync_account(request: Request):
+    """同步账号表页面"""
+    db = get_database()
+    history = db.get_sync_history("sync_account", limit=20)
+    return templates.TemplateResponse(request, "sync/account.html", context={
+        "request": request,
+        "history": history,
+        "page": "sync_account",
+    })
+
+
+@app.get("/sync/refresh", response_class=HTMLResponse)
+async def page_sync_refresh(request: Request):
+    """刷新账号资料页面"""
+    db = get_database()
+    history = db.get_sync_history("refresh_accounts", limit=20)
+    return templates.TemplateResponse(request, "sync/refresh.html", context={
+        "request": request,
+        "history": history,
+        "page": "sync_refresh",
+    })
+
+
+@app.get("/sync/cloud", response_class=HTMLResponse)
+async def page_sync_cloud(request: Request):
+    """云端同步页面"""
+    db = get_database()
+    history = db.get_sync_history("cloud_sync", limit=20)
+    feishu_ok = get_feishu() is not None
+    return templates.TemplateResponse(request, "sync/cloud.html", context={
+        "request": request,
+        "history": history,
+        "feishu_ok": feishu_ok,
+        "page": "sync_cloud",
     })
 
 
@@ -246,9 +341,11 @@ async def page_database(request: Request):
 @app.get("/table", response_class=HTMLResponse)
 async def page_table(request: Request):
     """表浏览页面 - 独立的数据表管理"""
+    import json as _json
     return templates.TemplateResponse(request, "table.html", context={
         "request": request,
         "page": "table",
+        "tags_mapping_json": _json.dumps(config._data.get("tags", {}), ensure_ascii=False),
     })
 
 
@@ -268,17 +365,6 @@ async def page_collect(request: Request):
         "accounts": accounts,
         "tasks": tasks,
         "page": "collect",
-    })
-
-
-@app.get("/history", response_class=HTMLResponse)
-async def page_history(request: Request):
-    h = get_history()
-    records = h.get_records(limit=200)
-    return templates.TemplateResponse(request, "history.html", context={
-        "request": request,
-        "records": records,
-        "page": "history",
     })
 
 
@@ -699,7 +785,7 @@ async def api_sync():
                     yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ [{i+1}/{len(entries)}] {account.name or sec_user_id}'})}\n\n"
                     
                     # 更新采集表状态
-                    s._update_collection_status(record_id, "已同步", "", sec_user_id)
+                    s._update_collection_status(record_id, "已解析", "", sec_user_id)
                     
                     # 让出控制权，避免阻塞
                     await asyncio.sleep(0)
@@ -778,10 +864,35 @@ async def api_sync_v2_import(request: Request):
         text = data.get("text", "")
         
         result = s.import_to_collection(text)
+        import_logs = [{"level": "info", "message": "开始导入采集表"}]
+        import_logs.extend({"level": "error", "message": err} for err in result.errors)
+        import_logs.extend({"level": "warning", "message": warning} for warning in result.warnings)
+        detail = (
+            f"写入 {result.success} 条"
+            f"（新增 {result.created}，更新 {result.updated}，恢复 {result.revived}），"
+            f"重复 {result.duplicates} 条，失败 {result.failed} 条，跳过 {result.skipped} 条"
+        )
+        summary = f"完成: {detail}"
+        import_logs.append({
+            "level": "ok" if result.failed == 0 else "error",
+            "message": summary,
+        })
+        # 保存到同步历史
+        db = get_database()
+        db.add_sync_history({
+            "task_type": "import_collection",
+            "status": "done" if result.failed == 0 else "failed",
+            "total": result.total,
+            "success": result.success,
+            "failed": result.failed,
+            "skipped": result.skipped,
+            "log_json": json.dumps(import_logs, ensure_ascii=False),
+        })
         return {
+            "message": f"导入完成: {detail}",
+            **result.to_dict(),
             "success": result.failed == 0,
-            "message": f"导入完成: 成功 {result.success} 条，失败 {result.failed} 条，跳过 {result.skipped} 条",
-            **result.to_dict()
+            "success_count": result.success,
         }
     except Exception as e:
         logger.error(f"导入失败: {e}")
@@ -867,7 +978,7 @@ async def _run_update_collection(task):
                 success += 1
                 tm.add_log(task.task_id, "OK 合并重复记录", "ok")
             else:
-                s.db.update_collection(collection["record_id"], {"sec_user_id": sec_user_id, "已同步": True, "同步错误": None})
+                s.db.update_collection(collection["record_id"], {"sec_user_id": sec_user_id, "已解析": True, "同步错误": None})
                 success += 1
                 tm.add_log(task.task_id, f"OK {share}: {sec_user_id}", "ok")
             tm.update(task.task_id, success=success, failed=failed)
@@ -903,7 +1014,7 @@ async def _run_sync_account(task):
         return
     tm.add_log(task.task_id, "开始同步账号表", "info")
     collections = s.db.get_all_collections()
-    to_process = [c for c in collections if c.get("已同步") and c.get("sec_user_id")]
+    to_process = [c for c in collections if s.is_ready_for_account(c)]
     tm.update(task.task_id, total=len(to_process))
     if not to_process:
         tm.add_log(task.task_id, "没有需要同步的记录（请先执行第二步解析账号标识）", "info")
@@ -914,10 +1025,9 @@ async def _run_sync_account(task):
     cookies = db.get_enabled_cookies()
     cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
     if not cookie_list:
-        tm.add_log(task.task_id, "Cookie 表为空,无法获取账号详情", "error")
-        tm.update(task.task_id, status="failed", error="Cookie 表为空")
-        return
-    tm.add_log(task.task_id, f"已加载 {len(cookie_list)} 个 Cookie", "info")
+        tm.add_log(task.task_id, "Cookie 表为空,仅同步账号基础数据,跳过详情获取", "warning")
+    else:
+        tm.add_log(task.task_id, f"已加载 {len(cookie_list)} 个 Cookie", "info")
     # 预检 TTD 服务是否可用(避免逐条等 15s 超时)
     ttd_available = False
     try:
@@ -943,15 +1053,12 @@ async def _run_sync_account(task):
         sec_user_id = collection["sec_user_id"]
         platform = collection.get("平台") or "抖音"
         existing_account = existing_accounts_map.get(sec_user_id)
-        # 已存在且已获取信息:跳过(避免重复处理)
-        if existing_account and existing_account.get("已获取信息"):
-            skipped += 1
-            tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
-            continue
+        # 跳过 API 调用的条件：账号表已有 且 已获取信息=是
+        skip_api = existing_account and existing_account.get("已获取信息")
         tm.add_log(task.task_id, f"[{i+1}/{len(to_process)}] {sec_user_id}", "info")
         try:
             if existing_account:
-                # 账号已存在但未获取信息:合并等级标签
+                # 账号已存在:合并等级标签（无论是否调API都执行）
                 new_level = s.merge_level(existing_account.get("等级"), collection.get("等级"))
                 existing_tags = json.loads(existing_account.get("标签", "[]")) if existing_account.get("标签") else []
                 new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
@@ -961,6 +1068,12 @@ async def _run_sync_account(task):
                     "标签": json.dumps(merged_tags),
                 })
                 account_id = existing_account["record_id"]
+                if skip_api:
+                    # 已获取过信息:只合并数据,不重复调API
+                    skipped += 1
+                    tm.add_log(task.task_id, f"SKIP {sec_user_id}: 已获取信息,仅合并等级标签", "info")
+                    tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
+                    continue
             else:
                 # 新账号:先复活软删除记录(如有),再插入
                 revived_id = db.revive_account_if_deleted(sec_user_id)
@@ -988,16 +1101,18 @@ async def _run_sync_account(task):
                     })
                     account_id = record_id
             # 获取账号详情
-            if not ttd_available:
+            if not ttd_available or not cookie_list:
                 skipped += 1
-                tm.add_log(task.task_id, f"SKIP {sec_user_id}: TTD 未运行", "error")
+                reason = "TTD 未运行" if not ttd_available else "Cookie 为空"
+                tm.add_log(task.task_id, f"SKIP {sec_user_id}: {reason}", "warning")
                 tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
                 continue
             cookie = cookie_list[i % len(cookie_list)]
             info = await s.collector.get_account_info(sec_user_id, platform, cookie)
             if not info or not info.get("nickname"):
                 failed += 1
-                reason = "TTD 返回空账号信息(服务不可用或超时)"
+                reason = info.get("_error") if info else "TTD 返回空"
+                s.db.update_account(account_id, {"获取错误": reason})
                 s.db.update_collection(collection["record_id"], {"同步错误": reason})
                 tm.add_log(task.task_id, f"X {sec_user_id}: {reason}", "error")
                 tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
@@ -1009,6 +1124,7 @@ async def _run_sync_account(task):
                 "签名": info.get("signature", ""),
                 "头像": info.get("avatar", ""),
                 "已获取信息": True,
+                "获取错误": None,
             })
             # 更新内存缓存
             existing_accounts_map[sec_user_id] = {
@@ -1054,107 +1170,96 @@ async def api_task_cancel(task_id: str):
     return {"success": ok, "message": "已请求取消" if ok else "任务不存在或已结束"}
 
 
+@app.get("/api/sync/history/{task_type}")
+async def api_sync_history(task_type: str):
+    """获取指定步骤的同步历史"""
+    db = get_database()
+    history = db.get_sync_history(task_type, limit=50)
+    return {"history": history}
+
+
 @app.post("/api/sync/v2/refresh-accounts")
 async def api_sync_v2_refresh_accounts():
-    """批量刷新账号表 — 重新获取所有账号的资料信息（账号名称、粉丝数、作品数等）"""
-    import json
-    from fastapi.responses import StreamingResponse
+    """批量刷新账号表 — 后台任务,立即返回 task_id"""
+    tm = get_task_manager()
+    task = tm.create("refresh_accounts")
+    asyncio.create_task(tm.run_serial(task, _run_refresh_accounts))
+    return {"task_id": task.task_id, "status": "pending", "message": "已加入队列"}
 
+
+async def _run_refresh_accounts(task):
+    """后台执行:获取未获取信息的账号的资料。串行队列内运行。"""
+    tm = get_task_manager()
     db = get_database()
-
-    async def refresh_stream():
+    tm.add_log(task.task_id, "开始获取账号资料", "info")
+    accounts = db.get_all_accounts()
+    to_fetch = [a for a in accounts if a.get("sec_user_id") and not a.get("已获取信息")]
+    tm.update(task.task_id, total=len(to_fetch))
+    if not to_fetch:
+        tm.add_log(task.task_id, "没有需要获取的账号", "info")
+        tm.add_log(task.task_id, "完成: 0 条", "ok")
+        return
+    tm.add_log(task.task_id, f"共 {len(to_fetch)} 个账号需要刷新", "info")
+    # 加载 Cookie
+    cookies = db.get_enabled_cookies()
+    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+    if not cookie_list:
+        tm.add_log(task.task_id, "Cookie 表为空,无法获取账号详情", "error")
+        tm.update(task.task_id, status="failed", error="Cookie 表为空")
+        return
+    tm.add_log(task.task_id, f"已加载 {len(cookie_list)} 个 Cookie", "info")
+    # 预检 TTD
+    ttd_available = False
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(f"http://127.0.0.1:{config.ttd_port}/")
+            if resp.status_code in (200, 307, 404):
+                ttd_available = True
+    except Exception:
+        ttd_available = False
+    if not ttd_available:
+        tm.add_log(task.task_id, "TTD 服务未运行,无法获取账号详情", "error")
+        tm.update(task.task_id, status="failed", error="TTD 服务未运行")
+        return
+    col = get_collector()
+    success = 0
+    failed = 0
+    for i, account in enumerate(to_fetch):
+        if tm.is_cancelled(task.task_id):
+            tm.update(task.task_id, status="cancelled")
+            return
+        sec_user_id = account["sec_user_id"]
+        old_name = account.get("账号名称") or sec_user_id[:20]
+        tm.add_log(task.task_id, f"[{i+1}/{len(to_fetch)}] {old_name}", "info")
         try:
-            yield f"data: {json.dumps({'type': 'start', 'message': '开始批量刷新账号资料'})}\n\n"
-
-            # 获取所有有 sec_user_id 的账号
-            accounts = db.get_all_accounts()
-            to_fetch = [a for a in accounts if a.get("sec_user_id")]
-
-            yield f"data: {json.dumps({'type': 'stats', 'total': len(to_fetch), 'success': 0, 'failed': 0})}\n\n"
-            yield f"data: {json.dumps({'type': 'progress', 'message': f'共 {len(to_fetch)} 个账号需要刷新'})}\n\n"
-
-            if not to_fetch:
-                yield f"data: {json.dumps({'type': 'complete', 'success': True, 'message': '没有需要刷新的账号', 'total': 0, 'success_count': 0, 'failed': 0})}\n\n"
-                return
-
-            # 加载 Cookie
-            cookies = db.get_enabled_cookies()
-            cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
-            if not cookie_list:
-                yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': 'Cookie 表为空，无法获取账号详情。请在 Cookie 表中添加有效的抖音 Cookie。'})}\n\n"
-                yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': 'Cookie 表为空', 'total': len(to_fetch), 'success_count': 0, 'failed': len(to_fetch)})}\n\n"
-                return
-            yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': f'已加载 {len(cookie_list)} 个 Cookie'})}\n\n"
-
-            # 预检 TTD 服务
-            config = Config()
-            ttd_available = False
-            try:
-                import httpx
-                async with httpx.AsyncClient(timeout=3) as client:
-                    resp = await client.get(f"http://127.0.0.1:{config.ttd_port}/")
-                    if resp.status_code in (200, 307, 404):
-                        ttd_available = True
-            except Exception:
-                ttd_available = False
-
-            if not ttd_available:
-                yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': 'TTD 服务未运行，请先在「状态」页面启动 TTD 服务。'})}\n\n"
-                yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': 'TTD 服务未运行', 'total': len(to_fetch), 'success_count': 0, 'failed': len(to_fetch)})}\n\n"
-                return
-
-            collector = Collector(ttd_url=f"http://127.0.0.1:{config.ttd_port}")
-            success = 0
-            failed = 0
-            skipped = 0
-            errors = []
-
-            for i, account in enumerate(to_fetch):
-                sec_user_id = account["sec_user_id"]
-                record_id = account.get("record_id", "")
-                old_name = account.get("账号名称") or sec_user_id[:20]
-
-                yield f"data: {json.dumps({'type': 'progress', 'message': f'刷新 [{i+1}/{len(to_fetch)}]: {old_name}'})}\n\n"
-
-                try:
-                    # 轮换 Cookie
-                    cookie = cookie_list[i % len(cookie_list)]
-
-                    info = await collector.get_account_info(sec_user_id, "抖音", cookie)
-
-                    nickname = info.get("nickname", "")
-                    if nickname:
-                        db.update_account(record_id, {
-                            "账号名称": nickname,
-                            "粉丝数": info.get("follower_count", 0),
-                            "作品数": info.get("aweme_count", 0),
-                            "签名": info.get("signature", ""),
-                            "头像": info.get("avatar", ""),
-                            "已获取信息": True,
-                        })
-                        success += 1
-                        msg = f'✅ {nickname} | 粉丝 {info.get("follower_count", 0)} | 作品 {info.get("aweme_count", 0)}'
-                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': msg}, ensure_ascii=False)}\n\n"
-                    else:
-                        failed += 1
-                        errors.append(f"{sec_user_id[:30]}: 无法获取资料")
-                        yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {old_name}: 无法获取资料'})}\n\n"
-
-                    # 更新统计
-                    yield f"data: {json.dumps({'type': 'stats', 'total': len(to_fetch), 'success': success, 'failed': failed})}\n\n"
-
-                except Exception as e:
-                    failed += 1
-                    errors.append(f"{sec_user_id[:30]}: {e}")
-                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {old_name}: {e}'})}\n\n"
-
-            yield f"data: {json.dumps({'type': 'complete', 'success': failed == 0, 'message': f'刷新完成: 成功 {success} 条，失败 {failed} 条', 'total': len(to_fetch), 'success_count': success, 'failed': failed, 'errors': errors[:5]})}\n\n"
-
+            cookie = cookie_list[i % len(cookie_list)]
+            platform = account.get("平台") or "抖音"
+            info = await col.get_account_info(sec_user_id, platform, cookie)
+            nickname = info.get("nickname", "") if info else ""
+            if nickname:
+                db.update_account(account.get("record_id", ""), {
+                    "账号名称": nickname,
+                    "粉丝数": info.get("follower_count", 0),
+                    "作品数": info.get("aweme_count", 0),
+                    "签名": info.get("signature", ""),
+                    "头像": info.get("avatar", ""),
+                    "已获取信息": True,
+                    "获取错误": None,
+                })
+                success += 1
+                tm.add_log(task.task_id, f"OK {nickname} | 粉丝 {info.get('follower_count', 0)} | 作品 {info.get('aweme_count', 0)}", "ok")
+            else:
+                failed += 1
+                reason = info.get("_error", "无法获取资料") if info else "TTD 返回空"
+                db.update_account(account.get("record_id", ""), {"获取错误": reason})
+                tm.add_log(task.task_id, f"X {old_name}: {reason}", "error")
+            tm.update(task.task_id, success=success, failed=failed)
+            await asyncio.sleep(0.5)
         except Exception as e:
-            logger.error(f"批量刷新账号失败: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'刷新失败: {str(e)}', 'total': 0, 'success_count': 0, 'failed': 1, 'errors': [str(e)]})}\n\n"
-
-    return StreamingResponse(refresh_stream(), media_type="text/event-stream")
+            failed += 1
+            tm.add_log(task.task_id, f"X {old_name}: {e}", "error")
+            tm.update(task.task_id, success=success, failed=failed)
+    tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed}", "info")
 
 
 @app.post("/api/sync/v2/all")
@@ -1721,142 +1826,157 @@ async def api_database_stats_detailed():
     return {"success": True, "data": stats}
 
 
-# --- 云端同步（v2 路由定义在文件后面）---
-
-
-# --- 云端同步（v2）---
-
-def _run_feishu_sync_sse(steps):
-    """通用云端同步 SSE 生成器。
-    steps: [(label, callable), ...] - callable 返回 dict（单步）或 dict[str, dict]（多步合并）
-    """
-    import json, asyncio
-
-    async def stream():
-        try:
-            total = len(steps)
-            all_errors = []
-            results = {}
-            yield f"data: {json.dumps({'type': 'start', 'message': '开始同步', 'total': total}, ensure_ascii=False)}\n\n"
-
-            for i, (label, fn) in enumerate(steps):
-                yield f"data: {json.dumps({'type': 'progress', 'message': f'[{i+1}/{total}] {label}...'}, ensure_ascii=False)}\n\n"
-                try:
-                    r = await asyncio.to_thread(fn)
-                    # r 可能是单步 dict 或 {label: dict} 形式的多步结果
-                    if r and all(isinstance(v, dict) and not any(k in v for k in ("created", "updated", "failed")) for v in r.values()):
-                        # 多步结果（sync_incremental / sync_full_*）
-                        step_errors = []
-                        for sub_label, sub_r in r.items():
-                            sub_created = sub_r.get("created", 0)
-                            sub_updated = sub_r.get("updated", 0)
-                            sub_deleted = sub_r.get("deleted", 0)
-                            sub_uptodate = sub_r.get("skipped_uptodate", 0)
-                            sub_duplicate = sub_r.get("skipped_duplicate", 0)
-                            sub_invalid = sub_r.get("skipped_invalid", 0)
-                            sub_failed = sub_r.get("failed", 0)
-                            sub_errs = sub_r.get("errors", [])
-                            all_errors.extend(sub_errs)
-                            results[sub_label] = {
-                                "created": sub_created, "updated": sub_updated, "deleted": sub_deleted,
-                                "uptodate": sub_uptodate, "duplicate": sub_duplicate,
-                                "invalid": sub_invalid, "failed": sub_failed,
-                            }
-                            parts = []
-                            if sub_created: parts.append(f"新增 {sub_created}")
-                            if sub_updated: parts.append(f"更新 {sub_updated}")
-                            if sub_deleted: parts.append(f"删除 {sub_deleted}")
-                            if sub_uptodate: parts.append(f"已最新 {sub_uptodate}")
-                            if sub_duplicate: parts.append(f"重复 {sub_duplicate}")
-                            if sub_invalid: parts.append(f"无效 {sub_invalid}")
-                            if sub_failed: parts.append(f"失败 {sub_failed}")
-                            msg_text = "，".join(parts) if parts else "无变化"
-                            level = "error" if sub_failed > 0 else "ok"
-                            icon = "⚠️" if sub_failed > 0 else "✅"
-                            yield f"data: {json.dumps({'type': 'log', 'level': level, 'message': f'{icon} {sub_label}: {msg_text}'}, ensure_ascii=False)}\n\n"
-                    else:
-                        # 单步结果
-                        created = r.get("created", 0)
-                        updated = r.get("updated", 0)
-                        deleted = r.get("deleted", 0)
-                        uptodate = r.get("skipped_uptodate", 0)
-                        duplicate = r.get("skipped_duplicate", 0)
-                        invalid = r.get("skipped_invalid", 0)
-                        failed = r.get("failed", 0)
-                        all_errors.extend(r.get("errors", []))
-                        results[label] = {
-                            "created": created, "updated": updated, "deleted": deleted,
-                            "uptodate": uptodate, "duplicate": duplicate,
-                            "invalid": invalid, "failed": failed,
-                        }
-                        if failed > 0:
-                            parts = []
-                            if created: parts.append(f"新增 {created}")
-                            if updated: parts.append(f"更新 {updated}")
-                            if deleted: parts.append(f"删除 {deleted}")
-                            if uptodate: parts.append(f"已最新 {uptodate}")
-                            if duplicate: parts.append(f"重复 {duplicate}")
-                            if invalid: parts.append(f"无效 {invalid}")
-                            if failed: parts.append(f"失败 {failed}")
-                            msg_text = "，".join(parts)
-                            yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'⚠️ {label}: {msg_text}'}, ensure_ascii=False)}\n\n"
-                        else:
-                            parts = []
-                            if created: parts.append(f"新增 {created}")
-                            if updated: parts.append(f"更新 {updated}")
-                            if deleted: parts.append(f"删除 {deleted}")
-                            if uptodate: parts.append(f"已最新 {uptodate}")
-                            if duplicate: parts.append(f"重复 {duplicate}")
-                            if invalid: parts.append(f"无效 {invalid}")
-                            msg_text = "，".join(parts) if parts else "无变化"
-                            yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ {label}: {msg_text}'}, ensure_ascii=False)}\n\n"
-                    yield f"data: {json.dumps({'type': 'stats', 'step': i+1, 'total': total})}\n\n"
-                except Exception as e:
-                    all_errors.append(f"{label}: {e}")
-                    logger.exception(f"同步步骤失败: {label}")
-                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {label}: {e}'}, ensure_ascii=False)}\n\n"
-
-            summary = "同步完成" + (f"，{len(all_errors)} 个错误" if all_errors else "")
-            yield f"data: {json.dumps({'type': 'complete', 'success': len(all_errors) == 0, 'message': summary, 'results': results, 'errors': all_errors[:10]}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            logger.error(f"云端同步失败: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'同步失败: {str(e)}'})}\n\n"
-
-    return StreamingResponse(stream(), media_type="text/event-stream")
+# --- 云端同步（后台任务）---
 
 
 @app.post("/api/feishu/sync")
 async def api_feishu_sync():
-    """增量同步：本地 ↔ 云端 双向 6 步（采集/账号/Cookie × 2 方向）"""
+    """增量同步：本地 ↔ 云端 双向 6 步 — 后台任务"""
     fs = get_feishu_syncer()
     if not fs:
         return JSONResponse({"success": False, "message": "云端未配置"}, status_code=400)
-    return _run_feishu_sync_sse(fs.get_incremental_steps())
+    tm = get_task_manager()
+    task = tm.create("cloud_sync")
+    asyncio.create_task(tm.run_serial(task, _run_cloud_sync))
+    return {"task_id": task.task_id, "status": "pending", "message": "已加入队列"}
 
 
 @app.post("/api/feishu/sync/full")
 async def api_feishu_sync_full(request: Request):
-    """全盘同步：以一端为基准覆盖另一端（核武器，需二次确认）
-
-    Body: {"direction": "to-feishu" | "from-feishu"}
-    """
+    """全盘同步：以一端为基准覆盖另一端 — 后台任务"""
     fs = get_feishu_syncer()
     if not fs:
         return JSONResponse({"success": False, "message": "云端未配置"}, status_code=400)
-
     try:
         data = await request.json()
     except Exception:
         data = {}
     direction = data.get("direction", "")
-
     if direction not in ("to-feishu", "from-feishu"):
         return JSONResponse({
             "success": False,
             "message": "参数 direction 必须是 to-feishu 或 from-feishu",
         }, status_code=400)
+    tm = get_task_manager()
+    task = tm.create("cloud_sync_full")
+    task._direction = direction
+    asyncio.create_task(tm.run_serial(task, _run_cloud_sync_full))
+    return {"task_id": task.task_id, "status": "pending", "message": "已加入队列"}
 
-    return _run_feishu_sync_sse(fs.get_full_steps(direction))
+
+async def _run_cloud_sync(task):
+    """后台执行:增量云端同步(6步双向)"""
+    import asyncio as _aio
+    tm = get_task_manager()
+    fs = get_feishu_syncer()
+    if not fs:
+        tm.add_log(task.task_id, "云端未配置", "error")
+        tm.update(task.task_id, status="failed", error="云端未配置")
+        return
+    tm.add_log(task.task_id, "开始增量云端同步(6步双向)", "info")
+    steps = fs.get_incremental_steps()
+    tm.update(task.task_id, total=len(steps))
+    success = 0
+    failed = 0
+    for i, (label, fn) in enumerate(steps):
+        if tm.is_cancelled(task.task_id):
+            tm.update(task.task_id, status="cancelled")
+            return
+        tm.add_log(task.task_id, f"[{i+1}/{len(steps)}] {label}", "info")
+        try:
+            r = await _aio.to_thread(fn)
+            if r and all(isinstance(v, dict) and not any(k in v for k in ("created", "updated", "failed")) for v in r.values()):
+                for sub_label, sub_r in r.items():
+                    parts = []
+                    if sub_r.get("created"): parts.append(f"新增 {sub_r['created']}")
+                    if sub_r.get("updated"): parts.append(f"更新 {sub_r['updated']}")
+                    if sub_r.get("deleted"): parts.append(f"删除 {sub_r['deleted']}")
+                    if sub_r.get("skipped_uptodate"): parts.append(f"已最新 {sub_r['skipped_uptodate']}")
+                    if sub_r.get("failed"): parts.append(f"失败 {sub_r['failed']}")
+                    msg = "，".join(parts) if parts else "无变化"
+                    lvl = "ok" if not sub_r.get("failed") else "error"
+                    tm.add_log(task.task_id, f"{'OK' if lvl=='ok' else 'X'} {sub_label}: {msg}", lvl)
+                    if sub_r.get("failed"):
+                        failed += 1
+                    else:
+                        success += 1
+            else:
+                parts = []
+                if r.get("created"): parts.append(f"新增 {r['created']}")
+                if r.get("updated"): parts.append(f"更新 {r['updated']}")
+                if r.get("deleted"): parts.append(f"删除 {r['deleted']}")
+                if r.get("skipped_uptodate"): parts.append(f"已最新 {r['skipped_uptodate']}")
+                if r.get("failed"): parts.append(f"失败 {r['failed']}")
+                msg = "，".join(parts) if parts else "无变化"
+                lvl = "ok" if not r.get("failed") else "error"
+                tm.add_log(task.task_id, f"{'OK' if lvl=='ok' else 'X'} {label}: {msg}", lvl)
+                if r.get("failed"):
+                    failed += 1
+                else:
+                    success += 1
+            tm.update(task.task_id, success=success, failed=failed)
+        except Exception as e:
+            failed += 1
+            tm.add_log(task.task_id, f"X {label}: {e}", "error")
+            tm.update(task.task_id, success=success, failed=failed)
+    tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed}", "info")
+
+
+async def _run_cloud_sync_full(task):
+    """后台执行:全盘云端同步"""
+    import asyncio as _aio
+    tm = get_task_manager()
+    fs = get_feishu_syncer()
+    if not fs:
+        tm.add_log(task.task_id, "云端未配置", "error")
+        tm.update(task.task_id, status="failed", error="云端未配置")
+        return
+    direction = getattr(task, '_direction', 'to-feishu')
+    tm.add_log(task.task_id, f"开始全盘同步({direction})", "info")
+    steps = fs.get_full_steps(direction)
+    tm.update(task.task_id, total=len(steps))
+    success = 0
+    failed = 0
+    for i, (label, fn) in enumerate(steps):
+        if tm.is_cancelled(task.task_id):
+            tm.update(task.task_id, status="cancelled")
+            return
+        tm.add_log(task.task_id, f"[{i+1}/{len(steps)}] {label}", "info")
+        try:
+            r = await _aio.to_thread(fn)
+            if r and all(isinstance(v, dict) and not any(k in v for k in ("created", "updated", "failed")) for v in r.values()):
+                for sub_label, sub_r in r.items():
+                    parts = []
+                    if sub_r.get("created"): parts.append(f"新增 {sub_r['created']}")
+                    if sub_r.get("updated"): parts.append(f"更新 {sub_r['updated']}")
+                    if sub_r.get("deleted"): parts.append(f"删除 {sub_r['deleted']}")
+                    if sub_r.get("failed"): parts.append(f"失败 {sub_r['failed']}")
+                    msg = "，".join(parts) if parts else "无变化"
+                    lvl = "ok" if not sub_r.get("failed") else "error"
+                    tm.add_log(task.task_id, f"{'OK' if lvl=='ok' else 'X'} {sub_label}: {msg}", lvl)
+                    if sub_r.get("failed"):
+                        failed += 1
+                    else:
+                        success += 1
+            else:
+                parts = []
+                if r.get("created"): parts.append(f"新增 {r['created']}")
+                if r.get("updated"): parts.append(f"更新 {r['updated']}")
+                if r.get("deleted"): parts.append(f"删除 {r['deleted']}")
+                if r.get("failed"): parts.append(f"失败 {r['failed']}")
+                msg = "，".join(parts) if parts else "无变化"
+                lvl = "ok" if not r.get("failed") else "error"
+                tm.add_log(task.task_id, f"{'OK' if lvl=='ok' else 'X'} {label}: {msg}", lvl)
+                if r.get("failed"):
+                    failed += 1
+                else:
+                    success += 1
+            tm.update(task.task_id, success=success, failed=failed)
+        except Exception as e:
+            failed += 1
+            tm.add_log(task.task_id, f"X {label}: {e}", "error")
+            tm.update(task.task_id, success=success, failed=failed)
+    tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed}", "info")
 
 
 # --- 采集（使用新数据库）---

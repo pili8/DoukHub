@@ -1,4 +1,5 @@
 """Downloader API 服务进程管理"""
+import logging
 import subprocess
 import sys
 import time
@@ -25,7 +26,9 @@ class DownloaderService:
         self.startup_cmd = startup_cmd
         self.repo_url = repo_url
         self.process: Optional[subprocess.Popen] = None
-        self._client = httpx.Client(timeout=5)
+        self._client = httpx.Client(timeout=3)
+        self._fail_count = 0
+        self._log_path = self.path / "logs" / f"doukhub_{self.name}.log"
 
     @property
     def base_url(self) -> str:
@@ -33,12 +36,7 @@ class DownloaderService:
 
     @property
     def is_running(self) -> bool:
-        """检测服务是否在运行"""
-        if self.process and self.process.poll() is not None:
-            self.process = None
-        if self.process:
-            return True
-        # 也检查端口是否已被占用（可能用户手动启动了）
+        """HTTP-only check: process alive does not mean service is responsive"""
         try:
             resp = self._client.get(f"{self.base_url}/")
             return resp.status_code in (200, 307, 404)
@@ -69,7 +67,25 @@ class DownloaderService:
                     "import asyncio\n"
                     "import aiosqlite\n"
                     "from src.application import TikTokDownloader\n"
+                    "from src.application.main_server import APIServer\n"
                     "from src.custom import PROJECT_ROOT\n\n"
+                    "# Patch: add /douyin/user/profile endpoint for DoukHub account sync\n"
+                    "_orig = APIServer.setup_routes\n"
+                    "def _patched(self):\n"
+                    "    _orig(self)\n"
+                    "    from fastapi import Body\n"
+                    "    @self.server.post('/douyin/user/profile')\n"
+                    "    async def _profile(payload: dict = Body(...)):\n"
+                    "        sid = payload.get('sec_user_id', '')\n"
+                    "        ck = payload.get('cookie', '') or None\n"
+                    "        if not sid:\n"
+                    "            return {'data': None, 'message': 'sec_user_id required'}\n"
+                    "        try:\n"
+                    "            info = await self._get_user_data(sid, cookie=ck)\n"
+                    "            return {'data': info, 'message': 'OK' if info else 'no data'}\n"
+                    "        except Exception as e:\n"
+                    "            return {'data': None, 'message': str(e)}\n"
+                    "APIServer.setup_routes = _patched\n\n"
                     "async def init_db():\n"
                     "    db_file = PROJECT_ROOT / 'DouK-Downloader.db'\n"
                     "    async with aiosqlite.connect(db_file) as db:\n"
@@ -96,19 +112,23 @@ class DownloaderService:
                     "    asyncio.run(main())\n",
                     encoding="utf-8",
                 )
+                self.path.joinpath('logs').mkdir(exist_ok=True)
+                log_file = open(self._log_path, 'w', encoding='utf-8')
                 self.process = subprocess.Popen(
                     [python, str(launcher)],
                     cwd=str(self.path),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=log_file,
+                    stderr=log_file,
                 )
             else:
                 # XHS-Downloader: python main.py API
+                self.path.joinpath('logs').mkdir(exist_ok=True)
+                log_file = open(self._log_path, 'w', encoding='utf-8')
                 self.process = subprocess.Popen(
                     [python, str(main_py), "API"],
                     cwd=str(self.path),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=log_file,
+                    stderr=log_file,
                 )
 
             # 等待服务启动
@@ -138,6 +158,22 @@ class DownloaderService:
             self.process.kill()
             self.process = None
             return {"success": False, "message": f"{self.name} 强制停止: {e}"}
+
+
+    def health_check(self) -> dict:
+        """Heartbeat: restart service after 2 consecutive HTTP failures"""
+        if self.is_running:
+            self._fail_count = 0
+            return {"healthy": True}
+        self._fail_count += 1
+        logging.info(f"{self.name} health check failed ({self._fail_count}/2)")
+        if self._fail_count >= 2:
+            logging.warning(f"{self.name} unresponsive, auto-restarting...")
+            self.stop()
+            result = self.start()
+            self._fail_count = 0
+            return {"healthy": False, "restarted": True, "message": result.get("message", "")}
+        return {"healthy": False}
 
     def status(self) -> dict:
         """获取服务状态"""

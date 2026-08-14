@@ -156,10 +156,10 @@ def test_values_equal_int_fields(syncer):
 
 
 def test_values_equal_bool_fields(syncer):
-    assert syncer._values_equal("已同步", True, True) is True
-    assert syncer._values_equal("已同步", True, "true") is True
-    assert syncer._values_equal("已同步", False, 0) is True
-    assert syncer._values_equal("已同步", True, False) is False
+    assert syncer._values_equal("已解析", True, True) is True
+    assert syncer._values_equal("已解析", True, "true") is True
+    assert syncer._values_equal("已解析", False, 0) is True
+    assert syncer._values_equal("已解析", True, False) is False
 
 
 def test_values_equal_tags_field(syncer):
@@ -177,24 +177,24 @@ def test_values_equal_tags_field(syncer):
 def test_compute_field_updates_local_wins(syncer, db):
     """API 字段（local_wins）：本地值优先，应该推送到飞书
 
-    注意：账号表的「粉丝数/昵称」是 API 字段（本地赢）
+    注意：账号表的「粉丝数」是 API 字段（本地赢）；「账号名称」按 LWW 处理
     """
     db.insert_account({
         "record_id": "r1", "sec_user_id": "sec1",
-        "粉丝数": 200, "昵称": "new_name",
+        "粉丝数": 200, "账号名称": "new_name",
     })
     local = db.get_account_by_id("r1")
     # 飞书：粉丝数=100（旧），本地：粉丝数=200（新）
     feishu_record = {
         "record_id": "r1",
-        "fields": {"sec_user_id": "sec1", "粉丝数": 100, "昵称": "old_name"},
+        "fields": {"sec_user_id": "sec1", "粉丝数": 100, "账号名称": "old_name"},
     }
     to_feishu, to_local = syncer._compute_field_updates("account_cache", local, feishu_record)
-    # API 字段（粉丝数、昵称）应该推送本地值到飞书
+    # API 字段（粉丝数）应该推送本地值到飞书
     assert "粉丝数" in to_feishu
     assert to_feishu["粉丝数"] == 200
-    assert "昵称" in to_feishu
-    assert to_feishu["昵称"] == "new_name"
+    assert "账号名称" not in to_feishu
+    assert to_local["账号名称"] == "old_name"
 
 
 def test_compute_field_updates_collection_account_name_feishu_wins(syncer, db):
@@ -202,7 +202,7 @@ def test_compute_field_updates_collection_account_name_feishu_wins(syncer, db):
 
     用户在飞书改账号名称 → 应该同步到本地（不会被本地覆盖）
     """
-    db.insert_collection({"record_id": "r1", "分享码": "abc", "账号名称": "old_name"})
+    db.insert_collection({"record_id": "r1", "share_code": "abc", "账号名称": "old_name"})
     local = db.get_collection_by_id("r1")
     feishu_record = {
         "record_id": "r1",
@@ -232,7 +232,7 @@ def test_compute_field_updates_account_account_name_feishu_wins(syncer, db):
 
 def test_compute_field_updates_feishu_wins(syncer, db):
     """人工字段（feishu_wins）：飞书值优先，应该更新本地"""
-    db.insert_collection({"record_id": "r1", "分享码": "abc", "等级": 3, "备注": "old"})
+    db.insert_collection({"record_id": "r1", "share_code": "abc", "等级": 3, "备注": "old"})
     local = db.get_collection_by_id("r1")
     # 飞书：等级=4（用户改的），本地：等级=3
     feishu_record = {
@@ -249,7 +249,7 @@ def test_compute_field_updates_feishu_wins(syncer, db):
 
 def test_compute_field_updates_no_diff(syncer, db):
     """两端值相同，应该没有更新"""
-    db.insert_collection({"record_id": "r1", "分享码": "abc", "等级": 3, "备注": "x"})
+    db.insert_collection({"record_id": "r1", "share_code": "abc", "等级": 3, "备注": "x"})
     local = db.get_collection_by_id("r1")
     feishu_record = {
         "record_id": "r1",
@@ -261,19 +261,20 @@ def test_compute_field_updates_no_diff(syncer, db):
 
 
 def test_compute_field_updates_account_local_wins(syncer, db):
-    """账号表：API 字段（粉丝数等）本地赢"""
+    """账号表：API 字段（粉丝数等）本地赢；账号名称按 LWW 处理"""
     db.insert_account({
         "record_id": "a1", "sec_user_id": "sec1",
-        "粉丝数": 1000, "昵称": "new_name",
+        "粉丝数": 1000, "账号名称": "new_name",
     })
     local = db.get_account_by_id("a1")
     feishu_record = {
         "record_id": "a1",
-        "fields": {"sec_user_id": "sec1", "粉丝数": 500, "昵称": "old_name"},
+        "fields": {"sec_user_id": "sec1", "粉丝数": 500, "账号名称": "old_name"},
     }
     to_feishu, to_local = syncer._compute_field_updates("account_cache", local, feishu_record)
     assert to_feishu.get("粉丝数") == 1000
-    assert to_feishu.get("昵称") == "new_name"
+    assert "账号名称" not in to_feishu
+    assert to_local.get("账号名称") == "old_name"
 
 
 def test_compute_field_updates_account_feishu_wins(syncer, db):
@@ -304,7 +305,7 @@ def test_business_keys_defined():
     assert "collection_cache" in FeishuSyncer.BUSINESS_KEYS
     assert "account_cache" in FeishuSyncer.BUSINESS_KEYS
     assert "cookie_cache" in FeishuSyncer.BUSINESS_KEYS
-    assert FeishuSyncer.BUSINESS_KEYS["collection_cache"] == "分享码"
+    assert FeishuSyncer.BUSINESS_KEYS["collection_cache"] == "share_code"
     assert FeishuSyncer.BUSINESS_KEYS["account_cache"] == "sec_user_id"
     assert FeishuSyncer.BUSINESS_KEYS["cookie_cache"] == "Cookie"
 
@@ -332,8 +333,8 @@ def test_field_ownership_disjoint():
 def test_build_collection_fields(syncer, db):
     """采集表字段构建应包含所有必要字段"""
     db.insert_collection({
-        "record_id": "r1", "分享码": "abc", "平台": "抖音", "等级": 3,
-        "标签": '["个"]', "sec_user_id": "sec1", "昵称": "name",
+        "record_id": "r1", "share_code": "abc", "平台": "抖音", "等级": 3,
+        "标签": '["个"]', "sec_user_id": "sec1", "账号名称": "name",
         "粉丝数": 100, "作品数": 50, "备注": "test",
     })
     local = db.get_collection_by_id("r1")
@@ -376,7 +377,7 @@ def test_feishu_record_to_local_collection(syncer):
     }
     data = syncer._feishu_record_to_local_collection(record)
     assert data is not None
-    assert data["分享码"] == "abc"
+    assert data["share_code"] == "abc"
     assert data["平台"] == "抖音"
     assert data["等级"] == 3
     assert data["sec_user_id"] == "sec1"
@@ -574,8 +575,8 @@ def test_field_ownership_collection_synced_is_local_wins():
     修正原因：之前归 feishu_wins（现 lww）会导致步骤3 写入后被飞书覆盖
     """
     ownership = FeishuSyncer.FIELD_OWNERSHIP["collection_cache"]
-    assert "已同步" in ownership["local_wins"]
-    assert "已同步" not in ownership["lww"]
+    assert "已解析" in ownership["local_wins"]
+    assert "已解析" not in ownership["lww"]
 
 
 # ========== sync_incremental 入口（mock 网络） ==========
@@ -601,7 +602,7 @@ def test_sync_incremental_handles_empty_tables(syncer, monkeypatch):
 
 def test_sync_incremental_creates_local_to_feishu(syncer, db, monkeypatch):
     """本地有飞书没有的记录 → 创建到飞书"""
-    db.insert_collection({"record_id": "local1", "分享码": "abc", "等级": 3})
+    db.insert_collection({"record_id": "local1", "share_code": "abc", "等级": 3})
 
     syncer.feishu.get_all_records.return_value = []  # 飞书空
     syncer.feishu.batch_create_records.return_value = {
@@ -619,8 +620,8 @@ def test_sync_incremental_creates_local_to_feishu(syncer, db, monkeypatch):
 
 def test_sync_incremental_propagates_feishu_deletion(syncer, db, monkeypatch):
     """飞书删除 → 本地 synced=1 但飞书没有 → 删本地（飞书端有其他记录）"""
-    db.insert_collection({"record_id": "r1", "分享码": "abc", "等级": 3, "synced": True})
-    db.insert_collection({"record_id": "r2", "分享码": "xyz", "等级": 3, "synced": True})
+    db.insert_collection({"record_id": "r1", "share_code": "abc", "等级": 3, "synced": True})
+    db.insert_collection({"record_id": "r2", "share_code": "xyz", "等级": 3, "synced": True})
 
     # 飞书还有 r2，但 r1 不见了（说明用户在飞书端删了 r1）
     syncer.feishu.get_all_records.return_value = [
@@ -732,7 +733,7 @@ def test_sync_to_feishu_merges_by_business_key_when_record_id_differs(syncer, db
     场景：本地新建 local_abc（synced=0），飞书有 fs_abc（业务键相同）
     正确行为：按业务键匹配，不重复创建飞书，更新本地 record_id=fs_abc
     """
-    db.insert_collection({"record_id": "local_abc", "分享码": "ABC", "等级": 3})
+    db.insert_collection({"record_id": "local_abc", "share_code": "ABC", "等级": 3})
 
     # 飞书有相同分享码 ABC（record_id 不同）
     syncer.feishu.get_all_records.return_value = [
@@ -861,7 +862,7 @@ def test_sync_to_feishu_does_not_resurrect_feishu_deletion(syncer, db, monkeypat
 
 def test_sync_incremental_skips_unsynced_local_records(syncer, db, monkeypatch):
     """本地新建未同步（synced=0）的记录，即使飞书空，也不会被误删"""
-    db.insert_collection({"record_id": "local1", "分享码": "abc", "等级": 3})  # synced=0 默认
+    db.insert_collection({"record_id": "local1", "share_code": "abc", "等级": 3})  # synced=0 默认
 
     syncer.feishu.get_all_records.return_value = []
     syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
@@ -882,7 +883,7 @@ def test_sync_incremental_pushes_local_tombstones(syncer, db, monkeypatch):
     - 第 2 次调用（_sync_to_feishu 主流程拉取飞书做比对）：返回空
     - 后续调用（_sync_from_feishu）：返回空
     """
-    db.insert_collection({"record_id": "r1", "分享码": "abc", "等级": 3, "synced": True})
+    db.insert_collection({"record_id": "r1", "share_code": "abc", "等级": 3, "synced": True})
     db.delete_collection("r1")  # 软删除
 
     call_count = {"n": 0}
@@ -916,7 +917,7 @@ def test_sync_incremental_empty_feishu_skips_deletion(syncer, db, monkeypatch):
     场景：本地有 synced=1 的记录，飞书返回空（可能是 API 异常）
     预期：不会误删本地的 synced 记录
     """
-    db.insert_collection({"record_id": "r1", "分享码": "abc", "等级": 3, "synced": True})
+    db.insert_collection({"record_id": "r1", "share_code": "abc", "等级": 3, "synced": True})
 
     syncer.feishu.get_all_records.return_value = []  # 飞书返回空
     syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
@@ -933,8 +934,8 @@ def test_sync_incremental_empty_feishu_skips_deletion(syncer, db, monkeypatch):
 
 def test_sync_full_to_feishu_clears_and_pushes(syncer, db, monkeypatch):
     """全盘：本地→飞书，应清空飞书 + 推送本地全部"""
-    db.insert_collection({"record_id": "r1", "分享码": "abc"})
-    db.insert_collection({"record_id": "r2", "分享码": "def"})
+    db.insert_collection({"record_id": "r1", "share_code": "abc"})
+    db.insert_collection({"record_id": "r2", "share_code": "def"})
 
     syncer.feishu.get_all_records.return_value = [
         {"record_id": "old1", "fields": {}},  # 旧的会被删
@@ -954,7 +955,7 @@ def test_sync_full_to_feishu_clears_and_pushes(syncer, db, monkeypatch):
 
 def test_sync_full_from_feishu_clears_and_inserts(syncer, db, monkeypatch):
     """全盘：飞书→本地，应清空本地 + 插入飞书全部"""
-    db.insert_collection({"record_id": "local1", "分享码": "old"})
+    db.insert_collection({"record_id": "local1", "share_code": "old"})
     db.insert_account({"record_id": "a1", "sec_user_id": "sec1"})
 
     syncer.feishu.get_all_records.return_value = [
@@ -971,7 +972,7 @@ def test_sync_full_from_feishu_clears_and_inserts(syncer, db, monkeypatch):
     collections = db.get_all_collections()
     assert len(collections) == 1
     assert collections[0]["record_id"] == "fs1"
-    assert collections[0]["分享码"] == "new_share"
+    assert collections[0]["share_code"] == "new_share"
 
 
 # ========== 方案 B：LWW 时间戳测试 ==========
@@ -1064,7 +1065,7 @@ def test_lww_missing_feishu_timestamp(syncer, db):
 def test_lww_local_wins_field_still_pushed(syncer, db):
     """LWW 字段如果本地赢，仍然推送到飞书"""
     db.insert_collection({
-        "record_id": "r1", "分享码": "abc", "等级": 5,
+        "record_id": "r1", "share_code": "abc", "等级": 5,
         "synced": True,
         "local_updated_at": "2026-07-17 12:00:00",
     })

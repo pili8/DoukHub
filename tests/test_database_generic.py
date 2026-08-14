@@ -123,6 +123,22 @@ def test_query_table_pagination(db):
     assert r["total"] == 5
 
 
+def test_table_counts_exclude_soft_deleted_rows(db):
+    db.insert_collection({"record_id": "c1", "share_code": "a"})
+    db.insert_collection({"record_id": "c2", "share_code": "b"})
+    db.delete_collection("c2")
+
+    assert db.get_table_counts()["collection_cache"] == 1
+
+
+def test_collection_resolved_is_independent_action_feedback(db):
+    db.insert_collection({"record_id": "c1", "share_code": "a", "sec_user_id": "sec1", "已解析": 0})
+
+    db.update_collection("c1", {"已解析": 0})
+
+    assert db.get_collection_by_id("c1")["已解析"] in (0, False)
+
+
 # ========== update_record_field 启用开关 ==========
 
 def test_update_record_field_enable(db):

@@ -93,9 +93,9 @@
                 <div class="stats-title"><i class="ph ph-clipboard-text"></i> 采集表</div>
                 <div class="stats-num" style="color:var(--accent);">${coll.total || 0}</div>
                 <div class="stats-sub">
-                    <span class="ok">已同步 ${coll.synced || 0}</span>
-                    <span class="warn">未同步 ${coll.not_synced || 0}</span>
-                    ${coll.has_error ? `<span class="err">有错误 ${coll.has_error}</span>` : ''}
+<span class="ok">已解析 ${coll.resolved || 0}</span>
+<span class="warn">未解析 ${coll.not_synced || 0}</span>
+${coll.has_error ? `<span class="err">有错误 ${coll.has_error}</span>` : ''}
                 </div>
             </div>`;
             const acc = s.account_cache || {};
