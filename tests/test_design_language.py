@@ -274,3 +274,11 @@ def test_settings_page_preserves_system_controls_and_api_calls(app_env):
     assert '<button type="button" onclick="exitSystem()"' in response.text
     assert "await apiCall('/api/system/restart', 'POST');" in response.text
     assert "await apiCall('/api/system/exit', 'POST');" in response.text
+
+
+def test_theme_material_is_no_longer_the_canonical_asset(app_env):
+    client, *_ = app_env
+    response = client.get("/collect")
+    assert 'href="/static/css/style.css?v=5"' in response.text
+    assert "theme-material.css" not in response.text
+    assert "workflow-panel" in response.text

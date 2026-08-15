@@ -1573,3 +1573,7 @@ except CookieExpiredError:
 ## 统一工作流界面验证
 
 同步页面按一次性数据准备流程组织，采集页面按日常增量运行台组织。两者共用 `workflow-*` 样式。验证浏览器时，需要同时打开 `/sync/overview` 与 `/collect`，确认视觉一致、状态文本清晰，并在约 390px 宽度下检查表格只在自己的滚动容器内横向滚动。
+
+## DoukHub 设计语言验证
+
+DoukHub 使用暖白底面、细边框卡片、紧凑控件和蓝色主题色；布局保留左侧导航，不复制 EntHub 的顶部导航。验证时必须确认侧边栏选中项仍有左侧白色竖向指示条。核心页面使用本地 Lucide 图标，样式入口是 `app/static/css/style.css`，不要再把新样式写入 `theme-material.css`。
