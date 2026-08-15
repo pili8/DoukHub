@@ -551,18 +551,20 @@
         }
     }
 
-    function updateCollectionStatus(batches) {
-        const status = document.getElementById('collection-status');
+    function selectBatchDetail(batches) {
         const active = batches.find(batch =>
             ['pending', 'running', 'cancelling'].includes(batch.status)
         );
+        return active || batches[0];
+    }
+
+    function updateCollectionStatus(batches) {
+        const status = document.getElementById('collection-status');
+        const batch = selectBatchDetail(batches);
         const latest = batches[0];
-        if (active) {
-            status.className = `workflow-status ${active.status}`;
-            status.textContent = `${formatPlatform(active.platform)} ${formatBatchStatus(active.status)}`;
-        } else if (latest) {
-            status.className = `workflow-status ${latest.status}`;
-            status.textContent = `${formatPlatform(latest.platform)} ${formatBatchStatus(latest.status)}`;
+        if (batch) {
+            status.className = `workflow-status ${batch.status}`;
+            status.textContent = `${formatPlatform(batch.platform)} ${formatBatchStatus(batch.status)}`;
         } else {
             status.className = 'workflow-status pending';
             status.textContent = '空闲';
@@ -601,10 +603,7 @@
             </tr>
         `).join('');
 
-        const active = data.batches.find(batch =>
-            ['pending', 'running', 'cancelling'].includes(batch.status)
-        );
-        const automaticBatch = active || latest;
+        const automaticBatch = selectBatchDetail(data.batches || []);
         if (automaticBatch) await showBatchDetail(automaticBatch.id, true);
     }
 

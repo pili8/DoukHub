@@ -1,3 +1,6 @@
+import json
+import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -157,9 +160,42 @@ def test_collection_batch_panel_renders_live_progress_and_actions(app_env):
     assert "cancelCollectionBatch('${batch.id}')" in source
     assert "retryCollectionBatch('${batch.id}')" in source
     assert "['pending', 'running', 'cancelling'].includes(batch.status)" in source
-    assert "const automaticBatch = active || latest" in source
+    assert "const automaticBatch = selectBatchDetail(data.batches || [])" in source
     assert "showBatchDetail(automaticBatch.id, true)" in source
     assert "batch-detail-actions" in response.text
+
+
+def test_collection_detail_selection_executes_without_active_batch():
+    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    match = re.search(
+        r"function selectBatchDetail\(batches\) \{.*?\n    \}",
+        source,
+        re.DOTALL,
+    )
+    assert match is not None
+    cases = [
+        [],
+        [{"id": "latest", "status": "completed"}],
+        [
+            {"id": "latest", "status": "completed"},
+            {"id": "active", "status": "running"},
+        ],
+    ]
+    script = (
+        f"{match.group(0)}; "
+        f"console.log(JSON.stringify({cases}.map(selectBatchDetail)))"
+    )
+    result = subprocess.run(
+        ["node", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(result.stdout) == [
+        None,
+        {"id": "latest", "status": "completed"},
+        {"id": "active", "status": "running"},
+    ]
 
 
 def test_collection_preview_cannot_overwrite_batch_status(app_env):
