@@ -1,4 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock
+from pathlib import Path
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -107,3 +109,72 @@ def test_retry_failed_items_creates_new_batch(batch_client):
     assert response.status_code == 200
     assert manager.start.await_args.kwargs["record_ids"] == ["a1"]
     assert manager.start.await_args.kwargs["mode"] == "full"
+
+
+@pytest.fixture
+def single_client(monkeypatch):
+    saved = app_main.single_work_client
+    app_main.single_work_client = MagicMock()
+    try:
+        yield TestClient(app_main.app)
+    finally:
+        app_main.single_work_client = saved
+
+
+def test_resolve_single_works(single_client, monkeypatch):
+    from app.core import single_work
+
+    async def fake_fetch(client, ttd_url, link, platform):
+        return {
+            "id": "1234567890123456789",
+            "title": "标题",
+            "author": "作者",
+            "create_time": "2026-08-15 10-00-00",
+            "type": "视频",
+            "downloads": ["https://example.com/video"],
+            "share_url": link,
+            "platform": platform,
+        }
+
+    monkeypatch.setattr(single_work, "fetch_work", fake_fetch)
+    link = "https://www.douyin.com/video/1234567890123456789"
+    monkeypatch.setattr(app_main, "_extract_single_work_links", lambda text: [(link, "douyin")])
+    response = single_client.post("/api/collection/works/resolve", json={"links": link})
+    assert response.status_code == 200
+    assert response.json()["works"][0]["title"] == "标题"
+
+
+def test_download_single_works(single_client, tmp_path, monkeypatch):
+    from app.core import single_work
+
+    async def fake_fetch(client, ttd_url, link, platform):
+        return {"id": "1", "title": "标题", "downloads": ["https://example.com/a"]}
+
+    async def fake_download(client, work, target_dir, template):
+        path = target_dir / "saved.mp4"
+        path.write_bytes(b"data")
+        return [path]
+
+    monkeypatch.setattr(single_work, "fetch_work", fake_fetch)
+    monkeypatch.setattr(single_work, "download_work", fake_download)
+    link = "https://www.douyin.com/video/1234567890123456789"
+    monkeypatch.setattr(app_main, "_extract_single_work_links", lambda text: [(link, "douyin")])
+    response = single_client.post(
+        "/api/collection/works/download",
+        json={
+            "links": link,
+            "target_dir": str(tmp_path),
+            "filename_template": "{author} {title}",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["results"][0]["status"] == "success"
+
+
+def test_collect_page_state_is_safe_for_spa_script_reload():
+    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    declarations = re.search(
+        r"(?m)^\s*let\s+(?:resolvedSingleLinks|singleDirCurrent|singleDirEntries)\b",
+        source,
+    )
+    assert declarations is None

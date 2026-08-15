@@ -27,6 +27,7 @@ from .core.history import HistoryDB
 from .core.scheduler import TaskScheduler
 from .core.tasks import get_task_manager
 from .core.link_resolver import extract_sec_user_id, build_profile_url
+from .core import single_work
 from .services.downloader import ServiceManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
@@ -45,6 +46,7 @@ history: HistoryDB | None = None
 services: ServiceManager | None = None
 scheduler: TaskScheduler | None = None
 collection_batch_manager: CollectionBatchManager | None = None
+single_work_client: httpx.AsyncClient | None = None
 
 
 def get_feishu() -> FeishuClient | None:
@@ -86,6 +88,17 @@ def get_collection_batch_manager() -> CollectionBatchManager:
             ttd_url=f"http://127.0.0.1:{config.ttd_port}",
         )
     return collection_batch_manager
+
+
+def get_single_work_client() -> httpx.AsyncClient:
+    global single_work_client
+    if single_work_client is None:
+        single_work_client = httpx.AsyncClient(
+            timeout=300,
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+    return single_work_client
 
 
 def get_feishu_syncer() -> FeishuSyncer | None:
@@ -211,6 +224,9 @@ async def lifespan(app: FastAPI):
     c = get_collector()
     if c:
         await c.close()
+    if single_work_client:
+        await single_work_client.aclose()
+        single_work_client = None
 
 
 app = FastAPI(title="DoukHub", version="2.2.0", lifespan=lifespan)
@@ -229,6 +245,15 @@ def detect_platform(link: str) -> str:
     elif "xiaohongshu.com" in link or "xhslink.com" in link or "rednote.com" in link:
         return "小红书"
     return ""
+
+
+def _extract_single_work_links(text: str) -> list[tuple[str, str]]:
+    result: list[tuple[str, str]] = []
+    for link in single_work.URL.findall(text or ""):
+        platform = single_work.detect_single_platform(link)
+        if platform:
+            result.append((link, platform))
+    return result
 
 
 # ========== 页面路由 ==========
@@ -381,6 +406,7 @@ async def page_collect(request: Request):
         "request": request,
         "accounts": accounts,
         "tasks": tasks,
+        "download_path": str(config.download_path),
         "page": "collect",
     })
 
@@ -1332,6 +1358,15 @@ class CollectionRetryRequest(BaseModel):
     mode: Literal["incremental", "full"] = "incremental"
 
 
+class SingleWorkResolveRequest(BaseModel):
+    links: str
+
+
+class SingleWorkDownloadRequest(SingleWorkResolveRequest):
+    target_dir: str
+    filename_template: str = "{create_time} {author} {title}"
+
+
 @app.post("/api/import/collection")
 async def api_import_collection(request: ImportCollectionRequest):
     """将解析后的数据写入飞书采集表（批量写入，一次最多500条）"""
@@ -2226,6 +2261,73 @@ async def api_collect_detail(links: str = Form("")):
         })
 
     return {"success": True, "results": results}
+
+
+@app.post("/api/collection/works/resolve")
+async def api_resolve_single_works(request: SingleWorkResolveRequest):
+    links = _extract_single_work_links(request.links)
+    if not links:
+        return JSONResponse(
+            {"success": False, "message": "未识别到抖音或 TikTok 作品链接"},
+            status_code=400,
+        )
+    client = get_single_work_client()
+    ttd_url = f"http://127.0.0.1:{config.ttd_port}"
+    works = []
+    errors = []
+    for link, platform in links:
+        try:
+            works.append(
+                await single_work.fetch_work(client, ttd_url, link, platform)
+            )
+        except Exception as error:
+            errors.append({"link": link, "message": str(error)})
+    return {"success": bool(works), "works": works, "errors": errors}
+
+
+@app.post("/api/collection/works/download")
+async def api_download_single_works(request: SingleWorkDownloadRequest):
+    links = _extract_single_work_links(request.links)
+    if not links:
+        return JSONResponse(
+            {"success": False, "message": "未识别到抖音或 TikTok 作品链接"},
+            status_code=400,
+        )
+    target = Path(request.target_dir).expanduser()
+    if not target.exists() or not target.is_dir():
+        return JSONResponse(
+            {"success": False, "message": "保存目录不存在"},
+            status_code=400,
+        )
+
+    client = get_single_work_client()
+    ttd_url = f"http://127.0.0.1:{config.ttd_port}"
+    results = []
+    for link, platform in links:
+        try:
+            work = await single_work.fetch_work(client, ttd_url, link, platform)
+            paths = await single_work.download_work(
+                client,
+                work,
+                target,
+                request.filename_template,
+            )
+            results.append(
+                {
+                    "link": link,
+                    "status": "success",
+                    "title": work["title"],
+                    "files": [str(path) for path in paths],
+                }
+            )
+        except Exception as error:
+            results.append(
+                {"link": link, "status": "failed", "message": str(error)}
+            )
+    return {
+        "success": any(item["status"] == "success" for item in results),
+        "results": results,
+    }
 
 
 # ========== 采集批次 ==========

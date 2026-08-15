@@ -72,13 +72,50 @@
 
 <div class="card" id="detail-form-card" style="display:none;">
     <h3><i class="ph ph-link"></i> 单品采集</h3>
-    <form id="detail-form" onsubmit="submitDetailCollect(event)">
+    <form id="detail-form" onsubmit="resolveSingleWorks(event)">
         <div class="form-group">
-            <label>粘贴作品链接（支持多个, 一行一个, 自动识别平台）</label>
-            <textarea name="links" rows="6" placeholder="https://www.douyin.com/video/...&#10;https://www.xiaohongshu.com/explore/...&#10;m3HL2u1R1YM（短链接也行）"></textarea>
+            <label>粘贴作品链接（一行一个，支持抖音 / TikTok）</label>
+            <textarea name="links" rows="6" placeholder="https://www.douyin.com/video/...&#10;https://www.tiktok.com/@user/video/..."></textarea>
         </div>
-        <button type="submit" class="btn btn-primary" id="detail-submit"><i class="ph ph-download-simple"></i> 开始单品采集</button>
+        <div class="form-group">
+            <label>保存目录</label>
+            <div style="display:flex;gap:8px;">
+                <input type="text" name="target_dir" id="single-target-dir" value="{{ download_path or '' }}" style="flex:1;">
+                <button type="button" class="btn btn-secondary" onclick="openSingleDirDialog()" title="选择目录">
+                    <i class="ph ph-folder-open"></i>
+                </button>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>命名模板</label>
+            <input type="text" name="filename_template" value="{create_time} {author} {title}">
+        </div>
+        <div class="btn-group">
+            <button type="submit" class="btn btn-secondary" id="detail-resolve">
+                <i class="ph ph-magnifying-glass"></i> 解析作品
+            </button>
+            <button type="button" class="btn btn-primary" id="detail-submit" onclick="downloadSingleWorks()" disabled>
+                <i class="ph ph-download-simple"></i> 下载作品
+            </button>
+        </div>
     </form>
+    <div id="single-work-list" style="margin-top:16px;"></div>
+
+    <div id="single-dir-modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,.45);">
+        <div class="card" style="width:min(560px,92vw);max-height:80vh;display:flex;flex-direction:column;">
+            <h3>选择目录</h3>
+            <div class="form-group">
+                <label>当前目录</label>
+                <input type="text" id="single-dir-current" readonly>
+            </div>
+            <div id="single-dir-list" style="overflow:auto;flex:1;min-height:160px;"></div>
+            <div class="btn-group" style="justify-content:flex-end;margin-top:12px;">
+                <button type="button" class="btn btn-secondary" onclick="goSingleDirParent()">上一级</button>
+                <button type="button" class="btn btn-secondary" onclick="closeSingleDirDialog()">取消</button>
+                <button type="button" class="btn btn-primary" onclick="chooseSingleDir()">使用此目录</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="card" id="batch-card" style="display:none;">
@@ -199,30 +236,159 @@
         collectionPollTimer = null;
     };
 
-    async function submitDetailCollect(e) {
-        e.preventDefault();
-        const form = new FormData(e.target);
-        const body = new FormData();
-        body.append('links', form.get('links'));
+    var resolvedSingleLinks = [];
 
-        const btn = document.getElementById('detail-submit');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="ph ph-spinner"></i> 采集中...';
-
+    async function resolveSingleWorks(event) {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        const button = document.getElementById('detail-resolve');
+        button.disabled = true;
+        button.innerHTML = '<i class="ph ph-spinner"></i> 解析中...';
         try {
-            const data = await apiCall('/api/collect/detail', 'POST', body);
-
-            if (data.success) {
-                showToast(`采集完成: ${data.results?.length || 0} 个作品`, 'success');
-            } else {
-                showToast(data.message, 'error');
+            const data = await apiCall('/api/collection/works/resolve', 'POST', {
+                links: form.get('links') || '',
+            });
+            if (!data.works?.length) {
+                throw new Error(
+                    data.message || data.errors?.[0]?.message || '解析失败'
+                );
             }
-        } catch (e) {
-            showToast('采集请求失败', 'error');
+            resolvedSingleLinks = data.works
+                .map(work => work.share_url)
+                .filter(Boolean);
+            renderSingleWorks(data.works);
+            document.getElementById('detail-submit').disabled = false;
+            showToast(`解析到 ${data.works.length} 个作品`, 'success');
+        } catch (error) {
+            showToast(error.message || '解析作品失败', 'error');
         } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="ph ph-download-simple"></i> 开始单品采集';
+            button.disabled = false;
+            button.innerHTML = '<i class="ph ph-magnifying-glass"></i> 解析作品';
         }
+    }
+
+    async function downloadSingleWorks() {
+        const form = new FormData(document.getElementById('detail-form'));
+        const originalLinks = String(form.get('links') || '');
+        const links = resolvedSingleLinks.length
+            ? resolvedSingleLinks.join('\n')
+            : originalLinks;
+        const button = document.getElementById('detail-submit');
+        button.disabled = true;
+        button.innerHTML = '<i class="ph ph-spinner"></i> 下载中...';
+        try {
+            const data = await apiCall('/api/collection/works/download', 'POST', {
+                links,
+                target_dir: form.get('target_dir') || '',
+                filename_template: form.get('filename_template') ||
+                    '{create_time} {author} {title}',
+            });
+            renderSingleResults(data.results || []);
+            showToast(
+                data.success ? '下载完成' : '部分作品下载失败',
+                data.success ? 'success' : 'error'
+            );
+        } catch (error) {
+            showToast(error.message || '下载作品失败', 'error');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = '<i class="ph ph-download-simple"></i> 下载作品';
+        }
+    }
+
+    function renderSingleWorks(works) {
+        document.getElementById('single-work-list').innerHTML = `
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>作品</th><th>作者</th><th>发布时间</th><th>类型</th><th>文件</th></tr></thead>
+                    <tbody>
+                        ${works.map(work => `
+                            <tr>
+                                <td>${escapeHtml(work.title)}</td>
+                                <td>${escapeHtml(work.author)}</td>
+                                <td>${formatDateTime(work.create_time)}</td>
+                                <td>${escapeHtml(work.type)}</td>
+                                <td>${work.downloads?.length || 0}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    function renderSingleResults(results) {
+        document.getElementById('single-work-list').innerHTML = `
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>作品</th><th>状态</th><th>文件 / 错误</th></tr></thead>
+                    <tbody>
+                        ${results.map(result => `
+                            <tr>
+                                <td>${escapeHtml(result.title || result.link)}</td>
+                                <td>${result.status === 'success' ? '成功' : '失败'}</td>
+                                <td>${escapeHtml(result.files ? result.files.join('\\n') : result.message || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    var singleDirCurrent = '';
+    var singleDirEntries = [];
+
+    async function openSingleDirDialog() {
+        const input = document.getElementById('single-target-dir');
+        await loadSingleDirs(input.value || '');
+        document.getElementById('single-dir-modal').style.display = 'flex';
+    }
+
+    async function loadSingleDirs(path) {
+        const data = await apiCall(
+            `/api/browse-dir?path=${encodeURIComponent(path || '')}`,
+            'GET'
+        );
+        singleDirCurrent = data.current || '';
+        singleDirEntries = data.dirs || [];
+        document.getElementById('single-dir-current').value = singleDirCurrent || '此电脑';
+        renderSingleDirs();
+    }
+
+    function renderSingleDirs() {
+        const list = document.getElementById('single-dir-list');
+        if (!singleDirEntries.length) {
+            list.innerHTML = '<div class="text-muted" style="padding:12px;">没有子目录</div>';
+            return;
+        }
+        list.innerHTML = singleDirEntries.map(dir => {
+            const name = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
+            return `
+                <div style="padding:8px 10px;border-bottom:1px solid var(--border-default);cursor:pointer;">
+                    <a href="javascript:void(0)" onclick="loadSingleDirs('${dir.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">
+                        <i class="ph ph-folder"></i> ${escapeHtml(name)}
+                    </a>
+                </div>
+            `;
+        }).join('');
+    }
+
+    async function goSingleDirParent() {
+        if (!singleDirCurrent) return;
+        const parent = singleDirCurrent.replace(/[\\/][^\\/]+[\\/]?$/, '');
+        await loadSingleDirs(parent || singleDirCurrent);
+    }
+
+    function closeSingleDirDialog() {
+        document.getElementById('single-dir-modal').style.display = 'none';
+    }
+
+    function chooseSingleDir() {
+        if (singleDirCurrent) {
+            document.getElementById('single-target-dir').value = singleDirCurrent;
+        }
+        closeSingleDirDialog();
     }
 
     async function startCollectionBatch(e) {
