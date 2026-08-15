@@ -6,7 +6,7 @@ import httpx
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -21,6 +21,7 @@ from .core.cookie_pool import CookiePool
 from .core.syncer import Syncer
 from .core.syncer_v2 import Syncer as SyncerV2
 from .core.database import Database
+from .core.collection_batch_manager import CollectionBatchManager
 from .core.feishu_sync import FeishuSyncer
 from .core.history import HistoryDB
 from .core.scheduler import TaskScheduler
@@ -43,6 +44,7 @@ database: Database | None = None
 history: HistoryDB | None = None
 services: ServiceManager | None = None
 scheduler: TaskScheduler | None = None
+collection_batch_manager: CollectionBatchManager | None = None
 
 
 def get_feishu() -> FeishuClient | None:
@@ -72,6 +74,18 @@ def get_database() -> Database:
     if database is None:
         database = Database()
     return database
+
+
+def get_collection_batch_manager() -> CollectionBatchManager:
+    global collection_batch_manager
+    if collection_batch_manager is None:
+        collection_batch_manager = CollectionBatchManager(
+            database=get_database(),
+            ttd_path=Path(config.ttd_path),
+            log_dir=config.data_dir / "collection_logs",
+            ttd_url=f"http://127.0.0.1:{config.ttd_port}",
+        )
+    return collection_batch_manager
 
 
 def get_feishu_syncer() -> FeishuSyncer | None:
@@ -186,9 +200,12 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"启动时自动增量同步失败（不影响使用）: {e}")
         threading.Thread(target=_bg_sync, daemon=True).start()
 
+    get_collection_batch_manager().recover_interrupted_batches()
+
     yield
 
     # 关闭
+    await get_collection_batch_manager().shutdown()
     sched.shutdown()
     svc.close()
     c = get_collector()
@@ -1303,6 +1320,18 @@ class ImportCollectionRequest(BaseModel):
     items: list[ImportItem]
 
 
+class CollectionBatchRequest(BaseModel):
+    rating_min: int = 3
+    tags: list[str] = []
+    account_names: str = ""
+    mode: Literal["incremental", "full"] = "incremental"
+    platform: Literal["douyin", "tiktok", "all"] = "douyin"
+
+
+class CollectionRetryRequest(BaseModel):
+    mode: Literal["incremental", "full"] = "incremental"
+
+
 @app.post("/api/import/collection")
 async def api_import_collection(request: ImportCollectionRequest):
     """将解析后的数据写入飞书采集表（批量写入，一次最多500条）"""
@@ -2197,6 +2226,95 @@ async def api_collect_detail(links: str = Form("")):
         })
 
     return {"success": True, "results": results}
+
+
+# ========== 采集批次 ==========
+
+@app.post("/api/collection/batches")
+async def api_start_collection_batch(request: CollectionBatchRequest):
+    db = get_database()
+    manager = get_collection_batch_manager()
+    platforms = (
+        ("douyin", "tiktok") if request.platform == "all" else (request.platform,)
+    )
+    try:
+        batches = await manager.start(
+            accounts=db.get_all_accounts(),
+            rating_min=request.rating_min,
+            tags=request.tags,
+            account_names=request.account_names,
+            platforms=platforms,
+            mode=request.mode,
+        )
+        return {"success": True, "batches": batches}
+    except ValueError as error:
+        return JSONResponse({"success": False, "message": str(error)}, status_code=400)
+    except RuntimeError as error:
+        return JSONResponse({"success": False, "message": str(error)}, status_code=409)
+
+
+@app.get("/api/collection/batches")
+async def api_list_collection_batches():
+    return {"batches": get_database().list_collection_batches()}
+
+
+@app.get("/api/collection/batches/{batch_id}")
+async def api_collection_batch_detail(batch_id: str):
+    db = get_database()
+    batch = db.get_collection_batch(batch_id)
+    if not batch:
+        return JSONResponse({"success": False, "message": "批次不存在"}, status_code=404)
+    items = db.get_collection_batch_items(batch_id)
+    accounts = {
+        row["record_id"]: row
+        for row in db.get_all_accounts()
+        if row.get("record_id")
+    }
+    for item in items:
+        account = accounts.get(item.get("account_record_id"))
+        item["last_collected_at"] = account.get("last_collected_at") if account else None
+    return {
+        "batch": batch,
+        "items": items,
+        "log": get_collection_batch_manager().read_log(batch_id),
+    }
+
+
+@app.post("/api/collection/batches/{batch_id}/cancel")
+async def api_cancel_collection_batch(batch_id: str):
+    ok = get_collection_batch_manager().cancel(batch_id)
+    return {
+        "success": ok,
+        "message": "已请求取消" if ok else "批次不存在或已结束",
+    }
+
+
+@app.post("/api/collection/batches/{batch_id}/retry")
+async def api_retry_collection_batch(batch_id: str, request: CollectionRetryRequest):
+    db = get_database()
+    source = db.get_collection_batch_items(batch_id)
+    record_ids = [
+        item["account_record_id"]
+        for item in source
+        if item.get("status") in ("failed", "cancelled")
+        and item.get("account_record_id")
+    ]
+    if not record_ids:
+        return JSONResponse(
+            {"success": False, "message": "没有可重试的账号"},
+            status_code=400,
+        )
+    try:
+        batches = await get_collection_batch_manager().start(
+            accounts=db.get_all_accounts(),
+            rating_min=1,
+            record_ids=record_ids,
+            platforms=(db.get_collection_batch(batch_id)["platform"],),
+            mode=request.mode,
+        )
+        return {"success": True, "batches": batches}
+    except RuntimeError as error:
+        return JSONResponse({"success": False, "message": str(error)}, status_code=409)
 
 
 # --- 账号 ---

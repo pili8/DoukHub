@@ -42,6 +42,7 @@ def app_env(tmp_path):
         "feishu_client": app_main.feishu_client,
         "collector": app_main.collector,
         "syncer": app_main.syncer,
+        "collection_batch_manager": app_main.collection_batch_manager,
     }
 
     # 替换为测试对象
@@ -52,6 +53,7 @@ def app_env(tmp_path):
     app_main.feishu_client = None
     app_main.collector = None
     app_main.syncer = None
+    app_main.collection_batch_manager = MagicMock()
 
     from app.main import app
     client = TestClient(app)
