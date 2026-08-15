@@ -57,6 +57,23 @@ class CrashingProcess:
         return self.returncode
 
 
+class LaunchRaceProcess:
+    def __init__(self):
+        self.stdout = FailingStream()
+        self.returncode = None
+        self.pid = 64321
+        self.terminated = False
+        self.wait_count = 0
+
+    def terminate(self):
+        self.terminated = True
+        self.returncode = -15
+
+    async def wait(self):
+        self.wait_count += 1
+        return self.returncode
+
+
 @pytest.fixture
 def db(tmp_path):
     return Database(db_path=tmp_path / "doukhub.db")
@@ -199,6 +216,7 @@ def test_start_recovers_verified_surviving_runner_before_new_batch(
     db.update_collection_batch("stale", process_pid=999)
     verified = []
     terminated = []
+    waits = []
 
     def fake_verify(pid):
         verified.append(pid)
@@ -208,8 +226,13 @@ def test_start_recovers_verified_surviving_runner_before_new_batch(
         terminated.append(pid)
         return True
 
+    def fake_wait(pid, timeout):
+        waits.append((pid, timeout))
+        return True
+
     monkeypatch.setattr(manager, "_verify_recorded_runner", fake_verify)
     monkeypatch.setattr(manager, "_terminate_recorded_runner", fake_terminate)
+    monkeypatch.setattr(manager, "_wait_for_recorded_runner", fake_wait)
     monkeypatch.setattr(
         manager,
         "_launch_process",
@@ -228,6 +251,7 @@ def test_start_recovers_verified_surviving_runner_before_new_batch(
 
     assert verified == [999]
     assert terminated == [999]
+    assert waits == [(999, manager._recovery_wait_timeout)]
     assert db.get_collection_batch("stale")["status"] == "failed"
     assert db.get_collection_batch(batches[0]["id"])["status"] == "pending"
 
@@ -245,6 +269,43 @@ def test_recovery_does_not_terminate_unverified_runner(db, manager, monkeypatch)
 
     assert terminated == []
     assert db.get_collection_batch("stale")["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    ("terminate_result", "wait_result"),
+    [(False, None), (True, False)],
+)
+def test_start_blocked_when_recorded_runner_exit_is_unconfirmed(
+    db, manager, monkeypatch, terminate_result, wait_result
+):
+    create_running_batch(db, "stale")
+    db.update_collection_batch("stale", process_pid=999)
+    monkeypatch.setattr(manager, "_verify_recorded_runner", lambda pid: True)
+    monkeypatch.setattr(
+        manager, "_terminate_recorded_runner", lambda pid: terminate_result
+    )
+    monkeypatch.setattr(
+        manager,
+        "_wait_for_recorded_runner",
+        lambda pid, timeout: wait_result
+        if wait_result is not None
+        else pytest.fail("termination was not requested"),
+    )
+    insert_douyin_account(db)
+
+    with pytest.raises(RuntimeError, match="recorded runner"):
+        asyncio.run(
+            manager.start(
+                db.get_all_accounts(),
+                rating_min=3,
+                platforms=("douyin",),
+                mode="incremental",
+            )
+        )
+
+    assert db.get_collection_batch("stale")["status"] == "running"
+    assert db.get_active_collection_batch()["id"] == "stale"
+    assert manager._queue.empty()
 
 
 def test_recovery_handles_more_than_one_hundred_active_batches(db, manager):
@@ -370,6 +431,67 @@ def test_cancellation_during_preparation_is_not_overwritten(db, manager, monkeyp
     result = asyncio.run(manager._run_batch(batch_id))
 
     assert result == "cancelled"
+    assert db.get_collection_batch(batch_id)["status"] == "cancelled"
+
+
+def test_cancellation_during_launch_terminates_child_before_output(
+    db, manager, monkeypatch
+):
+    insert_douyin_account(db)
+    batches = asyncio.run(
+        manager.start(
+            db.get_all_accounts(),
+            rating_min=3,
+            platforms=("douyin",),
+            mode="incremental",
+        )
+    )
+    batch_id = batches[0]["id"]
+    process = LaunchRaceProcess()
+
+    async def fake_launch(command, cwd):
+        manager.cancel(batch_id)
+        return process
+
+    monkeypatch.setattr(manager, "_launch_process", fake_launch)
+    result = asyncio.run(manager._run_batch(batch_id))
+
+    assert result == "cancelled"
+    assert process.terminated
+    assert process.wait_count == 1
+    assert db.get_collection_batch(batch_id)["status"] == "cancelled"
+
+
+def test_shutdown_during_launch_terminates_child_before_output(
+    db, manager, monkeypatch
+):
+    insert_douyin_account(db)
+    batches = asyncio.run(
+        manager.start(
+            db.get_all_accounts(),
+            rating_min=3,
+            platforms=("douyin",),
+            mode="incremental",
+        )
+    )
+    batch_id = batches[0]["id"]
+    process = LaunchRaceProcess()
+    shutdown_task = None
+
+    async def fake_launch(command, cwd):
+        nonlocal shutdown_task
+        shutdown_task = asyncio.create_task(manager.shutdown())
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        return process
+
+    monkeypatch.setattr(manager, "_launch_process", fake_launch)
+    result = asyncio.run(manager._run_batch(batch_id))
+
+    assert result == "cancelled"
+    assert process.terminated
+    assert process.wait_count == 1
+    assert shutdown_task.done()
     assert db.get_collection_batch(batch_id)["status"] == "cancelled"
 
 

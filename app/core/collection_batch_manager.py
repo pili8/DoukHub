@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +39,7 @@ class CollectionBatchManager:
         self._active_process: Optional[asyncio.subprocess.Process] = None
         self._cancel_requested = False
         self._closing = False
+        self._recovery_wait_timeout = 3.0
 
     async def start(
         self,
@@ -128,7 +130,17 @@ class CollectionBatchManager:
         for batch in self.db.list_active_collection_batches():
             process_pid = batch.get("process_pid")
             if process_pid and self._verify_recorded_runner(process_pid):
-                self._terminate_recorded_runner(process_pid)
+                if not self._terminate_recorded_runner(process_pid):
+                    raise RuntimeError(
+                        f"recorded runner {process_pid} could not be terminated"
+                    )
+                if not self._wait_for_recorded_runner(
+                    process_pid, self._recovery_wait_timeout
+                ):
+                    raise RuntimeError(
+                        f"recorded runner {process_pid} did not exit "
+                        f"within {self._recovery_wait_timeout} seconds"
+                    )
             self._finalize(
                 batch["id"],
                 "failed" if batch["status"] == "running" else "cancelled",
@@ -245,6 +257,14 @@ class CollectionBatchManager:
             return False
         return True
 
+    def _wait_for_recorded_runner(self, process_pid: int, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while self._verify_recorded_runner(process_pid):
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        return True
+
     async def _run_batch(self, batch_id: str) -> str:
         self._active_batch_id = batch_id
         self._cancel_requested = False
@@ -309,6 +329,21 @@ class CollectionBatchManager:
             process = await self._launch_process(command, self.ttd_path)
             self._active_process = process
             self.db.update_collection_batch(batch_id, process_pid=process.pid)
+            current_status = self.db.get_collection_batch(batch_id)["status"]
+            if (
+                self._cancel_requested
+                or self._closing
+                or current_status == "cancelling"
+            ):
+                if process.returncode is None:
+                    process.terminate()
+                    await process.wait()
+                return_code = (
+                    process.returncode if process.returncode is not None else -1
+                )
+                self._clear_active_batch()
+                self._finalize(batch_id, "cancelled", return_code, "批次已取消")
+                return "cancelled"
             log_path = Path(batch["log_path"])
             log_path.parent.mkdir(parents=True, exist_ok=True)
 
