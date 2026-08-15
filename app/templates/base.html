@@ -4,8 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}DoukHub{% endblock %}</title>
+    <script src="/static/js/lucide.min.js"></script>
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
-    <link id="theme-css" rel="stylesheet" href="/static/css/theme-material.css?v=4">
+    <link id="theme-css" rel="stylesheet" href="/static/css/style.css?v=5">
     <script>
       // 明暗模式:localStorage 优先,否则跟随系统,首屏设定避免闪烁
       (function() {
@@ -605,6 +606,13 @@
         document.querySelectorAll('script[src]').forEach(function(s) {
             _loadedScripts.add(s.src);
         });
+    </script>
+    <script>
+        function refreshIcons() {
+            if (window.lucide?.createIcons) window.lucide.createIcons();
+        }
+        document.addEventListener('DOMContentLoaded', refreshIcons);
+        window._doukhubRefreshIcons = refreshIcons;
     </script>
 </body>
 </html>

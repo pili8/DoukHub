@@ -1,25 +1,43 @@
 /* ==========================================================================
-   DoukHub - Material Design 3 (Material You)
-   Design Read: Internal admin panel for content collection platform
-   Design System: Google Material Design 3 (M3)
-   Dials: VARIANCE=4, MOTION=3, DENSITY=5
-   Primary: Material Blue (#0061A4) - Google Material signature color
-   Font: Roboto (Google's official Material typeface)
-   Icons: Phosphor Icons (via CDN)
-   Shape: M3 shape system (4/8/12/16/28px)
-   Elevation: M3 tonal elevation + shadow system
-   ==========================================================================
-   Backup: style.css.backup (previous Slate/Teal design)
-   Rollback: copy style.css.backup style.css
+   DoukHub - Compact Local Tool Design Language
+   Identity: EntHub-like warm paper surfaces + DoukHub blue accent
+   Layout: Left navigation (DoukHub), not EntHub's top navigation
+   Icons: Local Lucide for core shell/pages
    ========================================================================== */
 
-/* ===== 1. M3 Design Tokens ===== */
+/* ===== 1. Design Tokens ===== */
 :root {
+  --dh-background: #FBFAF7;
+  --dh-surface: #FFFFFF;
+  --dh-surface-muted: #F5F2EC;
+  --dh-text: #1F1B17;
+  --dh-text-secondary: #5C564E;
+  --dh-text-muted: #A39E96;
+  --dh-border: #ECE7DF;
+  --dh-border-strong: #D9D3C8;
+  --dh-accent: #0061A4;
+  --dh-accent-hover: #004F8A;
+  --dh-accent-soft: #E7F0F8;
+  --dh-danger: #C2410C;
+  --dh-danger-soft: #FEF1EB;
+  --dh-warning: #B45309;
+  --dh-warning-soft: #FEF3C7;
+  --dh-success: #16A34A;
+  --dh-success-soft: #ECFDF3;
+  --dh-radius-sm: 6px;
+  --dh-radius: 8px;
+  --dh-radius-lg: 12px;
+  --dh-shadow-sm: 0 1px 2px rgba(31, 27, 23, 0.04);
+  --dh-shadow-lg: 0 8px 24px rgba(31, 27, 23, 0.12);
+  --dh-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+             "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --dh-mono: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+
   /* --- M3 Primary --- */
-  --md-primary: #0061A4;
+  --md-primary: var(--dh-accent);
   --md-on-primary: #FFFFFF;
-  --md-primary-container: #D1E4FF;
-  --md-on-primary-container: #001D36;
+  --md-primary-container: var(--dh-accent-soft);
+  --md-on-primary-container: #003A5F;
 
   /* --- M3 Secondary --- */
   --md-secondary: #535F70;
@@ -34,21 +52,21 @@
   --md-on-tertiary-container: #251431;
 
   /* --- M3 Error --- */
-  --md-error: #BA1A1A;
+  --md-error: var(--dh-danger);
   --md-on-error: #FFFFFF;
-  --md-error-container: #FFDAD6;
+  --md-error-container: var(--dh-danger-soft);
   --md-on-error-container: #410002;
 
   /* --- M3 Success (custom role) --- */
-  --md-success: #006E2C;
+  --md-success: var(--dh-success);
   --md-on-success: #FFFFFF;
-  --md-success-container: #8AF8B0;
+  --md-success-container: var(--dh-success-soft);
   --md-on-success-container: #002107;
 
   /* --- M3 Warning (custom role) --- */
-  --md-warning: #835400;
+  --md-warning: var(--dh-warning);
   --md-on-warning: #FFFFFF;
-  --md-warning-container: #FFDDB7;
+  --md-warning-container: var(--dh-warning-soft);
   --md-on-warning-container: #2A1700;
 
   /* --- M3 Info (alias of primary family) --- */
@@ -58,52 +76,52 @@
   --md-on-info-container: #001D36;
 
   /* --- M3 Surface tones --- */
-  --md-background: #FDFCFF;
-  --md-on-background: #1A1C1E;
-  --md-surface: #FDFCFF;
-  --md-on-surface: #1A1C1E;
+  --md-background: var(--dh-background);
+  --md-on-background: var(--dh-text);
+  --md-surface: var(--dh-surface);
+  --md-on-surface: var(--dh-text);
   --md-surface-variant: #DFE2EB;
-  --md-on-surface-variant: #42474E;
-  --md-surface-container-lowest: #FFFFFF;
-  --md-surface-container-low: #F7F9FC;
-  --md-surface-container: #F1F4F9;
-  --md-surface-container-high: #EBEEF3;
-  --md-surface-container-highest: #E6E9EE;
+  --md-on-surface-variant: var(--dh-text-secondary);
+  --md-surface-container-lowest: var(--dh-surface);
+  --md-surface-container-low: var(--dh-surface);
+  --md-surface-container: var(--dh-surface-muted);
+  --md-surface-container-high: #EFEAE1;
+  --md-surface-container-highest: #EAE4D9;
 
   /* --- M3 Outline --- */
-  --md-outline: #73777F;
-  --md-outline-variant: #C3C7CF;
+  --md-outline: var(--dh-text-muted);
+  --md-outline-variant: var(--dh-border);
 
   /* --- M3 Shadow colors --- */
   --md-shadow-color: rgb(0 50 80);
   --md-scrim: rgb(0 0 0 / 0.4);
 
   /* === Legacy variable mapping (template compatibility) === */
-  --bg-base: var(--md-background);
-  --bg-surface: var(--md-surface-container-lowest);
-  --bg-sidebar: var(--md-surface-container-low);
-  --bg-sidebar-hover: var(--md-surface-container-high);
+  --bg-base: var(--dh-background);
+  --bg-surface: var(--dh-surface);
+  --bg-sidebar: var(--dh-surface);
+  --bg-sidebar-hover: var(--dh-surface-muted);
   --bg-sidebar-active: var(--md-secondary-container);
-  --bg-hover: var(--md-surface-container-high);
-  --bg-muted: var(--md-surface-container);
+  --bg-hover: var(--dh-surface-muted);
+  --bg-muted: var(--dh-surface-muted);
   --bg-elevated: var(--md-surface-container-low);
-  --bg-input: var(--md-surface-container-highest);
+  --bg-input: var(--dh-surface);
 
-  --text-primary: var(--md-on-surface);
-  --text-secondary: var(--md-on-surface-variant);
-  --text-muted: var(--md-outline);
+  --text-primary: var(--dh-text);
+  --text-secondary: var(--dh-text-secondary);
+  --text-muted: var(--dh-text-muted);
   --text-on-dark: var(--md-on-surface);
   --text-on-dark-muted: var(--md-on-surface-variant);
   --text-on-dark-dim: var(--md-outline);
 
-  --border-default: var(--md-outline-variant);
-  --border-strong: var(--md-outline);
+  --border-default: var(--dh-border);
+  --border-strong: var(--dh-border-strong);
   --border-sidebar: var(--md-outline-variant);
 
-  --accent: var(--md-primary);
-  --accent-hover: #00497D;
+  --accent: var(--dh-accent);
+  --accent-hover: var(--dh-accent-hover);
   --accent-active: #003258;
-  --accent-light: var(--md-primary-container);
+  --accent-light: var(--dh-accent-soft);
   --accent-text: var(--md-primary);
 
   --success: var(--md-success);
@@ -222,13 +240,11 @@
 html { font-size: 15px; -webkit-text-size-adjust: 100%; }
 
 body {
-  font-family: var(--font-sans);
-  background: var(--md-background);
-  color: var(--md-on-surface);
+  font-family: var(--dh-font);
+  font-size: 13px;
+  color: var(--dh-text);
+  background: var(--dh-background);
   line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  letter-spacing: 0.006em;
 }
 
 a { color: var(--md-primary); text-decoration: none; transition: color var(--transition-fast); }
@@ -330,12 +346,41 @@ code, pre { font-family: var(--font-mono); }
 
 .main {
   flex: 1;
-  padding: 24px 32px;
+  padding: 24px 28px;
   max-width: var(--content-max);
   min-width: 0;
 }
 
 /* ===== 4. Page Header ===== */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--dh-text);
+}
+
+.page-sub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--dh-text-secondary);
+}
+
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -362,28 +407,27 @@ code, pre { font-family: var(--font-mono); }
 
 /* ===== 5. M3 Elevated Cards ===== */
 .card {
-  background: var(--md-surface-container-low);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  margin-bottom: 16px;
-  box-shadow: var(--shadow-xs);
+  background: var(--dh-surface);
+  border: 1px solid var(--dh-border);
+  border-radius: var(--dh-radius);
+  box-shadow: none;
+  padding: 18px;
+  margin-bottom: 14px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   transition: box-shadow var(--transition);
 }
 
 .card:hover {
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
 }
 
 /* M3 Title Medium */
 .card h3 {
   margin-bottom: 16px;
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--md-on-surface);
-  letter-spacing: 0.006em;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dh-text);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -391,8 +435,8 @@ code, pre { font-family: var(--font-mono); }
 }
 
 .card h3 i {
-  font-size: 22px;
-  color: var(--md-primary);
+  font-size: 17px;
+  color: var(--dh-accent);
 }
 
 /* ===== 6. M3 Buttons ===== */
@@ -401,14 +445,15 @@ code, pre { font-family: var(--font-mono); }
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 0 24px;
-  height: 40px;
+  padding: 0 13px;
+  height: 34px;
   border: none;
-  border-radius: var(--radius-full);
+  border-radius: var(--dh-radius-sm);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   font-family: inherit;
+  box-shadow: none;
   white-space: nowrap;
   transition: all var(--transition-fast);
   text-decoration: none;
@@ -453,9 +498,9 @@ code, pre { font-family: var(--font-mono); }
 
 /* M3 Tonal / Outlined Button (secondary) */
 .btn-secondary {
-  background: transparent;
-  color: var(--md-primary);
-  border: 1px solid var(--md-outline-variant);
+  background: var(--dh-surface);
+  color: var(--dh-text-secondary);
+  border: 1px solid var(--dh-border-strong);
 }
 .btn-secondary:hover {
   background: transparent;
@@ -500,12 +545,29 @@ code, pre { font-family: var(--font-mono); }
 
 /* M3 Small button variant */
 .btn-sm {
-  height: 32px;
-  padding: 0 16px;
-  font-size: 13px;
-  border-radius: var(--radius-full);
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 .btn-sm i { font-size: 16px; }
+
+.icon-button {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--dh-border);
+  border-radius: var(--dh-radius-sm);
+  background: var(--dh-surface);
+  color: var(--dh-text-secondary);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  border-color: var(--dh-accent);
+  color: var(--dh-accent);
+}
 
 .btn:disabled {
   opacity: 0.38;
@@ -521,29 +583,29 @@ code, pre { font-family: var(--font-mono); }
 
 /* ===== 7. M3 Filled Text Fields ===== */
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .form-group label {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
   font-weight: 500;
-  font-size: 13px;
-  color: var(--md-on-surface-variant);
-  letter-spacing: 0.01em;
+  font-size: 12px;
+  color: var(--dh-text-secondary);
 }
 
 .form-group input,
 .form-group select,
 .form-group textarea {
   width: 100%;
-  padding: 12px 16px;
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--dh-border);
+  border-radius: var(--dh-radius-sm);
+  background: var(--dh-surface);
+  color: var(--dh-text);
+  font-size: 12px;
   font-family: inherit;
-  background: var(--md-surface-container-highest);
-  color: var(--md-on-surface);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
 }
 
@@ -557,11 +619,9 @@ code, pre { font-family: var(--font-mono); }
 .form-group select:focus,
 .form-group textarea:focus {
   outline: none;
-  border-color: var(--md-primary);
-  border-width: 2px;
-  padding: 11px 15px;
-  box-shadow: none;
-  background: var(--md-surface-container-lowest);
+  border-color: var(--dh-accent);
+  box-shadow: 0 0 0 2px var(--dh-accent-soft);
+  padding: 6px 9px;
 }
 
 .form-group input::placeholder,
@@ -592,19 +652,19 @@ table {
 }
 
 th, td {
-  padding: 14px 16px;
+  padding: 10px 12px;
   text-align: left;
   border-bottom: 1px solid var(--md-outline-variant);
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 /* M3 table header */
 th {
-  background: var(--md-surface-container);
+  background: var(--dh-surface-muted);
+  color: var(--dh-text-secondary);
   font-weight: 500;
   font-size: 12px;
-  color: var(--md-on-surface-variant);
   letter-spacing: 0.02em;
   text-transform: none;
 }
@@ -837,11 +897,16 @@ tbody tr:hover {
 
 /* ===== 16B. Shared Workflow Console ===== */
 .workflow-panel {
-  background: var(--md-surface-container-lowest);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--radius-lg);
-  padding: 20px;
-  margin-bottom: 16px;
+  background: var(--dh-surface);
+  border: 1px solid var(--dh-border);
+  border-radius: var(--dh-radius);
+  box-shadow: none;
+  padding: 18px;
+  margin-bottom: 14px;
+}
+
+.workflow-panel:hover {
+  box-shadow: none;
 }
 
 .workflow-header {
@@ -857,14 +922,14 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--md-on-surface);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dh-text);
 }
 
 .workflow-title i {
-  font-size: 22px;
-  color: var(--md-primary);
+  font-size: 17px;
+  color: var(--dh-accent);
 }
 
 .workflow-title .workflow-count {
@@ -914,9 +979,8 @@ tbody tr:hover {
   gap: 10px;
   align-items: start;
   padding: 14px;
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--radius);
-  background: var(--md-surface-container-low);
+  border-color: var(--dh-border);
+  background: var(--dh-surface);
   cursor: pointer;
   text-align: left;
   transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
@@ -974,10 +1038,10 @@ tbody tr:hover {
 .workflow-metric {
   min-width: 0;
   padding: 12px;
-  border: 1px solid var(--md-outline-variant);
+  border-color: var(--dh-border);
   border-left-width: 3px;
   border-radius: var(--radius-sm);
-  background: var(--md-surface-container-low);
+  background: var(--dh-surface);
 }
 
 .workflow-metric .metric-value {
@@ -1115,9 +1179,8 @@ tbody tr:hover {
   align-items: center;
   gap: 4px;
   padding: 4px;
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--radius-full);
-  background: var(--md-surface-container-low);
+  border-color: var(--dh-border);
+  background: var(--dh-surface);
 }
 
 .workflow-tab {
@@ -1137,8 +1200,8 @@ tbody tr:hover {
 }
 
 .workflow-tab.active {
-  background: var(--md-primary);
-  color: var(--md-on-primary);
+  background: var(--dh-accent);
+  color: white;
 }
 
 .workflow-form-grid {
