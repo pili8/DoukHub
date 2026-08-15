@@ -72,7 +72,9 @@ sec_user_id TEXT,
                     is_deleted BOOLEAN DEFAULT 0,
                     deleted_at DATETIME,
                     synced BOOLEAN DEFAULT 0,
-                    local_updated_at DATETIME
+                    local_updated_at DATETIME,
+                    last_collected_at DATETIME,
+                    collect_window_days INTEGER
                 )
             """)
 
@@ -112,6 +114,43 @@ sec_user_id TEXT,
                     耗时秒数 REAL,
                     错误信息 TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS collection_batches (
+                    id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    filter_json TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    process_pid INTEGER,
+                    log_path TEXT,
+                    started_at DATETIME,
+                    finished_at DATETIME,
+                    total_accounts INTEGER DEFAULT 0,
+                    success_accounts INTEGER DEFAULT 0,
+                    failed_accounts INTEGER DEFAULT 0,
+                    skipped_accounts INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS collection_batch_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    batch_id TEXT NOT NULL,
+                    account_record_id TEXT,
+                    sec_user_id TEXT NOT NULL,
+                    account_name TEXT,
+                    platform TEXT NOT NULL,
+                    mark TEXT,
+                    url TEXT,
+                    earliest TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    message TEXT,
+                    started_at DATETIME,
+                    finished_at DATETIME,
+                    FOREIGN KEY (batch_id) REFERENCES collection_batches(id)
                 )
             """)
 
@@ -163,6 +202,8 @@ sec_user_id TEXT,
                 "CREATE INDEX IF NOT EXISTS idx_history_created_at ON collection_history(created_at)",
                 "CREATE INDEX IF NOT EXISTS idx_sync_history_type ON sync_history(task_type)",
                 "CREATE INDEX IF NOT EXISTS idx_sync_history_created ON sync_history(created_at)",
+                "CREATE INDEX IF NOT EXISTS idx_collection_batch_status ON collection_batches(status, created_at)",
+                "CREATE INDEX IF NOT EXISTS idx_collection_batch_item_batch ON collection_batch_items(batch_id, sec_user_id)",
             ]:
                 try:
                     conn.execute(sql)
@@ -232,6 +273,8 @@ sec_user_id TEXT,
                 ("启用", "BOOLEAN DEFAULT 1"),
                 ("采集类型", "TEXT DEFAULT '发布'"),
                 ("获取错误", "TEXT"),
+                ("last_collected_at", "DATETIME"),
+                ("collect_window_days", "INTEGER"),
             ],
         }
         # 软删除字段（墓碑）：三张同步表都加上
@@ -458,6 +501,161 @@ sec_user_id TEXT,
             conn.execute("DELETE FROM account_cache")
             conn.commit()
             return True
+
+    # ========== 采集批次操作 ==========
+
+    _BATCH_FIELDS = {
+        "status", "process_pid", "log_path", "started_at", "finished_at",
+        "total_accounts", "success_accounts", "failed_accounts", "skipped_accounts",
+    }
+    _BATCH_ITEM_FIELDS = {
+        "status", "message", "started_at", "finished_at",
+    }
+
+    def create_collection_batch(
+        self,
+        batch_id: str,
+        filter_json: str,
+        platform: str,
+        log_path: str,
+        items: list[dict],
+    ) -> None:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO collection_batches
+                (id, status, filter_json, platform, log_path, total_accounts, created_at)
+                VALUES (?, 'pending', ?, ?, ?, ?, ?)
+                """,
+                (batch_id, filter_json, platform, log_path, len(items), now),
+            )
+            conn.executemany(
+                """
+                INSERT INTO collection_batch_items
+                (batch_id, account_record_id, sec_user_id, account_name, platform,
+                 mark, url, earliest, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                """,
+                [
+                    (
+                        batch_id,
+                        item.get("account_record_id"),
+                        item["sec_user_id"],
+                        item.get("account_name", ""),
+                        item.get("platform", platform),
+                        item.get("mark", ""),
+                        item.get("url", ""),
+                        str(item.get("earliest", "")),
+                    )
+                    for item in items
+                ],
+            )
+            conn.commit()
+
+    def get_collection_batch(self, batch_id: str) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM collection_batches WHERE id = ?", (batch_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_active_collection_batch(self) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM collection_batches
+                WHERE status IN ('pending', 'running', 'cancelling')
+                ORDER BY created_at, id
+                LIMIT 1
+                """
+            ).fetchone()
+            return dict(row) if row else None
+
+    def list_collection_batches(self, limit: int = 20) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM collection_batches ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_collection_batch_items(self, batch_id: str) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM collection_batch_items WHERE batch_id = ? ORDER BY id",
+                (batch_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def find_collection_batch_item(
+        self, batch_id: str, sec_user_id: str
+    ) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM collection_batch_items
+                WHERE batch_id = ? AND sec_user_id = ?
+                LIMIT 1
+                """,
+                (batch_id, sec_user_id),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def update_collection_batch(self, batch_id: str, **fields) -> bool:
+        valid = {key: value for key, value in fields.items() if key in self._BATCH_FIELDS}
+        if not valid:
+            return False
+        assignments = ", ".join(f"{key} = ?" for key in valid)
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"UPDATE collection_batches SET {assignments} WHERE id = ?",
+                list(valid.values()) + [batch_id],
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_collection_batch_item(self, item_id: int, **fields) -> bool:
+        valid = {key: value for key, value in fields.items() if key in self._BATCH_ITEM_FIELDS}
+        if not valid:
+            return False
+        assignments = ", ".join(f"{key} = ?" for key in valid)
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"UPDATE collection_batch_items SET {assignments} WHERE id = ?",
+                list(valid.values()) + [item_id],
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def refresh_collection_batch_counts(self, batch_id: str) -> dict:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+                    SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped
+                FROM collection_batch_items
+                WHERE batch_id = ?
+                """,
+                (batch_id,),
+            ).fetchone()
+            counts = {
+                "success": row["success"] or 0,
+                "failed": row["failed"] or 0,
+                "skipped": row["skipped"] or 0,
+            }
+            conn.execute(
+                """
+                UPDATE collection_batches
+                SET success_accounts = ?, failed_accounts = ?, skipped_accounts = ?
+                WHERE id = ?
+                """,
+                (counts["success"], counts["failed"], counts["skipped"], batch_id),
+            )
+            conn.commit()
+            return counts
 
     # ========== Cookie表缓存操作 ==========
 
