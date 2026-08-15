@@ -305,8 +305,9 @@ def test_collect_page_formats_single_work_storage_time():
 
 def test_collect_page_shows_batch_progress_summary():
     source = Path("app/templates/collect.html").read_text(encoding="utf-8")
-    assert ".batch-summary-grid" in source
-    assert "grid-template-columns: repeat(5, minmax(96px, 1fr));" in source
+    assert ".batch-summary-grid" not in source
+    assert '<div class="workflow-metrics" style="margin-bottom:12px;">' in source
+    assert 'class="workflow-log"' in source
     assert "function batchElapsedSeconds(batch)" in source
     assert "function currentAccountIndex(items)" in source
     assert "预计账号" in source
@@ -378,3 +379,10 @@ def test_collection_preview_returns_400_when_no_accounts_match(batch_client):
     assert response.status_code == 400
     assert response.json()["message"] == "没有符合条件的账号"
     manager.start.assert_not_called()
+
+
+def test_collect_page_calls_preview_without_starting_batch():
+    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    assert "/api/collection/batches/preview" in source
+    assert "previewCollectionScope(" in source
+    assert "startCollectionBatch" in source

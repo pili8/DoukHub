@@ -78,3 +78,31 @@ def test_sync_templates_do_not_redefine_shared_workflow_css():
         assert ".workflow-" not in source
         assert ".sync-log-box" not in source
         assert ".sync-stat-card" not in source
+
+
+def test_collect_page_is_daily_incremental_console(app_env):
+    client, *_ = app_env
+    response = client.get("/collect")
+    assert response.status_code == 200
+    assert "日常增量采集" in response.text
+    assert "workflow-tabs" in response.text
+    assert "workflow-panel" in response.text
+    assert "单作品采集" in response.text
+    assert "开始日常增量采集" in response.text
+    assert 'id="collection-last-run"' in response.text
+    assert 'id="collection-last-success"' in response.text
+
+
+def test_collect_page_contains_preview_metrics(app_env):
+    client, *_ = app_env
+    response = client.get("/collect")
+    assert 'id="preview-total"' in response.text
+    assert 'id="preview-first-run"' in response.text
+    assert 'id="preview-incremental"' in response.text
+    assert 'id="preview-skipped"' in response.text
+
+
+def test_collect_page_uses_workflow_tab_active_state(app_env):
+    client, *_ = app_env
+    response = client.get("/collect")
+    assert "classList.toggle('active', mode === 'account')" in response.text

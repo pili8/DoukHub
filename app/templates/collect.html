@@ -2,80 +2,109 @@
 {% block title %}采集 - DoukHub{% endblock %}
 {% block content %}
 <style>
-.collect-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-.mode-card { cursor: pointer; transition: all var(--transition); border: 2px solid transparent; }
-.mode-card:hover { border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
-.mode-card.selected { border-color: var(--accent); background: var(--accent-light); }
-.mode-card h3 { margin-bottom: 6px; }
-.mode-card p { font-size: 13px; color: var(--text-muted); }
-.batch-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(96px, 1fr)); gap: 8px; margin-bottom: 12px; }
-.batch-summary-item { min-width: 0; border-left: 2px solid var(--border-strong); padding-left: 8px; }
-.batch-summary-label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 2px; white-space: nowrap; }
-.batch-summary-value { display: block; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 #task-modal > div { max-width: 90vw; width: 420px; max-height: 90vh; overflow-y: auto; }
-@media (max-width: 768px) {
-    .collect-mode-grid { grid-template-columns: 1fr !important; }
-    .batch-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 </style>
 
 <div class="page-header">
     <h2>采集</h2>
 </div>
 
-<div class="collect-mode-grid">
-    <div class="card mode-card" onclick="showCollectMode('account')" id="mode-account-btn">
-        <h3><i class="ph ph-download"></i> 整号采集</h3>
-        <p>按账号批量采集所有作品, 支持评级筛选</p>
+<div class="workflow-tabs" id="collection-tabs">
+    <button type="button" class="workflow-tab active" id="mode-account-btn" onclick="showCollectMode('account')">
+        <i class="ph ph-download"></i> 日常增量采集
+    </button>
+    <button type="button" class="workflow-tab" id="mode-detail-btn" onclick="showCollectMode('detail')">
+        <i class="ph ph-link"></i> 单作品采集
+    </button>
+</div>
+
+<div class="workflow-panel" id="collection-status-panel">
+    <div class="workflow-header">
+        <div class="workflow-title">
+            <i class="ph ph-pulse"></i>
+            <span>采集状态</span>
+        </div>
+        <span class="workflow-status pending" id="collection-status">等待查看</span>
     </div>
-    <div class="card mode-card" onclick="showCollectMode('detail')" id="mode-detail-btn">
-        <h3><i class="ph ph-link"></i> 单品采集</h3>
-        <p>粘贴作品链接, 采集指定作品</p>
+    <div class="workflow-metrics">
+        <div class="workflow-metric" style="border-left-color: var(--md-secondary);">
+            <span class="metric-value" id="collection-last-run">-</span>
+            <span class="metric-label">上次采集</span>
+        </div>
+        <div class="workflow-metric" style="border-left-color: var(--md-success);">
+            <span class="metric-value" id="collection-last-success">-</span>
+            <span class="metric-label">上次成功账号</span>
+        </div>
+        <div class="workflow-metric" style="border-left-color: var(--md-primary);">
+            <span class="metric-value" id="preview-total">-</span>
+            <span class="metric-label">可采账号</span>
+        </div>
+        <div class="workflow-metric" style="border-left-color: var(--md-warning);">
+            <span class="metric-value" id="preview-first-run">-</span>
+            <span class="metric-label">首次全量</span>
+        </div>
+        <div class="workflow-metric" style="border-left-color: var(--md-success);">
+            <span class="metric-value" id="preview-incremental">-</span>
+            <span class="metric-label">日常增量</span>
+        </div>
+        <div class="workflow-metric" style="border-left-color: var(--md-outline);">
+            <span class="metric-value" id="preview-skipped">-</span>
+            <span class="metric-label">配置跳过</span>
+        </div>
     </div>
 </div>
 
-<div class="card" id="account-form-card">
-    <h3><i class="ph ph-download"></i> 整号采集</h3>
+<div class="workflow-panel" id="account-form-card">
+    <div class="workflow-header">
+        <div class="workflow-title">
+            <i class="ph ph-download"></i>
+            <span>日常增量采集</span>
+        </div>
+        <div class="workflow-actions">
+            <button type="submit" form="account-form" class="btn btn-primary" id="account-submit">
+                <i class="ph ph-download-simple"></i> 开始日常增量采集
+            </button>
+        </div>
+    </div>
     <form id="account-form" onsubmit="startCollectionBatch(event)">
-        <div class="form-group">
-            <label>等级筛选（只采集选中等级以上）</label>
-            <div class="collect-rating-group" style="display:flex;gap:16px;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:4px;font-size:14px;font-weight:normal;"><input type="checkbox" name="rating" value="4" checked> 4星</label>
-                <label style="display:flex;align-items:center;gap:4px;font-size:14px;font-weight:normal;"><input type="checkbox" name="rating" value="3" checked> 3星</label>
-                <label style="display:flex;align-items:center;gap:4px;font-size:14px;font-weight:normal;"><input type="checkbox" name="rating" value="2"> 2星</label>
-                <label style="display:flex;align-items:center;gap:4px;font-size:14px;font-weight:normal;"><input type="checkbox" name="rating" value="1"> 1星</label>
+        <div class="workflow-form-grid">
+            <div class="form-group">
+                <label>等级筛选（采集选中等级及以上）</label>
+                <div class="btn-group">
+                    <label class="tag"><input type="checkbox" name="rating" value="4" checked> 4星</label>
+                    <label class="tag"><input type="checkbox" name="rating" value="3" checked> 3星</label>
+                    <label class="tag"><input type="checkbox" name="rating" value="2"> 2星</label>
+                    <label class="tag"><input type="checkbox" name="rating" value="1"> 1星</label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>标签筛选</label>
+                <input type="text" name="tags" placeholder="多, 个人">
+            </div>
+            <div class="form-group">
+                <label>平台</label>
+                <select name="platform">
+                    <option value="douyin">抖音</option>
+                    <option value="tiktok">TikTok</option>
+                    <option value="all">全部</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>采集模式</label>
+                <select name="mode">
+                    <option value="incremental">首次全量，后续增量</option>
+                    <option value="full">重新全量</option>
+                </select>
+            </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+                <label>指定账号（留空为全部符合条件的账号）</label>
+                <input type="text" name="account_names" placeholder="账号名称, 多个用逗号分隔">
             </div>
         </div>
-        <div class="form-group">
-            <label>标签筛选（逗号分隔，留空为全部）</label>
-            <input type="text" name="tags" placeholder="多, 个人">
-        </div>
-        <div class="form-group">
-            <label>指定账号（留空为符合条件的全部账号）</label>
-            <input type="text" name="account_names" placeholder="账号名称, 多个用逗号分隔">
-        </div>
-        <div class="form-group">
-            <label>平台</label>
-            <select name="platform">
-                <option value="douyin">抖音</option>
-                <option value="tiktok">TikTok</option>
-                <option value="all">全部</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>采集模式</label>
-            <select name="mode">
-                <option value="incremental">首次全量，后续增量</option>
-                <option value="full">重新全量</option>
-            </select>
-        </div>
-        <button type="submit" class="btn btn-primary" id="account-submit">
-            <i class="ph ph-download-simple"></i> 开始整号采集
-        </button>
     </form>
 </div>
 
-<div class="card" id="detail-form-card" style="display:none;">
+<div class="workflow-panel" id="detail-form-card" style="display:none;">
     <h3><i class="ph ph-link"></i> 单品采集</h3>
     <form id="detail-form" onsubmit="resolveSingleWorks(event)">
         <div class="form-group">
@@ -123,12 +152,18 @@
     </div>
 </div>
 
-<div class="card" id="batch-card" style="display:none;">
-    <h3><i class="ph ph-list-checks"></i> 批量批次</h3>
+<div class="workflow-panel" id="batch-card" style="display:none;">
+    <div class="workflow-header">
+        <div class="workflow-title">
+            <i class="ph ph-list-checks"></i>
+            <span>当前批次</span>
+        </div>
+        <div class="workflow-actions" id="batch-detail-actions"></div>
+    </div>
     <div id="batch-detail"></div>
 </div>
 
-<div class="card">
+<div class="workflow-panel">
     <h3><i class="ph ph-clock-counter-clockwise"></i> 批次记录</h3>
     <div class="table-scroll">
         <table>
@@ -228,21 +263,80 @@
     function showCollectMode(mode) {
         document.getElementById('account-form-card').style.display = mode === 'account' ? 'block' : 'none';
         document.getElementById('detail-form-card').style.display = mode === 'detail' ? 'block' : 'none';
-        document.getElementById('mode-account-btn').classList.toggle('selected', mode === 'account');
-        document.getElementById('mode-detail-btn').classList.toggle('selected', mode === 'detail');
+        document.getElementById('mode-account-btn').classList.toggle('active', mode === 'account');
+        document.getElementById('mode-detail-btn').classList.toggle('active', mode === 'detail');
     }
 
     showCollectMode('account');
+    document.querySelectorAll('#account-form input, #account-form select').forEach(element => {
+        element.addEventListener('change', queueCollectionPreview);
+        element.addEventListener('input', queueCollectionPreview);
+    });
+    previewCollectionScope();
 
     if (window.collectionPollTimer) clearInterval(window.collectionPollTimer);
     var collectionPollTimer = window.collectionPollTimer || null;
     window._spaCleanup = () => {
         if (collectionPollTimer) clearInterval(collectionPollTimer);
         collectionPollTimer = null;
+        if (previewTimer) clearTimeout(previewTimer);
+        previewTimer = null;
     };
 
     var resolvedSingleLinks = [];
     var resolveGeneration = 0;
+
+    function collectionPayloadFromForm(form) {
+        const ratings = form.getAll('rating').map(Number);
+        return {
+            rating_min: ratings.length ? Math.min(...ratings) : 3,
+            tags: String(form.get('tags') || '')
+                .split(/[,，]/).map(value => value.trim()).filter(Boolean),
+            account_names: form.get('account_names') || '',
+            platform: form.get('platform') || 'douyin',
+            mode: form.get('mode') || 'incremental',
+        };
+    }
+
+    let previewTimer = null;
+
+    async function previewCollectionScope() {
+        const form = new FormData(document.getElementById('account-form'));
+        const status = document.getElementById('collection-status');
+        status.className = 'workflow-status running';
+        status.textContent = '正在统计';
+        try {
+            const data = await apiCall(
+                '/api/collection/batches/preview',
+                'POST',
+                collectionPayloadFromForm(form)
+            );
+            if (data.success === false) {
+                throw new Error(data.message || '无法统计');
+            }
+            document.getElementById('preview-total').textContent = data.total_accounts || 0;
+            document.getElementById('preview-first-run').textContent =
+                data.first_run_accounts || 0;
+            document.getElementById('preview-incremental').textContent =
+                data.incremental_accounts || 0;
+            document.getElementById('preview-skipped').textContent =
+                data.skipped_accounts || 0;
+            status.className = 'workflow-status success';
+            status.textContent = '范围已更新';
+        } catch (error) {
+            document.getElementById('preview-total').textContent = '-';
+            document.getElementById('preview-first-run').textContent = '-';
+            document.getElementById('preview-incremental').textContent = '-';
+            document.getElementById('preview-skipped').textContent = '-';
+            status.className = 'workflow-status failed';
+            status.textContent = error.message || '无法统计';
+        }
+    }
+
+    function queueCollectionPreview() {
+        if (previewTimer) clearTimeout(previewTimer);
+        previewTimer = setTimeout(previewCollectionScope, 250);
+    }
 
     function invalidateResolvedSingleWorks() {
         resolveGeneration += 1;
@@ -415,16 +509,7 @@
 
     async function startCollectionBatch(e) {
         e.preventDefault();
-        const form = new FormData(e.target);
-        const ratings = form.getAll('rating').map(Number);
-        const payload = {
-            rating_min: ratings.length ? Math.min(...ratings) : 3,
-            tags: String(form.get('tags') || '')
-                .split(/[,，]/).map(value => value.trim()).filter(Boolean),
-            account_names: form.get('account_names') || '',
-            platform: form.get('platform') || 'douyin',
-            mode: form.get('mode') || 'incremental',
-        };
+        const payload = collectionPayloadFromForm(new FormData(e.target));
         const button = document.getElementById('account-submit');
         button.disabled = true;
         button.innerHTML = '<i class="ph ph-spinner"></i> 正在创建...';
@@ -437,12 +522,37 @@
             showToast(error.message || '创建批次失败', 'error');
         } finally {
             button.disabled = false;
-            button.innerHTML = '<i class="ph ph-download-simple"></i> 开始整号采集';
+            button.innerHTML = '<i class="ph ph-download-simple"></i> 开始日常增量采集';
         }
+    }
+
+    function updateCollectionStatus(batches) {
+        const status = document.getElementById('collection-status');
+        const active = batches.find(batch =>
+            ['pending', 'running', 'cancelling'].includes(batch.status)
+        );
+        const latest = batches[0];
+        if (active) {
+            status.className = `workflow-status ${active.status}`;
+            status.textContent = `${formatPlatform(active.platform)} ${formatBatchStatus(active.status)}`;
+        } else if (latest) {
+            status.className = `workflow-status ${latest.status}`;
+            status.textContent = `${formatPlatform(latest.platform)} ${formatBatchStatus(latest.status)}`;
+        } else {
+            status.className = 'workflow-status pending';
+            status.textContent = '空闲';
+        }
+        document.getElementById('collection-last-run').textContent = latest
+            ? formatDateTime(latest.started_at)
+            : '-';
+        document.getElementById('collection-last-success').textContent = latest
+            ? String(latest.success_accounts || 0)
+            : '-';
     }
 
     async function refreshCollectionBatches() {
         const data = await apiCall('/api/collection/batches', 'GET');
+        updateCollectionStatus(data.batches || []);
         const body = document.getElementById('batch-table-body');
         if (!data.batches?.length) {
             body.innerHTML = '<tr><td colspan="9" class="text-muted">暂无批次</td></tr>';
@@ -452,7 +562,7 @@
             <tr>
                 <td title="${escapeHtml(batch.id)}">${escapeHtml(batch.id.slice(0, 17))}</td>
                 <td>${formatPlatform(batch.platform)}</td>
-                <td>${formatBatchStatus(batch.status)}</td>
+                <td><span class="workflow-status ${batch.status}">${formatBatchStatus(batch.status)}</span></td>
                 <td>${batch.total_accounts || 0}</td>
                 <td>${batch.success_accounts || 0}</td>
                 <td>${batch.failed_accounts || 0}</td>
@@ -485,26 +595,26 @@
             </tr>
         `).join('');
         document.getElementById('batch-detail').innerHTML = `
-            <div class="batch-summary-grid">
-                <div class="batch-summary-item">
-                    <span class="batch-summary-label">预计账号</span>
-                    <span class="batch-summary-value">${batch.total_accounts || 0}</span>
+            <div class="workflow-metrics" style="margin-bottom:12px;">
+                <div class="workflow-metric">
+                    <span class="metric-value">${batch.total_accounts || 0}</span>
+                    <span class="metric-label">预计账号</span>
                 </div>
-                <div class="batch-summary-item">
-                    <span class="batch-summary-label">当前账号</span>
-                    <span class="batch-summary-value">${formatCurrentAccount(data.items || [])}</span>
+                <div class="workflow-metric">
+                    <span class="metric-value">${formatCurrentAccount(data.items || [])}</span>
+                    <span class="metric-label">当前账号</span>
                 </div>
-                <div class="batch-summary-item">
-                    <span class="batch-summary-label">已运行</span>
-                    <span class="batch-summary-value">${formatElapsedSeconds(batchElapsedSeconds(batch))}</span>
+                <div class="workflow-metric">
+                    <span class="metric-value">${formatElapsedSeconds(batchElapsedSeconds(batch))}</span>
+                    <span class="metric-label">已运行</span>
                 </div>
-                <div class="batch-summary-item">
-                    <span class="batch-summary-label">成功</span>
-                    <span class="batch-summary-value">${batch.success_accounts || 0}</span>
+                <div class="workflow-metric">
+                    <span class="metric-value">${batch.success_accounts || 0}</span>
+                    <span class="metric-label">成功</span>
                 </div>
-                <div class="batch-summary-item">
-                    <span class="batch-summary-label">失败</span>
-                    <span class="batch-summary-value">${batch.failed_accounts || 0}</span>
+                <div class="workflow-metric">
+                    <span class="metric-value">${batch.failed_accounts || 0}</span>
+                    <span class="metric-label">失败</span>
                 </div>
             </div>
             <div class="table-scroll" style="margin-bottom:12px;">
@@ -515,7 +625,7 @@
             </div>
             <details>
                 <summary class="text-muted">批次日志</summary>
-                <pre style="max-height:240px;overflow:auto;background:var(--bg-muted);padding:12px;border-radius:var(--radius-sm);font-size:12px;">${escapeHtml((data.log || []).join('\n'))}</pre>
+                <pre class="workflow-log" style="max-height:240px;">${escapeHtml((data.log || []).join('\\n'))}</pre>
             </details>
         `;
         if (!silent) await refreshCollectionBatches();
