@@ -118,3 +118,21 @@ def test_canonical_stylesheet_is_served(app_env):
     response = client.get("/static/css/style.css")
     assert response.status_code == 200
     assert "--dh-background" in response.text
+
+
+def test_global_shell_uses_lucide_icons(app_env):
+    client, *_ = app_env
+    response = client.get("/status")
+    assert response.status_code == 200
+    assert 'data-lucide="gauge"' in response.text
+    assert 'data-lucide="refresh-cw"' in response.text
+    assert 'data-lucide="download"' in response.text
+    assert 'data-lucide="database"' in response.text
+    assert 'data-lucide="settings"' in response.text
+    assert 'class="ph ph-gauge"' not in response.text
+
+
+def test_spa_router_refreshes_lucide_icons():
+    source = Path("app/templates/base.html").read_text(encoding="utf-8")
+    assert "function refreshIcons()" in source
+    assert "refreshIcons()" in source.split("async function loadPage", 1)[1]

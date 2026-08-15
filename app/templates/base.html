@@ -20,76 +20,76 @@
     <div class="layout">
         <nav class="sidebar">
             <div class="sidebar-brand">
-                <i class="ph-bold ph-rocket-launch"></i>
+                <i data-lucide="rocket"></i>
                 <span>DoukHub</span>
                 <button id="sidebar-collapse-btn" onclick="toggleSidebar()" title="折叠/展开侧边栏" class="sidebar-collapse-btn">
-                    <i class="ph ph-sidebar-simple"></i>
+                    <i data-lucide="panel-left-close"></i>
                 </button>
             </div>
             <div class="sidebar-nav">
                 <a href="/status" title="状态" class="{% if page == 'status' %}active{% endif %}">
-                    <i class="ph ph-gauge"></i><span>状态</span>
+                    <i data-lucide="gauge"></i><span>状态</span>
                 </a>
 
                 <!-- 同步父级:手风琴式展开/收起子项 -->
                 <div class="nav-group{% if page in ('sync_overview','sync_import','sync_resolve','sync_account','sync_refresh') %} expanded{% endif %}">
                     <a href="/sync/overview" title="同步" class="nav-group-toggle" onclick="toggleNavGroup(event, this)">
-                        <i class="ph ph-arrows-clockwise"></i><span>同步</span>
-                        <i class="ph ph-caret-right nav-arrow"></i>
+                        <i data-lucide="refresh-cw"></i><span>同步</span>
+                        <i data-lucide="chevron-right" class="nav-arrow"></i>
                     </a>
                     <div class="nav-submenu">
                         <a href="/sync/overview" title="概览" class="{% if page == 'sync_overview' %}active{% endif %}">
-                            <i class="ph ph-house"></i><span>概览</span>
+                            <i data-lucide="house"></i><span>概览</span>
                         </a>
                         <a href="/sync/import" title="导入采集表" class="{% if page == 'sync_import' %}active{% endif %}">
-                            <i class="ph ph-download"></i><span>导入采集表</span>
+                            <i data-lucide="download"></i><span>导入采集表</span>
                         </a>
                         <a href="/sync/resolve" title="解析采集表" class="{% if page == 'sync_resolve' %}active{% endif %}">
-                            <i class="ph ph-keyhole"></i><span>解析采集表</span>
+                            <i data-lucide="key-round"></i><span>解析采集表</span>
                         </a>
                         <a href="/sync/account" title="同步账号表" class="{% if page == 'sync_account' %}active{% endif %}">
-                            <i class="ph ph-users"></i><span>同步账号表</span>
+                            <i data-lucide="users"></i><span>同步账号表</span>
                         </a>
                         <a href="/sync/refresh" title="更新账号表" class="{% if page == 'sync_refresh' %}active{% endif %}">
-                            <i class="ph ph-arrow-clockwise"></i><span>更新账号表</span>
+                            <i data-lucide="rotate-cw"></i><span>更新账号表</span>
                         </a>
                     </div>
                 </div>
 
                 <a href="/collect" title="采集" class="{% if page == 'collect' %}active{% endif %}">
-                    <i class="ph ph-download-simple"></i><span>采集</span>
+                    <i data-lucide="download"></i><span>采集</span>
                 </a>
 
                 <!-- 数据父级:手风琴式展开/收起子项 -->
                 <div class="nav-group{% if page in ('database','table','sync_cloud') %} expanded{% endif %}">
                     <a href="/database" title="数据" class="nav-group-toggle" onclick="toggleNavGroup(event, this)">
-                        <i class="ph ph-database"></i><span>数据</span>
-                        <i class="ph ph-caret-right nav-arrow"></i>
+                        <i data-lucide="database"></i><span>数据</span>
+                        <i data-lucide="chevron-right" class="nav-arrow"></i>
                     </a>
                     <div class="nav-submenu">
                         <a href="/database" title="数据概览" class="{% if page == 'database' %}active{% endif %}">
-                            <i class="ph ph-squares-four"></i><span>数据概览</span>
+                            <i data-lucide="layout-grid"></i><span>数据概览</span>
                         </a>
                         <a href="/sync/cloud" title="云端同步" class="{% if page == 'sync_cloud' %}active{% endif %}">
-                            <i class="ph ph-cloud-arrow-up"></i><span>云端同步</span>
+                            <i data-lucide="cloud-upload"></i><span>云端同步</span>
                         </a>
                         <a href="/table" title="表浏览" class="{% if page == 'table' %}active{% endif %}">
-                            <i class="ph ph-table"></i><span>表浏览</span>
+                            <i data-lucide="table-2"></i><span>表浏览</span>
                         </a>
                     </div>
                 </div>
                 <a href="/settings" title="设置" class="{% if page == 'settings' %}active{% endif %}">
-                    <i class="ph ph-gear"></i><span>设置</span>
+                    <i data-lucide="settings"></i><span>设置</span>
                 </a>
             </div>
             <div class="sidebar-footer">
             <div class="sidebar-footer">
               <div style="display:flex;gap:6px;">
                 <button id="mode-toggle" onclick="toggleMode()" title="切换明/暗" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);cursor:pointer;font-size:16px;transition:all var(--transition-fast);">
-                    <i class="ph ph-moon"></i>
+                    <i data-lucide="moon"></i>
                 </button>
                 <button id="task-badge" onclick="openTaskPanel()" title="后台任务" style="width:32px;height:32px;display:none;align-items:center;justify-content:center;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);cursor:pointer;font-size:16px;transition:all var(--transition-fast);position:relative;">
-                    <i class="ph ph-list-checks"></i>
+                    <i data-lucide="list-checks"></i>
                     <span id="task-badge-count" style="position:absolute;top:-6px;right:-6px;background:var(--accent);color:var(--text-on-accent,#fff);font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;line-height:1;"></span>
                 </button>
               </div>
@@ -106,8 +106,8 @@
     <div id="dh-confirm-overlay" class="dh-modal-overlay">
         <div class="dh-modal-box">
             <div class="dh-modal-header">
-                <h3><i class="ph ph-question"></i> <span id="dh-confirm-title">确认</span></h3>
-                <button class="dh-modal-close" onclick="dhConfirmResolve(false)"><i class="ph ph-x"></i></button>
+                <h3><i data-lucide="help-circle"></i> <span id="dh-confirm-title">确认</span></h3>
+                <button class="dh-modal-close" onclick="dhConfirmResolve(false)"><i data-lucide="x"></i></button>
             </div>
             <div id="dh-confirm-message" class="dh-modal-body"></div>
             <input id="dh-confirm-input" type="text" style="display:none;width:100%;box-sizing:border-box;margin-top:12px;padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-default);background:var(--bg-input);color:var(--text-primary);font-size:13px;">
@@ -122,8 +122,8 @@
     <div id="task-panel-overlay" class="dh-modal-overlay">
         <div class="dh-modal-box" style="max-width:760px;">
             <div class="dh-modal-header">
-                <h3><i class="ph ph-list-checks"></i> <span>后台任务</span></h3>
-                <button class="dh-modal-close" onclick="closeTaskPanel()"><i class="ph ph-x"></i></button>
+                <h3><i data-lucide="list-checks"></i> <span>后台任务</span></h3>
+                <button class="dh-modal-close" onclick="closeTaskPanel()"><i data-lucide="x"></i></button>
             </div>
             <div id="task-panel-body" class="dh-modal-body" style="max-height:72vh;overflow-y:auto;"></div>
             <div class="dh-modal-actions">
@@ -371,7 +371,7 @@
         function updateModeToggle(mode) {
             var btn = document.getElementById('mode-toggle');
             if (!btn) return;
-            btn.innerHTML = '<i class="ph ph-' + (mode === 'dark' ? 'sun' : 'moon') + '"></i>';
+            btn.innerHTML = '<i data-lucide="' + (mode === 'dark' ? 'sun' : 'moon') + '"></i>';
             btn.title = mode === 'dark' ? '当前暗色 — 点击切到亮色' : '当前亮色 — 点击切到暗色';
         }
         updateModeToggle(document.documentElement.getAttribute('data-theme') || 'light');
@@ -445,6 +445,7 @@
                     ps.innerHTML = newScripts.innerHTML;
                     await rebindScripts(ps);
                 }
+                if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
                 document.title = doc.title;
                 if (pushState) history.pushState({ url }, '', url);
                 updateActiveNav(url);
