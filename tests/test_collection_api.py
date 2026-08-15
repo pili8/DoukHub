@@ -111,6 +111,28 @@ def test_retry_failed_items_creates_new_batch(batch_client):
     assert manager.start.await_args.kwargs["mode"] == "full"
 
 
+def test_retry_returns_400_when_no_source_accounts_remain_eligible(
+    batch_client,
+):
+    client, database, manager = batch_client
+    database.get_collection_batch_items.return_value = [
+        {
+            "account_record_id": "a1",
+            "sec_user_id": "sec1",
+            "account_name": "一号",
+            "status": "failed",
+        }
+    ]
+    manager.start = AsyncMock(side_effect=ValueError("没有符合条件的账号"))
+
+    response = client.post(
+        "/api/collection/batches/b1/retry", json={"mode": "incremental"}
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "没有符合条件的账号"
+
+
 @pytest.fixture
 def single_client(monkeypatch):
     saved = app_main.single_work_client
@@ -245,7 +267,10 @@ def test_collect_page_discards_stale_resolve_response():
     ) == 2
 
 
-@pytest.mark.parametrize("filename_template", ["{title", "{unknown}", "{0}"])
+@pytest.mark.parametrize(
+    "filename_template",
+    ["{title", "{unknown}", "{0}", "{title.foo}"],
+)
 def test_download_rejects_malformed_filename_templates(
     single_client, tmp_path, monkeypatch, filename_template
 ):
@@ -276,3 +301,15 @@ def test_collect_page_uses_canonical_browse_parent():
 def test_collect_page_formats_single_work_storage_time():
     source = Path("app/templates/collect.html").read_text(encoding="utf-8")
     assert ".replace(/ (\\d\\d)-(\\d\\d)-(\\d\\d)$/, ' $1:$2:$3')" in source
+
+
+def test_collect_page_shows_batch_progress_summary():
+    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    assert ".batch-summary-grid" in source
+    assert "grid-template-columns: repeat(5, minmax(96px, 1fr));" in source
+    assert "function batchElapsedSeconds(batch)" in source
+    assert "function currentAccountIndex(items)" in source
+    assert "预计账号" in source
+    assert "已运行" in source
+    assert "当前账号" in source
+    assert 'batch.total_accounts || 0' in source

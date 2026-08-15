@@ -209,9 +209,13 @@ class CollectionBatchManager:
         self, command: list[str], cwd: Path
     ) -> asyncio.subprocess.Process:
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        environment = os.environ.copy()
+        environment["PYTHONIOENCODING"] = "utf-8"
+        environment["PYTHONUTF8"] = "1"
         return await asyncio.create_subprocess_exec(
             *command,
             cwd=str(cwd),
+            env=environment,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             creationflags=creationflags,
@@ -401,6 +405,7 @@ class CollectionBatchManager:
             )
         if not item:
             return False
+        batch = self.db.get_collection_batch(batch_id)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if marker_type == "account_start":
             self.db.update_collection_batch_item(
@@ -416,9 +421,10 @@ class CollectionBatchManager:
             message=str(marker.get("message") or ""),
             finished_at=now,
         )
-        if status == "success" and item.get("account_record_id"):
+        batch_start_date = str((batch or {}).get("started_at") or "")[:10]
+        if status == "success" and item.get("account_record_id") and batch_start_date:
             self.db.update_account(
-                item["account_record_id"], {"last_collected_at": now[:10]}
+                item["account_record_id"], {"last_collected_at": batch_start_date}
             )
         self.db.refresh_collection_batch_counts(batch_id)
         return True

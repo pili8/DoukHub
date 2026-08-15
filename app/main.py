@@ -2307,7 +2307,7 @@ async def api_resolve_single_works(request: SingleWorkResolveRequest):
 async def api_download_single_works(request: SingleWorkDownloadRequest):
     try:
         unsafe_template = _is_unsafe_filename_template(request.filename_template)
-    except (KeyError, IndexError, ValueError):
+    except (AttributeError, KeyError, IndexError, ValueError):
         return JSONResponse(
             {"success": False, "message": "命名模板格式无效"},
             status_code=400,
@@ -2445,6 +2445,8 @@ async def api_retry_collection_batch(batch_id: str, request: CollectionRetryRequ
             mode=request.mode,
         )
         return {"success": True, "batches": batches}
+    except ValueError as error:
+        return JSONResponse({"success": False, "message": str(error)}, status_code=400)
     except RuntimeError as error:
         return JSONResponse({"success": False, "message": str(error)}, status_code=409)
 

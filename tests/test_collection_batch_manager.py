@@ -1,10 +1,13 @@
 import asyncio
 import json
+import sys
+from datetime import datetime as real_datetime
 
 import pytest
 
 from app.core.collection_batch_manager import CollectionBatchManager
 from app.core.database import Database
+from app.core.ttd_batch_runner import marker_line
 
 
 class FakeStream:
@@ -116,6 +119,7 @@ def create_running_batch(db, batch_id, log_path="", sec_user_id="sec1"):
         log_path=log_path,
         items=[
             {
+                "account_record_id": "a1",
                 "sec_user_id": sec_user_id,
                 "account_name": sec_user_id,
                 "platform": "douyin",
@@ -139,6 +143,7 @@ def test_marker_updates_item_account_and_counts(db, manager):
         )
     )
     batch_id = batches[0]["id"]
+    db.update_collection_batch(batch_id, started_at="2026-08-15 10:00:00")
     item = db.find_collection_batch_item(batch_id, "sec1")
 
     marker = {
@@ -154,6 +159,62 @@ def test_marker_updates_item_account_and_counts(db, manager):
     counts = manager._finalize(batch_id, "completed", 0)
     assert counts["success"] == 1
     assert db.get_collection_batch(batch_id)["status"] == "completed"
+
+
+def test_marker_success_uses_persisted_batch_start_date(
+    db, manager, monkeypatch
+):
+    insert_douyin_account(db)
+    create_running_batch(db, "midnight")
+    db.update_collection_batch(
+        "midnight", started_at="2026-08-14 23:59:59"
+    )
+
+    class FixedDatetime:
+        @staticmethod
+        def now():
+            return real_datetime(2026, 8, 15, 0, 0, 1)
+
+    monkeypatch.setattr(
+        "app.core.collection_batch_manager.datetime", FixedDatetime
+    )
+
+    assert manager._apply_marker(
+        "midnight",
+        {
+            "type": "account_result",
+            "sec_user_id": "sec1",
+            "status": "success",
+            "message": "OK",
+        },
+    )
+    assert (
+        db.get_account_by_id("a1")["last_collected_at"] == "2026-08-14"
+    )
+
+
+def test_launch_process_forces_utf8_for_non_ascii_markers(
+    manager, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("PYTHONIOENCODING", "gbk")
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import json; print('__DOUKHUB__' + json.dumps("
+            "{'type': 'account_result', 'sec_user_id': 'sec1', "
+            "'account_name': '一号', 'status': 'success'}, ensure_ascii=False))"
+        ),
+    ]
+
+    async def read_marker():
+        process = await manager._launch_process(command, tmp_path)
+        raw = await process.stdout.readline()
+        await process.wait()
+        return marker_line(raw.decode("utf-8", errors="replace").rstrip("\r\n"))
+
+    marker = asyncio.run(read_marker())
+    assert marker["account_name"] == "一号"
 
 
 def test_run_batch_uses_ttd_process_and_persists_log(db, manager, monkeypatch):

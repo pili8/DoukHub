@@ -8,9 +8,14 @@
 .mode-card.selected { border-color: var(--accent); background: var(--accent-light); }
 .mode-card h3 { margin-bottom: 6px; }
 .mode-card p { font-size: 13px; color: var(--text-muted); }
+.batch-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(96px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.batch-summary-item { min-width: 0; border-left: 2px solid var(--border-strong); padding-left: 8px; }
+.batch-summary-label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 2px; white-space: nowrap; }
+.batch-summary-value { display: block; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 #task-modal > div { max-width: 90vw; width: 420px; max-height: 90vh; overflow-y: auto; }
 @media (max-width: 768px) {
     .collect-mode-grid { grid-template-columns: 1fr !important; }
+    .batch-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>
 
@@ -469,6 +474,7 @@
 
     async function showBatchDetail(batchId, silent = false) {
         const data = await apiCall(`/api/collection/batches/${batchId}`, 'GET');
+        const batch = data.batch || {};
         document.getElementById('batch-card').style.display = 'block';
         const rows = data.items.map(item => `
             <tr>
@@ -479,6 +485,28 @@
             </tr>
         `).join('');
         document.getElementById('batch-detail').innerHTML = `
+            <div class="batch-summary-grid">
+                <div class="batch-summary-item">
+                    <span class="batch-summary-label">预计账号</span>
+                    <span class="batch-summary-value">${batch.total_accounts || 0}</span>
+                </div>
+                <div class="batch-summary-item">
+                    <span class="batch-summary-label">当前账号</span>
+                    <span class="batch-summary-value">${formatCurrentAccount(data.items || [])}</span>
+                </div>
+                <div class="batch-summary-item">
+                    <span class="batch-summary-label">已运行</span>
+                    <span class="batch-summary-value">${formatElapsedSeconds(batchElapsedSeconds(batch))}</span>
+                </div>
+                <div class="batch-summary-item">
+                    <span class="batch-summary-label">成功</span>
+                    <span class="batch-summary-value">${batch.success_accounts || 0}</span>
+                </div>
+                <div class="batch-summary-item">
+                    <span class="batch-summary-label">失败</span>
+                    <span class="batch-summary-value">${batch.failed_accounts || 0}</span>
+                </div>
+            </div>
             <div class="table-scroll" style="margin-bottom:12px;">
                 <table>
                     <thead><tr><th>账号</th><th>状态</th><th>上次采集</th><th>信息</th></tr></thead>
@@ -522,6 +550,37 @@
             completed: '已完成', failed: '失败', cancelled: '已取消',
             success: '成功', skipped: '跳过',
         }[value] || value || '-';
+    }
+
+    function batchElapsedSeconds(batch) {
+        const start = Date.parse(String(batch.started_at || '').replace(' ', 'T'));
+        if (Number.isNaN(start)) return null;
+        const end = Date.parse(String(batch.finished_at || '').replace(' ', 'T'));
+        const stoppedAt = Number.isNaN(end) ? null : end;
+        const elapsed = ((stoppedAt || Date.now()) - start) / 1000;
+        return Math.max(0, Math.floor(elapsed));
+    }
+
+    function formatElapsedSeconds(seconds) {
+        if (seconds === null) return '-';
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const remainingSeconds = seconds % 60;
+        return [hours, minutes, remainingSeconds]
+            .map(value => String(value).padStart(2, '0'))
+            .join(':');
+    }
+
+    function currentAccountIndex(items) {
+        const running = items.findIndex(item => item.status === 'running');
+        if (running >= 0) return running + 1;
+        const pending = items.findIndex(item => item.status === 'pending');
+        if (pending >= 0) return pending + 1;
+        return items.length;
+    }
+
+    function formatCurrentAccount(items) {
+        return items.length ? `${currentAccountIndex(items)} / ${items.length}` : '-';
     }
 
     function formatDateTime(value) {

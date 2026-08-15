@@ -33,7 +33,6 @@ def test_marker_line_is_stable_json(capsys):
     assert parsed["type"] == "account_result"
     assert parsed["account_name"] == "一号"
 
-
 def test_database_init_preserves_existing_preferences_and_adds_defaults(tmp_path):
     with sqlite3.connect(tmp_path / "DouK-Downloader.db") as conn:
         conn.execute(
