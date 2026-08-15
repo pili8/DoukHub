@@ -22,6 +22,7 @@ from .core.syncer import Syncer
 from .core.syncer_v2 import Syncer as SyncerV2
 from .core.database import Database
 from .core.collection_batch_manager import CollectionBatchManager
+from .core.collection_planner import plan_collection
 from .core.feishu_sync import FeishuSyncer
 from .core.history import HistoryDB
 from .core.scheduler import TaskScheduler
@@ -2388,6 +2389,58 @@ async def api_start_collection_batch(request: CollectionBatchRequest):
 @app.get("/api/collection/batches")
 async def api_list_collection_batches():
     return {"batches": get_database().list_collection_batches()}
+
+
+@app.post("/api/collection/batches/preview")
+async def api_preview_collection_batch(request: CollectionBatchRequest):
+    """Preview the account selection without creating a batch."""
+    accounts = get_database().get_all_accounts()
+    platforms = (
+        ("douyin", "tiktok") if request.platform == "all" else (request.platform,)
+    )
+    platform_results = []
+    totals = {
+        "total_accounts": 0,
+        "incremental_accounts": 0,
+        "first_run_accounts": 0,
+        "skipped_accounts": 0,
+    }
+
+    for platform in platforms:
+        planned = plan_collection(
+            accounts=accounts,
+            rating_min=request.rating_min,
+            tags=request.tags,
+            account_names=request.account_names,
+            platform=platform,
+            mode=request.mode,
+        )
+        if not planned:
+            continue
+        skipped = sum(item.status == "skipped" for item in planned)
+        first_run = sum(
+            item.status == "pending" and item.earliest == "" for item in planned
+        )
+        incremental = sum(
+            item.status == "pending" and item.earliest != "" for item in planned
+        )
+        result = {
+            "platform": platform,
+            "total_accounts": len(planned),
+            "incremental_accounts": incremental,
+            "first_run_accounts": first_run,
+            "skipped_accounts": skipped,
+        }
+        platform_results.append(result)
+        for key in totals:
+            totals[key] += result[key]
+
+    if not platform_results:
+        return JSONResponse(
+            {"success": False, "message": "没有符合条件的账号"},
+            status_code=400,
+        )
+    return {"success": True, **totals, "platforms": platform_results}
 
 
 @app.get("/api/collection/batches/{batch_id}")

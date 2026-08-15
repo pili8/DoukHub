@@ -313,3 +313,68 @@ def test_collect_page_shows_batch_progress_summary():
     assert "已运行" in source
     assert "当前账号" in source
     assert 'batch.total_accounts || 0' in source
+
+
+def test_collection_preview_is_read_only(batch_client):
+    client, database, manager = batch_client
+    database.get_all_accounts.return_value = [
+        {
+            "record_id": "a1",
+            "账号名称": "新账号",
+            "平台": "抖音",
+            "链接": "",
+            "sec_user_id": "sec1",
+            "等级": 4,
+            "标签": "",
+            "启用": 1,
+            "last_collected_at": None,
+            "collect_window_days": None,
+        },
+        {
+            "record_id": "a2",
+            "账号名称": "已采集账号",
+            "平台": "抖音",
+            "链接": "",
+            "sec_user_id": "sec2",
+            "等级": 4,
+            "标签": "",
+            "启用": 1,
+            "last_collected_at": "2026-08-14 10:00:00",
+            "collect_window_days": None,
+        },
+        {
+            "record_id": "a3",
+            "账号名称": "TikTok",
+            "平台": "TikTok",
+            "链接": "",
+            "sec_user_id": "tiksec",
+            "等级": 4,
+            "标签": "",
+            "启用": 1,
+            "last_collected_at": None,
+            "collect_window_days": None,
+        },
+    ]
+    response = client.post(
+        "/api/collection/batches/preview",
+        json={"rating_min": 3, "platform": "all", "mode": "incremental"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["total_accounts"] == 3
+    assert data["first_run_accounts"] == 1
+    assert data["incremental_accounts"] == 1
+    assert data["skipped_accounts"] == 1
+    assert data["platforms"][0]["platform"] == "douyin"
+    assert data["platforms"][0]["total_accounts"] == 2
+    assert manager.start.await_count == 0
+
+
+def test_collection_preview_returns_400_when_no_accounts_match(batch_client):
+    client, database, manager = batch_client
+    database.get_all_accounts.return_value = []
+    response = client.post("/api/collection/batches/preview", json={})
+    assert response.status_code == 400
+    assert response.json()["message"] == "没有符合条件的账号"
+    manager.start.assert_not_called()
