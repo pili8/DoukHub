@@ -5,35 +5,36 @@
 #task-modal > div { max-width: 90vw; width: 420px; max-height: 90vh; overflow-y: auto; }
 </style>
 
-<div class="page-header">
-    <h2>采集</h2>
+<div class="page-head">
+    <div>
+        <h1 class="page-title">采集</h1>
+        <div class="page-sub">日常增量运行台 · 上次采集 <span id="collection-last-run">-</span></div>
+    </div>
+    <div class="page-actions">
+        <span class="workflow-status pending" id="collection-status">等待查看</span>
+    </div>
 </div>
 
 <div class="workflow-tabs" id="collection-tabs" role="tablist" aria-label="采集模式">
     <button type="button" class="workflow-tab active" id="mode-account-btn" role="tab" aria-selected="true" aria-controls="account-form-card" tabindex="0" onclick="showCollectMode('account')" onkeydown="collectionTabKeydown(event, 'account')">
-        <i class="ph ph-download"></i> 日常增量采集
+        <i data-lucide="download"></i> 日常增量采集
     </button>
     <button type="button" class="workflow-tab" id="mode-detail-btn" role="tab" aria-selected="false" aria-controls="detail-form-card" tabindex="-1" onclick="showCollectMode('detail')" onkeydown="collectionTabKeydown(event, 'detail')">
-        <i class="ph ph-link"></i> 单作品采集
+        <i data-lucide="link"></i> 单作品采集
     </button>
 </div>
 
 <div class="workflow-panel" id="collection-status-panel">
     <div class="workflow-header">
         <div class="workflow-title">
-            <i class="ph ph-pulse"></i>
+            <i data-lucide="activity"></i>
             <span>采集状态</span>
         </div>
         <div class="workflow-actions">
             <span class="workflow-status pending" id="collection-preview-status">等待统计</span>
-            <span class="workflow-status pending" id="collection-status">等待查看</span>
         </div>
     </div>
     <div class="workflow-metrics">
-        <div class="workflow-metric" style="border-left-color: var(--md-secondary);">
-            <span class="metric-value" id="collection-last-run">-</span>
-            <span class="metric-label">上次采集</span>
-        </div>
         <div class="workflow-metric" style="border-left-color: var(--md-success);">
             <span class="metric-value" id="collection-last-success">-</span>
             <span class="metric-label">上次成功账号</span>
@@ -60,12 +61,12 @@
 <div class="workflow-panel" id="account-form-card" role="tabpanel" aria-labelledby="mode-account-btn">
     <div class="workflow-header">
         <div class="workflow-title">
-            <i class="ph ph-download"></i>
+            <i data-lucide="download"></i>
             <span>日常增量采集</span>
         </div>
         <div class="workflow-actions">
             <button type="submit" form="account-form" class="btn btn-primary" id="account-submit">
-                <i class="ph ph-download-simple"></i> 开始日常增量采集
+                <i data-lucide="download"></i> 开始日常增量采集
             </button>
         </div>
     </div>
@@ -108,7 +109,7 @@
 </div>
 
 <div class="workflow-panel" id="detail-form-card" role="tabpanel" aria-labelledby="mode-detail-btn" style="display:none;">
-    <h3><i class="ph ph-link"></i> 单品采集</h3>
+    <h3><i data-lucide="link"></i> 单品采集</h3>
     <form id="detail-form" onsubmit="resolveSingleWorks(event)">
         <div class="form-group">
             <label>粘贴作品链接（一行一个，支持抖音 / TikTok）</label>
@@ -119,7 +120,7 @@
             <div style="display:flex;gap:8px;">
                 <input type="text" name="target_dir" id="single-target-dir" value="{{ download_path or '' }}" style="flex:1;">
                 <button type="button" class="btn btn-secondary" onclick="openSingleDirDialog()" title="选择目录">
-                    <i class="ph ph-folder-open"></i>
+                    <i data-lucide="folder-open"></i>
                 </button>
             </div>
         </div>
@@ -129,10 +130,10 @@
         </div>
         <div class="btn-group">
             <button type="submit" class="btn btn-secondary" id="detail-resolve">
-                <i class="ph ph-magnifying-glass"></i> 解析作品
+                <i data-lucide="search"></i> 解析作品
             </button>
             <button type="button" class="btn btn-primary" id="detail-submit" onclick="downloadSingleWorks()" disabled>
-                <i class="ph ph-download-simple"></i> 下载作品
+                <i data-lucide="download"></i> 下载作品
             </button>
         </div>
     </form>
@@ -158,7 +159,7 @@
 <div class="workflow-panel" id="batch-card" style="display:none;">
     <div class="workflow-header">
         <div class="workflow-title">
-            <i class="ph ph-list-checks"></i>
+            <i data-lucide="list-checks"></i>
             <span>当前批次</span>
         </div>
         <div class="workflow-actions" id="batch-detail-actions"></div>
@@ -167,7 +168,7 @@
 </div>
 
 <div class="workflow-panel">
-    <h3><i class="ph ph-clock-counter-clockwise"></i> 批次记录</h3>
+    <h3><i data-lucide="clock-3"></i> 批次记录</h3>
     <div class="table-scroll">
         <table>
             <thead>
@@ -191,9 +192,9 @@
 </div>
 
 <div class="card">
-    <h3><i class="ph ph-calendar-clock"></i> 定时任务 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;margin-left:8px;">（可选）</span></h3>
+    <h3><i data-lucide="calendar-clock"></i> 定时任务 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;margin-left:8px;">（可选）</span></h3>
     <div class="btn-group" style="margin-bottom:16px;">
-        <button class="btn btn-secondary" onclick="showAddTask()"><i class="ph ph-plus"></i> 新建定时任务</button>
+        <button class="btn btn-secondary" onclick="showAddTask()"><i data-lucide="plus"></i> 新建定时任务</button>
     </div>
     <div id="task-list">
         {% if tasks %}
@@ -224,21 +225,21 @@
                     <td>{{ task.next_run or '-' }}</td>
                     <td>
                         <button class="btn btn-sm btn-secondary" onclick="toggleTask({{ task.id }})">{{ '禁用' if task.enabled else '启用' }}</button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteTask({{ task.id }})"><i class="ph ph-trash"></i></button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteTask({{ task.id }})"><i data-lucide="trash-2"></i></button>
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table></div>
         {% else %}
-        <div class="empty-state"><i class="ph ph-calendar-x"></i>暂无定时任务</div>
+        <div class="empty-state"><i data-lucide="calendar-x"></i>暂无定时任务</div>
         {% endif %}
     </div>
 </div>
 
 <div id="task-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
     <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg-surface);padding:24px;border-radius:var(--radius-lg);width:420px;border:1px solid var(--border-default);box-shadow:var(--shadow-lg);">
-        <h3 style="margin-bottom:16px;"><i class="ph ph-plus-circle"></i> 新建定时任务</h3>
+        <h3 style="margin-bottom:16px;"><i data-lucide="circle-plus"></i> 新建定时任务</h3>
         <form onsubmit="addTask(event)">
             <div class="form-group">
                 <label>任务名称</label>
@@ -377,7 +378,8 @@
         const generation = ++resolveGeneration;
         const button = document.getElementById('detail-resolve');
         button.disabled = true;
-        button.innerHTML = '<i class="ph ph-spinner"></i> 解析中...';
+        button.innerHTML = '<i data-lucide="loader-circle"></i> 解析中...';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         try {
             const data = await apiCall('/api/collection/works/resolve', 'POST', {
                 links: submittedLinks,
@@ -401,7 +403,8 @@
             showToast(error.message || '解析作品失败', 'error');
         } finally {
             button.disabled = false;
-            button.innerHTML = '<i class="ph ph-magnifying-glass"></i> 解析作品';
+            button.innerHTML = '<i data-lucide="search"></i> 解析作品';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         }
     }
 
@@ -413,7 +416,8 @@
             : originalLinks;
         const button = document.getElementById('detail-submit');
         button.disabled = true;
-        button.innerHTML = '<i class="ph ph-spinner"></i> 下载中...';
+        button.innerHTML = '<i data-lucide="loader-circle"></i> 下载中...';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         try {
             const data = await apiCall('/api/collection/works/download', 'POST', {
                 links,
@@ -430,7 +434,8 @@
             showToast(error.message || '下载作品失败', 'error');
         } finally {
             button.disabled = false;
-            button.innerHTML = '<i class="ph ph-download-simple"></i> 下载作品';
+            button.innerHTML = '<i data-lucide="download"></i> 下载作品';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         }
     }
 
@@ -507,11 +512,12 @@
             return `
                 <div style="padding:8px 10px;border-bottom:1px solid var(--border-default);cursor:pointer;">
                     <a href="javascript:void(0)" onclick="loadSingleDirs('${dir.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">
-                        <i class="ph ph-folder"></i> ${escapeHtml(name)}
+                        <i data-lucide="folder"></i> ${escapeHtml(name)}
                     </a>
                 </div>
             `;
         }).join('');
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     }
 
     async function goSingleDirParent() {
@@ -537,7 +543,8 @@
         const payload = collectionPayloadFromForm(new FormData(e.target));
         const button = document.getElementById('account-submit');
         button.disabled = true;
-        button.innerHTML = '<i class="ph ph-spinner"></i> 正在创建...';
+        button.innerHTML = '<i data-lucide="loader-circle"></i> 正在创建...';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         try {
             const data = await apiCall('/api/collection/batches', 'POST', payload);
             showToast(`已创建 ${data.batches.length} 个批次`, 'success');
@@ -547,7 +554,8 @@
             showToast(error.message || '创建批次失败', 'error');
         } finally {
             button.disabled = false;
-            button.innerHTML = '<i class="ph ph-download-simple"></i> 开始日常增量采集';
+            button.innerHTML = '<i data-lucide="download"></i> 开始日常增量采集';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         }
     }
 

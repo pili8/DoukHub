@@ -223,3 +223,30 @@ def test_sync_runtime_lucide_replacements_refresh_icons():
         assert replacements
         for index in replacements:
             assert refresh_call in lines[index + 1]
+
+
+def test_collection_console_uses_page_head_and_lucide(app_env):
+    client, *_ = app_env
+    response = client.get("/collect")
+    assert response.status_code == 200
+    assert 'class="page-head"' in response.text
+    assert "日常增量采集" in response.text
+    assert "data-lucide=" in response.text
+    assert 'class="ph ph-' not in response.text
+
+
+def test_collection_page_preserves_workflow_contracts(app_env):
+    client, *_ = app_env
+    response = client.get("/collect")
+    for element_id in (
+        "collection-preview-status",
+        "collection-status",
+        "preview-total",
+        "batch-progress-bar",
+        "batch-detail-actions",
+        "detail-submit",
+    ):
+        assert f'id="{element_id}"' in response.text
+    assert "previewCollectionScope" in response.text
+    assert "selectBatchDetail" in response.text
+    assert "invalidateResolvedSingleWorks" in response.text
