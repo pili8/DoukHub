@@ -178,3 +178,63 @@ def test_collect_page_state_is_safe_for_spa_script_reload():
         source,
     )
     assert declarations is None
+
+
+@pytest.mark.parametrize(
+    "filename_template",
+    [
+        "../escaped/{title}",
+        "..\\escaped\\{title}",
+        "C:\\{title}",
+        "{title}:\\escaped",
+        "{author:/../x}",
+    ],
+)
+def test_download_rejects_unsafe_filename_templates(
+    single_client, tmp_path, monkeypatch, filename_template
+):
+    from app.core import single_work
+
+    async def fake_download(client, work, target_dir, template):
+        path = target_dir / "saved.mp4"
+        path.write_bytes(b"data")
+        return [path]
+
+    monkeypatch.setattr(single_work, "download_work", fake_download)
+    link = "https://www.douyin.com/video/1234567890123456789"
+    monkeypatch.setattr(
+        app_main, "_extract_single_work_links", lambda text: [(link, "douyin")]
+    )
+    response = single_client.post(
+        "/api/collection/works/download",
+        json={
+            "links": link,
+            "target_dir": str(tmp_path),
+            "filename_template": filename_template,
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["message"] == "命名模板不能包含路径分隔符或绝对路径"
+    assert not list(tmp_path.iterdir())
+
+
+def test_collect_page_invalidates_resolved_links_on_edit():
+    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    assert "invalidateResolvedSingleWorks" in source
+    assert (
+        'oninput="invalidateResolvedSingleWorks()" '
+        'onchange="invalidateResolvedSingleWorks()"' in source
+    )
+    assert "resolvedSingleLinks = [];" in source
+
+
+def test_collect_page_uses_canonical_browse_parent():
+    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    assert "singleDirParent = data.parent || '';" in source
+    assert "if (!parent || parent === singleDirCurrent) return;" in source
+    assert "singleDirCurrent.replace(/[\\\\/]" not in source
+
+
+def test_collect_page_formats_single_work_storage_time():
+    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    assert ".replace(/ (\\d\\d)-(\\d\\d)-(\\d\\d)$/, ' $1:$2:$3')" in source

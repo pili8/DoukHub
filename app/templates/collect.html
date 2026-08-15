@@ -75,7 +75,7 @@
     <form id="detail-form" onsubmit="resolveSingleWorks(event)">
         <div class="form-group">
             <label>粘贴作品链接（一行一个，支持抖音 / TikTok）</label>
-            <textarea name="links" rows="6" placeholder="https://www.douyin.com/video/...&#10;https://www.tiktok.com/@user/video/..."></textarea>
+            <textarea name="links" rows="6" oninput="invalidateResolvedSingleWorks()" onchange="invalidateResolvedSingleWorks()" placeholder="https://www.douyin.com/video/...&#10;https://www.tiktok.com/@user/video/..."></textarea>
         </div>
         <div class="form-group">
             <label>保存目录</label>
@@ -238,6 +238,11 @@
 
     var resolvedSingleLinks = [];
 
+    function invalidateResolvedSingleWorks() {
+        resolvedSingleLinks = [];
+        document.getElementById('detail-submit').disabled = true;
+    }
+
     async function resolveSingleWorks(event) {
         event.preventDefault();
         const form = new FormData(event.target);
@@ -338,6 +343,7 @@
 
     var singleDirCurrent = '';
     var singleDirEntries = [];
+    var singleDirParent = '';
 
     async function openSingleDirDialog() {
         const input = document.getElementById('single-target-dir');
@@ -351,6 +357,7 @@
             'GET'
         );
         singleDirCurrent = data.current || '';
+        singleDirParent = data.parent || '';
         singleDirEntries = data.dirs || [];
         document.getElementById('single-dir-current').value = singleDirCurrent || '此电脑';
         renderSingleDirs();
@@ -376,8 +383,9 @@
 
     async function goSingleDirParent() {
         if (!singleDirCurrent) return;
-        const parent = singleDirCurrent.replace(/[\\/][^\\/]+[\\/]?$/, '');
-        await loadSingleDirs(parent || singleDirCurrent);
+        const parent = singleDirParent;
+        if (!parent || parent === singleDirCurrent) return;
+        await loadSingleDirs(parent);
     }
 
     function closeSingleDirDialog() {
@@ -508,7 +516,10 @@
     }
 
     function formatDateTime(value) {
-        return value ? String(value).replace('T', ' ').slice(0, 19) : '-';
+        return value
+            ? String(value).replace('T', ' ').slice(0, 19)
+                .replace(/ (\d\d)-(\d\d)-(\d\d)$/, ' $1:$2:$3')
+            : '-';
     }
 
     function escapeHtml(value) {

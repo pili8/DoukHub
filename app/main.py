@@ -5,7 +5,7 @@ import logging
 import httpx
 from contextlib import asynccontextmanager
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 
 from fastapi import FastAPI, Request, Form
@@ -254,6 +254,24 @@ def _extract_single_work_links(text: str) -> list[tuple[str, str]]:
         if platform:
             result.append((link, platform))
     return result
+
+
+def _is_unsafe_filename_template(template: str) -> bool:
+    if any(char in template for char in ("/", "\\", ":")) or any(
+        ord(char) < 32 for char in template
+    ):
+        return True
+    rendered = template.format(
+        create_time="2026-08-15 10-00-00",
+        author="作者",
+        title="标题",
+        id="123",
+    )
+    path = PureWindowsPath(rendered)
+    return (
+        path.is_absolute()
+        or any(part in ("", ".", "..") for part in path.parts)
+    )
 
 
 # ========== 页面路由 ==========
@@ -2287,6 +2305,11 @@ async def api_resolve_single_works(request: SingleWorkResolveRequest):
 
 @app.post("/api/collection/works/download")
 async def api_download_single_works(request: SingleWorkDownloadRequest):
+    if _is_unsafe_filename_template(request.filename_template):
+        return JSONResponse(
+            {"success": False, "message": "命名模板不能包含路径分隔符或绝对路径"},
+            status_code=400,
+        )
     links = _extract_single_work_links(request.links)
     if not links:
         return JSONResponse(
