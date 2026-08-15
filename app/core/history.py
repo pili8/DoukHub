@@ -13,9 +13,18 @@ class HistoryDB:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
+    def _connect(self) -> sqlite3.Connection:
+        """Create one SQLite connection with the project's standard pragmas."""
+        conn = sqlite3.connect(str(self.db_path), timeout=5.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
+        return conn
+
     def _init_db(self):
         """初始化数据库表"""
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._connect() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS collection_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,7 +58,7 @@ class HistoryDB:
 
     def add_record(self, data: dict) -> int:
         """添加采集记录"""
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._connect() as conn:
             cursor = conn.execute(
                 """INSERT INTO collection_history
                    (account_name, platform, sec_user_id, collection_type,
@@ -89,14 +98,13 @@ class HistoryDB:
         query += " ORDER BY id DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 
     def get_stats(self) -> dict:
         """获取统计信息"""
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._connect() as conn:
             total = conn.execute("SELECT COUNT(*) FROM collection_history").fetchone()[0]
             today = datetime.now().strftime("%Y-%m-%d")
             today_count = conn.execute(
@@ -120,7 +128,7 @@ class HistoryDB:
 
     def add_task(self, name: str, cron_expression: str, rating_filter: str = "3,4,5") -> int:
         """添加定时任务"""
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._connect() as conn:
             cursor = conn.execute(
                 """INSERT INTO scheduled_tasks (name, cron_expression, rating_filter)
                    VALUES (?, ?, ?)""",
@@ -131,8 +139,7 @@ class HistoryDB:
 
     def get_tasks(self) -> list[dict]:
         """获取所有定时任务"""
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM scheduled_tasks ORDER BY id"
             ).fetchall()
@@ -149,7 +156,7 @@ class HistoryDB:
         if not fields:
             return
         values.append(task_id)
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._connect() as conn:
             conn.execute(
                 f"UPDATE scheduled_tasks SET {', '.join(fields)} WHERE id = ?",
                 values,
@@ -158,6 +165,6 @@ class HistoryDB:
 
     def delete_task(self, task_id: int) -> None:
         """删除定时任务"""
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._connect() as conn:
             conn.execute("DELETE FROM scheduled_tasks WHERE id = ?", (task_id,))
             conn.commit()

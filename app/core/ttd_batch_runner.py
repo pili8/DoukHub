@@ -35,7 +35,10 @@ def emit_marker(payload: dict) -> None:
 
 def init_ttd_database(root: Path) -> None:
     database = root / "DouK-Downloader.db"
-    with sqlite3.connect(database) as conn:
+    with sqlite3.connect(database, timeout=5.0) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS config_data (
