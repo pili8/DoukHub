@@ -1462,6 +1462,12 @@ except CookieExpiredError:
 
 ***
 
+## 采集功能验证
+
+批量采集使用 TTD 终端模式执行，DoukHub 只改写 `TikTokDownloader/Volume/settings.json` 的 `accounts_urls` / `accounts_urls_tiktok`。验证增量时注意 TTD 要求具体日期格式为 `YYYY/MM/DD`。
+
+单作品下载不会写入 TTD 的 `download_data`，因此同一作品后续整号归档仍可能再次下载。这是有意设计：单作品是灵活取件，整号批量是 TTD 管理的档案库。
+
 ## 更新日志
 
 ### 2026-07-10（初始版本）
