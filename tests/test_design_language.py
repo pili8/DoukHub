@@ -103,6 +103,7 @@ def _declaration_map(block):
 
 
 def _style_rules(source):
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
     rules = {}
     for selectors, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", source):
         for selector in selectors.split(","):
@@ -155,6 +156,60 @@ def test_dark_legacy_components_resolve_through_doukhub_palette():
         rule = _rule_declarations(css, selector)
         background = _resolved_value(rule["background"], dark)
         color = _resolved_value(rule["color"], dark)
+        assert _contrast_ratio(background, color) >= 4.5
+
+
+def test_sidebar_active_contract_is_white_on_readable_blue():
+    css = Path("app/static/css/style.css").read_text(encoding="utf-8")
+    source = Path("app/templates/base.html").read_text(encoding="utf-8")
+    root = _declaration_map(css.split(":root {", 1)[1].split("}", 1)[0])
+    dark = root | _declaration_map(css.split(':root[data-theme="dark"] {', 1)[1].split("}", 1)[0])
+
+    assert root["--text-on-accent"] == "#FFFFFF"
+    assert dark["--text-on-accent"] == "#FFFFFF"
+    assert root["--accent-active"] == "#0061A4"
+    assert dark["--accent-active"] == "#0061A4"
+
+    active_selectors = (
+        ".sidebar-nav a.active",
+        ".nav-group .nav-group-toggle.active",
+        ".nav-group .nav-submenu a.active",
+    )
+    for selector in active_selectors:
+        rule = _rule_declarations(source, selector)
+        assert rule["background"] == "var(--accent-active)"
+        assert rule["color"] == "var(--text-on-accent, #fff)"
+        assert _contrast_ratio(root["--accent-active"], root["--text-on-accent"]) >= 4.5
+        assert _contrast_ratio(dark["--accent-active"], dark["--text-on-accent"]) >= 4.5
+
+    indicator = _rule_declarations(source, ".sidebar-nav a.active::before")
+    assert indicator["background"] == "var(--text-on-accent, #fff)"
+
+
+def test_dark_soft_tonal_components_have_opaque_accessible_pairs():
+    css = Path("app/static/css/style.css").read_text(encoding="utf-8")
+    rules = _style_rules(css)
+    root = _declaration_map(css.split(":root {", 1)[1].split("}", 1)[0])
+    dark = root | _declaration_map(css.split(':root[data-theme="dark"] {', 1)[1].split("}", 1)[0])
+
+    cases = {
+        ".btn-success": ("--md-success-container", "--md-on-success-container"),
+        ".btn-warning": ("--md-warning-container", "--md-on-warning-container"),
+        ".toast-success": ("--md-success-container", "--md-on-success-container"),
+        ".toast-error": ("--md-error-container", "--md-on-error-container"),
+        ".workflow-status.success": ("--md-success-container", "--md-on-success-container"),
+        ".workflow-status.failed": ("--md-error-container", "--md-on-error-container"),
+        ".workflow-status.warning": ("--md-warning-container", "--md-on-warning-container"),
+    }
+    hex_color = re.compile(r"#[0-9A-Fa-f]{6}")
+    for selector, (background_token, color_token) in cases.items():
+        rule = _declaration_map(rules[selector])
+        assert rule["background"] == f"var({background_token})"
+        assert rule["color"] == f"var({color_token})"
+        background = _resolved_value(dark[background_token], dark)
+        color = _resolved_value(dark[color_token], dark)
+        assert hex_color.fullmatch(background)
+        assert hex_color.fullmatch(color)
         assert _contrast_ratio(background, color) >= 4.5
 
 
@@ -252,6 +307,8 @@ def test_core_page_lucide_runtime_svgs_have_explicit_sizes():
         ".card h3 svg[data-lucide]": "17px",
         ".workflow-title svg[data-lucide]": "17px",
         ".empty-state svg[data-lucide]": "36px",
+        ".workflow-notice svg[data-lucide]": "17px",
+        ".workflow-step .step-status svg[data-lucide]": "24px",
     }
     for selector, size in expected_sizes.items():
         assert f"width: {size};" in rules[selector]

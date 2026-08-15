@@ -114,7 +114,7 @@
   --text-secondary: var(--dh-text-secondary);
   --text-muted: var(--dh-text-muted);
   --text-tertiary: var(--dh-text-muted);
-  --text-on-accent: var(--md-on-primary);
+  --text-on-accent: #FFFFFF;
   --text-on-dark: var(--md-on-surface);
   --text-on-dark-muted: var(--md-on-surface-variant);
   --text-on-dark-dim: var(--md-outline);
@@ -125,7 +125,7 @@
 
   --accent: var(--dh-accent);
   --accent-hover: var(--dh-accent-hover);
-  --accent-active: #003258;
+  --accent-active: #0061A4;
   --accent-light: var(--dh-accent-soft);
   --accent-text: var(--md-primary);
 
@@ -222,15 +222,19 @@
   --md-on-warning: #17130F;
   --md-on-info: #17130F;
   --md-on-primary-container: #E7F3FF;
-  --md-on-error-container: #4A1710;
-  --md-on-success-container: #0E3B20;
-  --md-on-warning-container: #4A3207;
+  --md-success-container: #123B26;
+  --md-on-success-container: #C8F7DC;
+  --md-error-container: #4A1710;
+  --md-on-error-container: #FFDAD6;
+  --md-warning-container: #3D2B06;
+  --md-on-warning-container: #FFEBB9;
   --md-on-info-container: #E7F3FF;
   --md-surface-variant: #3D352C;
   --md-shadow-color: rgb(0 0 0);
   --md-scrim: rgb(0 0 0 / 0.6);
 
-  --accent-active: #A3D6FF;
+  --accent-active: #0061A4;
+  --text-on-accent: #FFFFFF;
 }
 
 /* ===== 2. Reset & Base ===== */
@@ -989,6 +993,12 @@ tbody tr:hover {
   flex-shrink: 0;
 }
 
+.workflow-notice svg[data-lucide] {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+
 .workflow-flow {
   display: grid;
   grid-template-columns: repeat(4, minmax(190px, 1fr));
@@ -1044,6 +1054,11 @@ tbody tr:hover {
   display: inline-flex;
   color: var(--md-primary);
   font-size: 10px;
+}
+
+.workflow-step .step-status svg[data-lucide] {
+  width: 24px;
+  height: 24px;
 }
 
 .workflow-step .step-desc {
