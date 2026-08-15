@@ -267,6 +267,7 @@
         document.getElementById('mode-detail-btn').classList.toggle('active', mode === 'detail');
     }
 
+    var previewGeneration = 0;
     showCollectMode('account');
     document.querySelectorAll('#account-form input, #account-form select').forEach(element => {
         element.addEventListener('change', queueCollectionPreview);
@@ -281,6 +282,7 @@
         collectionPollTimer = null;
         if (previewTimer) clearTimeout(previewTimer);
         previewTimer = null;
+        previewGeneration += 1;
     };
 
     var resolvedSingleLinks = [];
@@ -301,6 +303,7 @@
     let previewTimer = null;
 
     async function previewCollectionScope() {
+        const previewGenerationToken = ++previewGeneration;
         const form = new FormData(document.getElementById('account-form'));
         const status = document.getElementById('collection-status');
         status.className = 'workflow-status running';
@@ -314,6 +317,7 @@
             if (data.success === false) {
                 throw new Error(data.message || '无法统计');
             }
+            if (previewGenerationToken !== previewGeneration) return;
             document.getElementById('preview-total').textContent = data.total_accounts || 0;
             document.getElementById('preview-first-run').textContent =
                 data.first_run_accounts || 0;
@@ -324,6 +328,7 @@
             status.className = 'workflow-status success';
             status.textContent = '范围已更新';
         } catch (error) {
+            if (previewGenerationToken !== previewGeneration) return;
             document.getElementById('preview-total').textContent = '-';
             document.getElementById('preview-first-run').textContent = '-';
             document.getElementById('preview-incremental').textContent = '-';
@@ -334,6 +339,7 @@
     }
 
     function queueCollectionPreview() {
+        previewGeneration += 1;
         if (previewTimer) clearTimeout(previewTimer);
         previewTimer = setTimeout(previewCollectionScope, 250);
     }

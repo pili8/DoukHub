@@ -386,3 +386,36 @@ def test_collect_page_calls_preview_without_starting_batch():
     assert "/api/collection/batches/preview" in source
     assert "previewCollectionScope(" in source
     assert "startCollectionBatch" in source
+
+
+def test_collect_page_discards_stale_preview_response():
+    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    assert "var previewGeneration = 0;" in source
+    assert source.index("var previewGeneration = 0;") < source.index(
+        "previewCollectionScope();"
+    )
+    preview = re.search(
+        r"async function previewCollectionScope\(\) \{([\s\S]*?)\n    \}",
+        source,
+    )
+    assert preview is not None
+    body = preview.group(1)
+    assert "const previewGenerationToken = ++previewGeneration;" in body
+    guard = "if (previewGenerationToken !== previewGeneration) return;"
+    assert body.count(guard) == 2
+
+    success_body, _, error_body = body.partition("} catch (error) {")
+    success_updates = success_body.partition(guard)[2]
+    error_updates = error_body.partition(guard)[2]
+    for update_body in (success_updates, error_updates):
+        assert "preview-total" in update_body
+        assert "status.className" in update_body
+
+    queue = re.search(
+        r"function queueCollectionPreview\(\) \{([\s\S]*?)\n    \}", source
+    )
+    cleanup = re.search(
+        r"window\._spaCleanup = \(\) => \{([\s\S]*?)\n    \};", source
+    )
+    assert queue is not None and "previewGeneration += 1;" in queue.group(1)
+    assert cleanup is not None and "previewGeneration += 1;" in cleanup.group(1)
