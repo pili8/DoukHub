@@ -534,8 +534,8 @@ sec_user_id TEXT,
                 """
                 INSERT INTO collection_batch_items
                 (batch_id, account_record_id, sec_user_id, account_name, platform,
-                 mark, url, earliest, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                 mark, url, earliest, status, message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -547,6 +547,8 @@ sec_user_id TEXT,
                         item.get("mark", ""),
                         item.get("url", ""),
                         str(item.get("earliest", "")),
+                        item.get("status", "pending"),
+                        str(item.get("message") or ""),
                     )
                     for item in items
                 ],
@@ -571,6 +573,17 @@ sec_user_id TEXT,
                 """
             ).fetchone()
             return dict(row) if row else None
+
+    def list_active_collection_batches(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM collection_batches
+                WHERE status IN ('pending', 'running', 'cancelling')
+                ORDER BY created_at, id
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def list_collection_batches(self, limit: int = 20) -> list[dict]:
         with self._connect() as conn:

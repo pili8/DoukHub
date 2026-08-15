@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 import subprocess
 import sys
 import uuid
@@ -48,6 +49,10 @@ class CollectionBatchManager:
         platforms: tuple[str, ...] = ("douyin",),
         mode: str = "incremental",
     ) -> list[dict]:
+        if self.db.get_active_collection_batch():
+            if self._worker and not self._worker.done():
+                raise RuntimeError("已有采集批次正在执行或等待执行")
+            self.recover_interrupted_batches()
         if self.db.get_active_collection_batch():
             raise RuntimeError("已有采集批次正在执行或等待执行")
 
@@ -120,9 +125,10 @@ class CollectionBatchManager:
             return [line.rstrip("\r\n") for line in file][-max_lines:]
 
     def recover_interrupted_batches(self) -> None:
-        for batch in self.db.list_collection_batches(limit=100):
-            if batch["status"] not in ("pending", "running", "cancelling"):
-                continue
+        for batch in self.db.list_active_collection_batches():
+            process_pid = batch.get("process_pid")
+            if process_pid and self._verify_recorded_runner(process_pid):
+                self._terminate_recorded_runner(process_pid)
             self._finalize(
                 batch["id"],
                 "failed" if batch["status"] == "running" else "cancelled",
@@ -164,7 +170,18 @@ class CollectionBatchManager:
                     self._finalize(batch_id, "cancelled", -1, "批次已取消")
                     continue
                 await self._run_batch(batch_id)
+            except Exception as error:
+                if self._active_batch_id == batch_id:
+                    if self._active_process and self._active_process.returncode is None:
+                        self._active_process.terminate()
+                    self._clear_active_batch()
+                try:
+                    self._finalize(batch_id, "failed", -1, str(error))
+                except Exception:
+                    pass
             finally:
+                if self._active_batch_id == batch_id:
+                    self._clear_active_batch()
                 self._queue.task_done()
 
     async def _check_ttd_api(self) -> None:
@@ -188,6 +205,46 @@ class CollectionBatchManager:
             creationflags=creationflags,
         )
 
+    def _verify_recorded_runner(self, process_pid: int) -> bool:
+        try:
+            if os.name == "nt":
+                creationflags = subprocess.CREATE_NO_WINDOW
+                completed = subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        (
+                            '(Get-CimInstance Win32_Process -Filter '
+                            f'"ProcessId = {process_pid}").CommandLine'
+                        ),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                    creationflags=creationflags,
+                )
+            else:
+                completed = subprocess.run(
+                    ["ps", "-p", str(process_pid), "-o", "command="],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                )
+            command_line = completed.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return str(self.runner_path).casefold() in command_line.casefold()
+
+    def _terminate_recorded_runner(self, process_pid: int) -> bool:
+        if not self._verify_recorded_runner(process_pid):
+            return False
+        try:
+            os.kill(process_pid, signal.SIGTERM)
+        except OSError:
+            return False
+        return True
+
     async def _run_batch(self, batch_id: str) -> str:
         self._active_batch_id = batch_id
         self._cancel_requested = False
@@ -197,6 +254,7 @@ class CollectionBatchManager:
         started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         if not pending:
+            self._clear_active_batch()
             self._finalize(batch_id, "completed", 0)
             return "completed"
 
@@ -210,7 +268,11 @@ class CollectionBatchManager:
                     platform=item["platform"],
                     mark=item["mark"],
                     url=item["url"],
-                    earliest=item["earliest"],
+                    earliest=(
+                        int(item["earliest"])
+                        if str(item["earliest"]).isdigit()
+                        else item["earliest"]
+                    ),
                 )
                 for item in pending
             ]
@@ -224,37 +286,53 @@ class CollectionBatchManager:
                 self.db.update_collection_batch_item(
                     item["id"], status="failed", message=str(error)
                 )
+            self._clear_active_batch()
             self._finalize(batch_id, "failed", -1, str(error))
             return "failed"
 
         self.db.update_collection_batch(
             batch_id, status="running", started_at=started_at
         )
+        current_status = self.db.get_collection_batch(batch_id)["status"]
+        if self._cancel_requested or self._closing or current_status == "cancelling":
+            self._clear_active_batch()
+            self._finalize(batch_id, "cancelled", -1, "批次已取消")
+            return "cancelled"
         command = [
             sys.executable,
             str(self.runner_path),
             "--platform",
             batch["platform"],
         ]
-        process = await self._launch_process(command, self.ttd_path)
-        self._active_process = process
-        self.db.update_collection_batch(batch_id, process_pid=process.pid)
-        log_path = Path(batch["log_path"])
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+        process = None
+        try:
+            process = await self._launch_process(command, self.ttd_path)
+            self._active_process = process
+            self.db.update_collection_batch(batch_id, process_pid=process.pid)
+            log_path = Path(batch["log_path"])
+            log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with log_path.open("w", encoding="utf-8", errors="replace") as log_file:
-            while True:
-                raw = await process.stdout.readline()
-                if not raw:
-                    break
-                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-                log_file.write(line + "\n")
-                log_file.flush()
-                marker = marker_line(line)
-                if marker:
-                    self._apply_marker(batch_id, marker)
+            with log_path.open("w", encoding="utf-8", errors="replace") as log_file:
+                while True:
+                    raw = await process.stdout.readline()
+                    if not raw:
+                        break
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                    log_file.write(line + "\n")
+                    log_file.flush()
+                    marker = marker_line(line)
+                    if marker:
+                        self._apply_marker(batch_id, marker)
 
-        return_code = await process.wait()
+            return_code = await process.wait()
+        except Exception as error:
+            if process and process.returncode is None:
+                process.terminate()
+                await process.wait()
+            self._clear_active_batch()
+            self._finalize(batch_id, "failed", -1, str(error))
+            return "failed"
+
         current_status = self.db.get_collection_batch(batch_id)["status"]
         if self._cancel_requested or current_status == "cancelling":
             final_status = "cancelled"
@@ -263,10 +341,13 @@ class CollectionBatchManager:
             final_status = "completed" if return_code == 0 else "failed"
             message = "" if return_code == 0 else f"TTD 进程退出码: {return_code}"
 
-        self._active_process = None
-        self._active_batch_id = None
+        self._clear_active_batch()
         self._finalize(batch_id, final_status, return_code, message)
         return final_status
+
+    def _clear_active_batch(self) -> None:
+        self._active_process = None
+        self._active_batch_id = None
 
     def _apply_marker(self, batch_id: str, marker: dict) -> bool:
         marker_type = marker.get("type")

@@ -101,6 +101,26 @@ def test_create_and_query_collection_batch(db):
     assert db.find_collection_batch_item("batch1", "sec2")["account_name"] == "二号"
 
 
+def test_create_collection_batch_preserves_planned_status_and_message(db):
+    db.create_collection_batch(
+        batch_id="batch1",
+        filter_json="{}",
+        platform="tiktok",
+        log_path="/tmp/batch1.log",
+        items=[
+            {
+                "sec_user_id": "tiksec",
+                "status": "skipped",
+                "message": "TikTok 主页链接缺失",
+            }
+        ],
+    )
+
+    item = db.find_collection_batch_item("batch1", "tiksec")
+    assert item["status"] == "skipped"
+    assert item["message"] == "TikTok 主页链接缺失"
+
+
 def test_update_batch_and_refresh_counts(db):
     db.create_collection_batch(
         batch_id="batch1",
