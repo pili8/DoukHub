@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 @dataclass
@@ -42,6 +43,19 @@ def _last_date(value) -> date | None:
         return datetime.strptime(normalized, "%Y-%m-%d").date()
     except ValueError:
         return None
+
+
+def _is_tiktok_profile_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        if parsed.hostname not in ("tiktok.com", "www.tiktok.com"):
+            return False
+        parts = parsed.path.strip("/").split("/")
+        return len(parts) == 1 and parts[0].startswith("@") and len(parts[0]) > 1
+    except ValueError:
+        return False
 
 
 def _earliest_for(row: dict, mode: str) -> str | int:
@@ -107,7 +121,7 @@ def plan_collection(
         message = ""
         if platform == "douyin":
             url = f"https://www.douyin.com/user/{sec_user_id}"
-        elif "tiktok.com/" not in url:
+        elif not _is_tiktok_profile_url(url):
             status = "skipped"
             message = "TikTok 主页链接缺失"
             url = ""

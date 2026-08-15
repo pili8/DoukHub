@@ -108,6 +108,37 @@ def test_tiktok_requires_profile_link_and_douyin_url_is_generated():
     assert by_id["tiksec2"].url == "https://www.tiktok.com/@two"
 
 
+def test_tiktok_accepts_only_profile_urls_on_tiktok_hosts():
+    planned = plan_collection(
+        [
+            account(
+                record_id="a1",
+                sec_user_id="profile",
+                平台="TikTok",
+                链接="https://www.tiktok.com/@valid",
+            ),
+            account(
+                record_id="a2",
+                sec_user_id="video",
+                平台="TikTok",
+                链接="https://www.tiktok.com/@user/video/123",
+            ),
+            account(
+                record_id="a3",
+                sec_user_id="offsite",
+                平台="TikTok",
+                链接="https://example.com/tiktok.com/@user",
+            ),
+        ],
+        platform="tiktok",
+    )
+    by_id = {item.sec_user_id: item for item in planned}
+    assert by_id["profile"].status == "pending"
+    assert by_id["profile"].url == "https://www.tiktok.com/@valid"
+    assert by_id["video"].status == "skipped"
+    assert by_id["offsite"].status == "skipped"
+
+
 def test_write_ttd_accounts_preserves_unrelated_settings(tmp_path):
     settings = tmp_path / "settings.json"
     settings.write_text(
