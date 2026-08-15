@@ -11,28 +11,40 @@
     <button type="button" class="workflow-step" onclick="loadPage('/sync/import')">
         <span class="step-index">1</span>
         <span>
-            <span class="step-name">导入采集表</span>
+            <span class="step-name">
+                导入采集表
+                <span class="step-status"><i class="ph ph-circle" aria-hidden="true"></i></span>
+            </span>
             <span class="step-desc">粘贴分享链接、等级和标签，写入本地数据库</span>
         </span>
     </button>
     <button type="button" class="workflow-step" onclick="loadPage('/sync/resolve')">
         <span class="step-index">2</span>
         <span>
-            <span class="step-name">解析采集表</span>
+            <span class="step-name">
+                解析采集表
+                <span class="step-status"><i class="ph ph-circle" aria-hidden="true"></i></span>
+            </span>
             <span class="step-desc">解析短链接并获取 sec_user_id</span>
         </span>
     </button>
     <button type="button" class="workflow-step" onclick="loadPage('/sync/account')">
         <span class="step-index">3</span>
         <span>
-            <span class="step-name">同步账号表</span>
+            <span class="step-name">
+                同步账号表
+                <span class="step-status"><i class="ph ph-circle" aria-hidden="true"></i></span>
+            </span>
             <span class="step-desc">生成账号记录并获取账号详情</span>
         </span>
     </button>
     <button type="button" class="workflow-step" onclick="loadPage('/sync/refresh')">
         <span class="step-index">4</span>
         <span>
-            <span class="step-name">更新账号表</span>
+            <span class="step-name">
+                更新账号表
+                <span class="step-status"><i class="ph ph-circle" aria-hidden="true"></i></span>
+            </span>
             <span class="step-desc">补齐未获取详情的账号资料</span>
         </span>
     </button>

@@ -11,6 +11,8 @@
     <h2>导入采集表</h2>
 </div>
 
+{{ workflow_notice('info', '粘贴采集表内容并写入本地数据库；此步骤无需 TTD 服务和 Cookie。') }}
+
 <div class="workflow-panel">
     <div class="workflow-header">
         <div class="workflow-title">
@@ -70,6 +72,7 @@
     function toggleHistory(el) {
         var detail = el.nextElementSibling;
         var expanded = detail.classList.toggle('expanded');
+        el.setAttribute('aria-expanded', String(expanded));
         if (expanded && !detail.dataset.loaded) {
             var logDiv = detail.querySelector('.history-log');
             try {

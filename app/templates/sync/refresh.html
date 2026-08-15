@@ -66,6 +66,7 @@ function toggleCard(header) {
 function toggleHistory(el) {
     var detail = el.nextElementSibling;
     var expanded = detail.classList.toggle('expanded');
+    el.setAttribute('aria-expanded', String(expanded));
     if (expanded) {
         var logDiv = detail.querySelector('.history-log');
         if (logDiv && !logDiv.dataset.rendered) {

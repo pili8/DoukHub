@@ -38,14 +38,14 @@
     {% if history %}
     {% for item in history %}
     <div class="workflow-history-item">
-        <div class="workflow-history-header" onclick="toggleHistory(this)">
+        <button type="button" class="workflow-history-header" id="workflow-history-header-{{ loop.index }}" aria-expanded="false" aria-controls="workflow-history-detail-{{ loop.index }}" onclick="toggleHistory(this)">
             <span>
                 <span class="workflow-status {{ item.status }}">{{ item.status }}</span>
                 成功 {{ item.success }} / 失败 {{ item.failed }}{% if item.skipped %} / 跳过 {{ item.skipped }}{% endif %}
             </span>
             <span class="text-muted">{{ item.created_at }}</span>
-        </div>
-        <div class="workflow-history-detail">
+        </button>
+        <div class="workflow-history-detail" id="workflow-history-detail-{{ loop.index }}">
             <div class="workflow-log history-log" data-log="{{ item.log_json }}"></div>
         </div>
     </div>

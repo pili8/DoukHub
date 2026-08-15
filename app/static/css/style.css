@@ -943,9 +943,19 @@ tbody tr:hover {
 
 .workflow-step .step-name {
   margin: 0 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 13px;
   font-weight: 500;
   color: var(--md-on-surface);
+}
+
+.workflow-step .step-status {
+  display: inline-flex;
+  color: var(--md-primary);
+  font-size: 10px;
 }
 
 .workflow-step .step-desc {
@@ -1032,8 +1042,7 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
-.workflow-status.pending,
-.workflow-status.cancelled {
+.workflow-status.pending {
   background: var(--md-surface-container-high);
   color: var(--md-on-surface-variant);
 }
@@ -1059,7 +1068,8 @@ tbody tr:hover {
 }
 
 .workflow-status.skipped,
-.workflow-status.warning {
+.workflow-status.warning,
+.workflow-status.cancelled {
   background: var(--md-warning-container);
   color: var(--md-on-warning-container);
 }
@@ -1072,6 +1082,10 @@ tbody tr:hover {
 }
 
 .workflow-history-header {
+  width: 100%;
+  border: none;
+  font: inherit;
+  text-align: inherit;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1143,7 +1157,10 @@ tbody tr:hover {
 }
 
 @media (max-width: 720px) {
-  .workflow-flow { grid-template-columns: 1fr; }
+  .workflow-flow {
+    grid-template-columns: repeat(4, minmax(220px, 1fr));
+    overflow-x: auto;
+  }
   .workflow-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workflow-actions .btn { flex: 1 1 100%; }
   .workflow-tabs {

@@ -9,11 +9,11 @@
     <h2>采集</h2>
 </div>
 
-<div class="workflow-tabs" id="collection-tabs">
-    <button type="button" class="workflow-tab active" id="mode-account-btn" onclick="showCollectMode('account')">
+<div class="workflow-tabs" id="collection-tabs" role="tablist" aria-label="采集模式">
+    <button type="button" class="workflow-tab active" id="mode-account-btn" role="tab" aria-selected="true" aria-controls="account-form-card" tabindex="0" onclick="showCollectMode('account')" onkeydown="collectionTabKeydown(event, 'account')">
         <i class="ph ph-download"></i> 日常增量采集
     </button>
-    <button type="button" class="workflow-tab" id="mode-detail-btn" onclick="showCollectMode('detail')">
+    <button type="button" class="workflow-tab" id="mode-detail-btn" role="tab" aria-selected="false" aria-controls="detail-form-card" tabindex="-1" onclick="showCollectMode('detail')" onkeydown="collectionTabKeydown(event, 'detail')">
         <i class="ph ph-link"></i> 单作品采集
     </button>
 </div>
@@ -24,7 +24,10 @@
             <i class="ph ph-pulse"></i>
             <span>采集状态</span>
         </div>
-        <span class="workflow-status pending" id="collection-status">等待查看</span>
+        <div class="workflow-actions">
+            <span class="workflow-status pending" id="collection-preview-status">等待统计</span>
+            <span class="workflow-status pending" id="collection-status">等待查看</span>
+        </div>
     </div>
     <div class="workflow-metrics">
         <div class="workflow-metric" style="border-left-color: var(--md-secondary);">
@@ -54,7 +57,7 @@
     </div>
 </div>
 
-<div class="workflow-panel" id="account-form-card">
+<div class="workflow-panel" id="account-form-card" role="tabpanel" aria-labelledby="mode-account-btn">
     <div class="workflow-header">
         <div class="workflow-title">
             <i class="ph ph-download"></i>
@@ -104,7 +107,7 @@
     </form>
 </div>
 
-<div class="workflow-panel" id="detail-form-card" style="display:none;">
+<div class="workflow-panel" id="detail-form-card" role="tabpanel" aria-labelledby="mode-detail-btn" style="display:none;">
     <h3><i class="ph ph-link"></i> 单品采集</h3>
     <form id="detail-form" onsubmit="resolveSingleWorks(event)">
         <div class="form-group">
@@ -263,8 +266,24 @@
     function showCollectMode(mode) {
         document.getElementById('account-form-card').style.display = mode === 'account' ? 'block' : 'none';
         document.getElementById('detail-form-card').style.display = mode === 'detail' ? 'block' : 'none';
-        document.getElementById('mode-account-btn').classList.toggle('active', mode === 'account');
-        document.getElementById('mode-detail-btn').classList.toggle('active', mode === 'detail');
+        const accountTab = document.getElementById('mode-account-btn');
+        const detailTab = document.getElementById('mode-detail-btn');
+        accountTab.classList.toggle('active', mode === 'account');
+        detailTab.classList.toggle('active', mode === 'detail');
+        accountTab.setAttribute('aria-selected', String(mode === 'account'));
+        detailTab.setAttribute('aria-selected', String(mode === 'detail'));
+        accountTab.tabIndex = mode === 'account' ? 0 : -1;
+        detailTab.tabIndex = mode === 'detail' ? 0 : -1;
+    }
+
+    function collectionTabKeydown(event, currentMode) {
+        if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        event.preventDefault();
+        const nextMode = event.key === 'ArrowRight'
+            ? (currentMode === 'account' ? 'detail' : 'account')
+            : (currentMode === 'account' ? 'detail' : 'account');
+        showCollectMode(nextMode);
+        document.getElementById(nextMode === 'account' ? 'mode-account-btn' : 'mode-detail-btn').focus();
     }
 
     var previewGeneration = 0;
@@ -305,7 +324,7 @@
     async function previewCollectionScope() {
         const previewGenerationToken = ++previewGeneration;
         const form = new FormData(document.getElementById('account-form'));
-        const status = document.getElementById('collection-status');
+        const status = document.getElementById('collection-preview-status');
         status.className = 'workflow-status running';
         status.textContent = '正在统计';
         try {
@@ -585,14 +604,17 @@
         const active = data.batches.find(batch =>
             ['pending', 'running', 'cancelling'].includes(batch.status)
         );
-        if (active) await showBatchDetail(active.id, true);
+        const automaticBatch = active || latest;
+        if (automaticBatch) await showBatchDetail(automaticBatch.id, true);
     }
 
     async function showBatchDetail(batchId, silent = false) {
         const data = await apiCall(`/api/collection/batches/${batchId}`, 'GET');
         const batch = data.batch || {};
+        const items = data.items || [];
+        renderBatchDetailActions(batch);
         document.getElementById('batch-card').style.display = 'block';
-        const rows = data.items.map(item => `
+        const rows = items.map(item => `
             <tr>
                 <td>${escapeHtml(item.account_name || item.sec_user_id)}</td>
                 <td>${formatBatchStatus(item.status)}</td>
@@ -623,6 +645,13 @@
                     <span class="metric-label">失败</span>
                 </div>
             </div>
+            <div class="progress-bar-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${batchProgressPercent(items)}" aria-labelledby="batch-progress-text">
+                <div class="progress-bar" id="batch-progress-bar" style="width:${batchProgressPercent(items)}%"></div>
+            </div>
+            <div class="workflow-progress-meta" style="margin-bottom:12px;">
+                <span id="batch-progress-text">当前进度 ${formatCurrentAccount(items)}</span>
+                <span>${batchProgressPercent(items)}%</span>
+            </div>
             <div class="table-scroll" style="margin-bottom:12px;">
                 <table>
                     <thead><tr><th>账号</th><th>状态</th><th>上次采集</th><th>信息</th></tr></thead>
@@ -635,6 +664,18 @@
             </details>
         `;
         if (!silent) await refreshCollectionBatches();
+    }
+
+    function renderBatchDetailActions(batch) {
+        const actions = document.getElementById('batch-detail-actions');
+        const active = ['pending', 'running', 'cancelling'].includes(batch.status);
+        if (active) {
+            actions.innerHTML = `<button class="btn btn-danger" onclick="cancelCollectionBatch('${batch.id}')">取消批次</button>`;
+            return;
+        }
+        actions.innerHTML = (batch.failed_accounts || 0) > 0
+            ? `<button class="btn btn-primary" onclick="retryCollectionBatch('${batch.id}')">失败重试</button>`
+            : '';
     }
 
     async function cancelCollectionBatch(batchId) {
@@ -697,6 +738,14 @@
 
     function formatCurrentAccount(items) {
         return items.length ? `${currentAccountIndex(items)} / ${items.length}` : '-';
+    }
+
+    function batchProgressPercent(items) {
+        if (!items.length) return 0;
+        const processed = items.filter(item =>
+            !['pending', 'running'].includes(item.status)
+        ).length;
+        return Math.round((processed / items.length) * 100);
     }
 
     function formatDateTime(value) {
