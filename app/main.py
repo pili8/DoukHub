@@ -2305,7 +2305,14 @@ async def api_resolve_single_works(request: SingleWorkResolveRequest):
 
 @app.post("/api/collection/works/download")
 async def api_download_single_works(request: SingleWorkDownloadRequest):
-    if _is_unsafe_filename_template(request.filename_template):
+    try:
+        unsafe_template = _is_unsafe_filename_template(request.filename_template)
+    except (KeyError, IndexError, ValueError):
+        return JSONResponse(
+            {"success": False, "message": "命名模板格式无效"},
+            status_code=400,
+        )
+    if unsafe_template:
         return JSONResponse(
             {"success": False, "message": "命名模板不能包含路径分隔符或绝对路径"},
             status_code=400,

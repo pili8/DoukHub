@@ -237,8 +237,10 @@
     };
 
     var resolvedSingleLinks = [];
+    var resolveGeneration = 0;
 
     function invalidateResolvedSingleWorks() {
+        resolveGeneration += 1;
         resolvedSingleLinks = [];
         document.getElementById('detail-submit').disabled = true;
     }
@@ -246,13 +248,18 @@
     async function resolveSingleWorks(event) {
         event.preventDefault();
         const form = new FormData(event.target);
+        const submittedLinks = String(form.get('links') || '');
+        const linksInput = event.target.elements.links;
+        const generation = ++resolveGeneration;
         const button = document.getElementById('detail-resolve');
         button.disabled = true;
         button.innerHTML = '<i class="ph ph-spinner"></i> 解析中...';
         try {
             const data = await apiCall('/api/collection/works/resolve', 'POST', {
-                links: form.get('links') || '',
+                links: submittedLinks,
             });
+            const currentLinks = String(linksInput.value || '');
+            if (generation !== resolveGeneration || currentLinks !== submittedLinks) return;
             if (!data.works?.length) {
                 throw new Error(
                     data.message || data.errors?.[0]?.message || '解析失败'
@@ -265,6 +272,8 @@
             document.getElementById('detail-submit').disabled = false;
             showToast(`解析到 ${data.works.length} 个作品`, 'success');
         } catch (error) {
+            const currentLinks = String(linksInput.value || '');
+            if (generation !== resolveGeneration || currentLinks !== submittedLinks) return;
             showToast(error.message || '解析作品失败', 'error');
         } finally {
             button.disabled = false;

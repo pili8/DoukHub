@@ -228,6 +228,44 @@ def test_collect_page_invalidates_resolved_links_on_edit():
     assert "resolvedSingleLinks = [];" in source
 
 
+def test_collect_page_discards_stale_resolve_response():
+    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    assert "var resolveGeneration = 0;" in source
+    assert "resolveGeneration += 1;" in source
+    assert "const submittedLinks = String(form.get('links') || '');" in source
+    assert "const generation = ++resolveGeneration;" in source
+    assert "const currentLinks = String(linksInput.value || '');" in source
+    assert (
+        "if (generation !== resolveGeneration || currentLinks !== submittedLinks)"
+        " return;" in source
+    )
+    assert source.count(
+        "if (generation !== resolveGeneration || currentLinks !== submittedLinks)"
+        " return;"
+    ) == 2
+
+
+@pytest.mark.parametrize("filename_template", ["{title", "{unknown}", "{0}"])
+def test_download_rejects_malformed_filename_templates(
+    single_client, tmp_path, monkeypatch, filename_template
+):
+    link = "https://www.douyin.com/video/1234567890123456789"
+    monkeypatch.setattr(
+        app_main, "_extract_single_work_links", lambda text: [(link, "douyin")]
+    )
+    response = single_client.post(
+        "/api/collection/works/download",
+        json={
+            "links": link,
+            "target_dir": str(tmp_path),
+            "filename_template": filename_template,
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["message"] == "命名模板格式无效"
+    assert not list(tmp_path.iterdir())
+
+
 def test_collect_page_uses_canonical_browse_parent():
     source = Path("app/templates/collect.html").read_text(encoding="utf-8")
     assert "singleDirParent = data.parent || '';" in source
