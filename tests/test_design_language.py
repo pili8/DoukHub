@@ -315,6 +315,15 @@ def test_core_page_lucide_runtime_svgs_have_explicit_sizes():
         assert f"height: {size};" in rules[selector]
 
 
+def test_status_page_lucide_runtime_svgs_have_explicit_sizes():
+    source = Path("app/templates/status.html").read_text(encoding="utf-8")
+    rules = _style_rules(source)
+    rule = rules[".status-icon svg[data-lucide]"]
+
+    assert "width: 18px;" in rule
+    assert "height: 18px;" in rule
+
+
 def test_legacy_geometry_aliases_use_doukhub_scale():
     css = Path("app/static/css/style.css").read_text(encoding="utf-8")
     variables = _declaration_map(css.split(":root {", 1)[1].split("}", 1)[0])
