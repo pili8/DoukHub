@@ -53,11 +53,11 @@ def init_ttd_database(root: Path) -> None:
             """
         )
         conn.executemany(
-            "INSERT OR REPLACE INTO config_data(NAME, VALUE) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO config_data(NAME, VALUE) VALUES (?, ?)",
             [("Disclaimer", 1), ("Record", 1), ("Logger", 0)],
         )
         conn.execute(
-            "INSERT OR REPLACE INTO option_data(NAME, VALUE) VALUES ('Language', 'zh_CN')"
+            "INSERT OR IGNORE INTO option_data(NAME, VALUE) VALUES ('Language', 'zh_CN')"
         )
         conn.commit()
 
@@ -122,7 +122,7 @@ async def run_platform(platform: str) -> int:
                         index,
                         resolved,
                         mark=item.mark,
-                        tab=getattr(item, "tab", "post") or "post",
+                        tab="post",
                         earliest=getattr(item, "earliest", "") or "",
                         latest=getattr(item, "latest", "") or "",
                         tiktok=tiktok,
