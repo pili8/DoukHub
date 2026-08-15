@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}状态 - DoukHub{% endblock %}
+{% block title %}服务状态 - DoukHub{% endblock %}
 {% block content %}
 <style>
 .status-card {
@@ -49,76 +49,79 @@
 .status-actions { display: flex; gap: 8px; flex-shrink: 0; }
 </style>
 
-<div class="page-header">
-    <h2>状态</h2>
-    <div class="page-header-actions">
-        <button class="btn btn-secondary" onclick="refreshStatus()"><i class="ph ph-arrow-clockwise"></i> 刷新状态</button>
+<div class="page-head">
+    <div>
+        <h1 class="page-title">服务状态</h1>
+        <div class="page-sub">TTD、XHS 与后台任务健康状态</div>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-secondary" onclick="refreshStatus()"><i data-lucide="rotate-cw"></i> 刷新状态</button>
     </div>
 </div>
 
 <div class="card">
-    <h3><i class="ph ph-package"></i> 内核检测</h3>
+    <h3><i data-lucide="package"></i> 内核检测</h3>
     <div id="kernel-section">
         <div id="kernel-ttd" class="status-card">
-            <div class="status-icon missing" id="kernel-ttd-icon"><i class="ph ph-question"></i></div>
+            <div class="status-icon missing" id="kernel-ttd-icon"><i data-lucide="help-circle"></i></div>
             <div class="status-info">
                 <div class="status-name">TikTokDownloader 内核</div>
                 <div class="status-message" id="kernel-ttd-msg">检测中...</div>
             </div>
             <div class="status-actions">
-                <button class="btn btn-primary btn-sm" id="kernel-ttd-btn" onclick="installKernel('TikTokDownloader')"><i class="ph ph-download-simple"></i> 从 GitHub 下载</button>
+                <button class="btn btn-primary btn-sm" id="kernel-ttd-btn" onclick="installKernel('TikTokDownloader')"><i data-lucide="download"></i> 从 GitHub 下载</button>
             </div>
         </div>
         <div id="kernel-xhs" class="status-card">
-            <div class="status-icon missing" id="kernel-xhs-icon"><i class="ph ph-question"></i></div>
+            <div class="status-icon missing" id="kernel-xhs-icon"><i data-lucide="help-circle"></i></div>
             <div class="status-info">
                 <div class="status-name">XHS-Downloader 内核</div>
                 <div class="status-message" id="kernel-xhs-msg">检测中...</div>
             </div>
             <div class="status-actions">
-                <button class="btn btn-primary btn-sm" id="kernel-xhs-btn" onclick="installKernel('XHS-Downloader')"><i class="ph ph-download-simple"></i> 从 GitHub 下载</button>
+                <button class="btn btn-primary btn-sm" id="kernel-xhs-btn" onclick="installKernel('XHS-Downloader')"><i data-lucide="download"></i> 从 GitHub 下载</button>
             </div>
         </div>
     </div>
 </div>
 
 <div class="card">
-    <h3><i class="ph ph-plug"></i> 服务连接</h3>
+    <h3><i data-lucide="plug"></i> 服务连接</h3>
 
     <div class="status-card" id="feishu-card">
-        <div class="status-icon unknown" id="feishu-icon"><i class="ph ph-question"></i></div>
+        <div class="status-icon unknown" id="feishu-icon"><i data-lucide="help-circle"></i></div>
         <div class="status-info">
             <div class="status-name">云端 API</div>
             <div class="status-message" id="feishu-message">检测中...</div>
         </div>
         <div class="status-actions">
-            <button class="btn btn-secondary btn-sm" onclick="testFeishu()"><i class="ph ph-plugs-connected"></i> 测试连接</button>
+            <button class="btn btn-secondary btn-sm" onclick="testFeishu()"><i data-lucide="plug-zap"></i> 测试连接</button>
         </div>
     </div>
 
     <div class="status-card" id="ttd-card">
-        <div class="status-icon unknown" id="ttd-icon"><i class="ph ph-question"></i></div>
+        <div class="status-icon unknown" id="ttd-icon"><i data-lucide="help-circle"></i></div>
         <div class="status-info">
             <div class="status-name">TikTokDownloader</div>
             <div class="status-message" id="ttd-message">检测中...</div>
         </div>
         <div class="status-actions">
-            <button class="btn btn-success btn-sm" onclick="controlService('TikTokDownloader', 'start')"><i class="ph ph-play"></i> 启动</button>
-            <button class="btn btn-danger btn-sm" onclick="controlService('TikTokDownloader', 'stop')"><i class="ph ph-stop"></i> 停止</button>
-            <button class="btn btn-secondary btn-sm" onclick="testTTD()"><i class="ph ph-plugs-connected"></i> 测试</button>
+            <button class="btn btn-success btn-sm" onclick="controlService('TikTokDownloader', 'start')"><i data-lucide="play"></i> 启动</button>
+            <button class="btn btn-danger btn-sm" onclick="controlService('TikTokDownloader', 'stop')"><i data-lucide="square"></i> 停止</button>
+            <button class="btn btn-secondary btn-sm" onclick="testTTD()"><i data-lucide="plug-zap"></i> 测试</button>
         </div>
     </div>
 
     <div class="status-card" id="xhs-card">
-        <div class="status-icon unknown" id="xhs-icon"><i class="ph ph-question"></i></div>
+        <div class="status-icon unknown" id="xhs-icon"><i data-lucide="help-circle"></i></div>
         <div class="status-info">
             <div class="status-name">XHS-Downloader</div>
             <div class="status-message" id="xhs-message">检测中...</div>
         </div>
         <div class="status-actions">
-            <button class="btn btn-success btn-sm" onclick="controlService('XHS-Downloader', 'start')"><i class="ph ph-play"></i> 启动</button>
-            <button class="btn btn-danger btn-sm" onclick="controlService('XHS-Downloader', 'stop')"><i class="ph ph-stop"></i> 停止</button>
-            <button class="btn btn-secondary btn-sm" onclick="testXHS()"><i class="ph ph-plugs-connected"></i> 测试</button>
+            <button class="btn btn-success btn-sm" onclick="controlService('XHS-Downloader', 'start')"><i data-lucide="play"></i> 启动</button>
+            <button class="btn btn-danger btn-sm" onclick="controlService('XHS-Downloader', 'stop')"><i data-lucide="square"></i> 停止</button>
+            <button class="btn btn-secondary btn-sm" onclick="testXHS()"><i data-lucide="plug-zap"></i> 测试</button>
         </div>
     </div>
 </div>
@@ -152,13 +155,14 @@
 
         if (status.connected) {
             icon.className = 'status-icon connected';
-            icon.innerHTML = '<i class="ph ph-check"></i>';
+            icon.innerHTML = '<i data-lucide="check"></i>';
             message.textContent = status.message;
         } else {
             icon.className = 'status-icon disconnected';
-            icon.innerHTML = '<i class="ph ph-x"></i>';
+            icon.innerHTML = '<i data-lucide="x"></i>';
             message.textContent = status.message;
         }
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     }
 
     function updateKernelCard(name, kernel) {
@@ -169,15 +173,16 @@
 
         if (kernel.installed) {
             icon.className = 'status-icon connected';
-            icon.innerHTML = '<i class="ph ph-check"></i>';
+            icon.innerHTML = '<i data-lucide="check"></i>';
             msg.textContent = '已安装: ' + kernel.path;
             if (btn) btn.style.display = 'none';
         } else {
             icon.className = 'status-icon missing';
-            icon.innerHTML = '<i class="ph ph-warning"></i>';
+            icon.innerHTML = '<i data-lucide="triangle-alert"></i>';
             msg.textContent = '未安装, 请点击右侧按钮从 GitHub 下载';
             if (btn) btn.style.display = '';
         }
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     }
 
     async function installKernel(name) {
@@ -187,7 +192,11 @@
 
         if (!await confirmDialog('将从 GitHub 下载 ' + name + ' 内核源码，需要已安装 git。', { title: '下载确认', confirmText: '下载', danger: false })) return;
 
-        if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ph ph-spinner"></i> 下载中...'; }
+        if (btnEl) {
+            btnEl.disabled = true;
+            btnEl.innerHTML = '<i data-lucide="loader-circle"></i> 下载中...';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+        }
         if (msg) msg.textContent = '正在从 GitHub 克隆源码, 请耐心等待...';
         showToast('正在下载内核源码...', 'info');
 
@@ -204,7 +213,11 @@
             showToast('下载失败: ' + e.message, 'error');
             if (msg) msg.textContent = '下载失败: ' + e.message;
         } finally {
-            if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ph ph-download-simple"></i> 从 GitHub 下载'; }
+            if (btnEl) {
+                btnEl.disabled = false;
+                btnEl.innerHTML = '<i data-lucide="download"></i> 从 GitHub 下载';
+                if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+            }
         }
     }
 

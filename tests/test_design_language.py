@@ -250,3 +250,17 @@ def test_collection_page_preserves_workflow_contracts(app_env):
     assert "previewCollectionScope" in response.text
     assert "selectBatchDetail" in response.text
     assert "invalidateResolvedSingleWorks" in response.text
+
+
+@pytest.mark.parametrize(
+    "path,title",
+    [("/status", "服务状态"), ("/settings", "设置")],
+)
+def test_system_pages_use_page_head_and_lucide(app_env, path, title):
+    client, *_ = app_env
+    response = client.get(path)
+    assert response.status_code == 200
+    assert 'class="page-head"' in response.text
+    assert title in response.text
+    assert "data-lucide=" in response.text
+    assert 'class="ph ph-' not in response.text
