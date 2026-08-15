@@ -85,8 +85,8 @@
   --md-surface-container-lowest: var(--dh-surface);
   --md-surface-container-low: var(--dh-surface);
   --md-surface-container: var(--dh-surface-muted);
-  --md-surface-container-high: #EFEAE1;
-  --md-surface-container-highest: #EAE4D9;
+  --md-surface-container-high: var(--dh-surface-muted);
+  --md-surface-container-highest: var(--dh-border);
 
   /* --- M3 Outline --- */
   --md-outline: var(--dh-text-muted);
@@ -114,7 +114,7 @@
   --text-secondary: var(--dh-text-secondary);
   --text-muted: var(--dh-text-muted);
   --text-tertiary: var(--dh-text-muted);
-  --text-on-accent: #FFFFFF;
+  --text-on-accent: var(--md-on-primary);
   --text-on-dark: var(--md-on-surface);
   --text-on-dark-muted: var(--md-on-surface-variant);
   --text-on-dark-dim: var(--md-outline);
@@ -143,19 +143,19 @@
   --info-text: var(--md-on-info-container);
 
   /* --- M3 Shape System --- */
-  --radius-xs: 4px;
-  --radius-sm: 8px;
-  --radius: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 28px;
+  --radius-xs: var(--dh-radius-sm);
+  --radius-sm: var(--dh-radius-sm);
+  --radius: var(--dh-radius);
+  --radius-lg: var(--dh-radius-lg);
+  --radius-xl: var(--dh-radius-lg);
   --radius-full: 9999px;
 
   /* --- M3 Elevation (level 1-4) --- */
-  --shadow-xs: 0 1px 2px 0 rgb(0 50 80 / 0.06);
-  --shadow-sm: 0 1px 2px 0 rgb(0 50 80 / 0.10), 0 1px 3px 1px rgb(0 50 80 / 0.06);
-  --shadow-md: 0 1px 2px 0 rgb(0 50 80 / 0.10), 0 2px 6px 2px rgb(0 50 80 / 0.08);
-  --shadow-lg: 0 4px 8px 3px rgb(0 50 80 / 0.10), 0 1px 3px 0 rgb(0 50 80 / 0.10);
-  --shadow-xl: 0 8px 12px 6px rgb(0 50 80 / 0.12), 0 4px 4px 3px rgb(0 50 80 / 0.08);
+  --shadow-xs: var(--dh-shadow-sm);
+  --shadow-sm: var(--dh-shadow-sm);
+  --shadow-md: var(--dh-shadow-sm);
+  --shadow-lg: var(--dh-shadow-lg);
+  --shadow-xl: var(--dh-shadow-lg);
   --glow-primary: 0 0 0 2px var(--dh-accent-soft);
   --glow-danger: 0 0 0 2px var(--dh-danger-soft);
 
@@ -216,6 +216,11 @@
   --md-on-tertiary: #26201A;
   --md-tertiary-container: #3D352C;
   --md-on-tertiary-container: #F7F3EC;
+  --md-on-primary: #17130F;
+  --md-on-error: #17130F;
+  --md-on-success: #17130F;
+  --md-on-warning: #17130F;
+  --md-on-info: #17130F;
   --md-on-primary-container: #E7F3FF;
   --md-on-error-container: #4A1710;
   --md-on-success-container: #0E3B20;
@@ -433,6 +438,12 @@ code, pre { font-family: var(--font-mono); }
   color: var(--dh-accent);
 }
 
+.card h3 svg[data-lucide] {
+  width: 17px;
+  height: 17px;
+  color: var(--dh-accent);
+}
+
 /* ===== 6. M3 Buttons ===== */
 .btn {
   display: inline-flex;
@@ -477,6 +488,11 @@ code, pre { font-family: var(--font-mono); }
 
 .btn i {
   font-size: 18px;
+}
+
+.btn svg[data-lucide] {
+  width: 14px;
+  height: 14px;
 }
 
 /* M3 Filled Button */
@@ -854,6 +870,14 @@ tbody tr:hover {
   display: block;
 }
 
+.empty-state svg[data-lucide] {
+  width: 36px;
+  height: 36px;
+  color: var(--md-outline-variant);
+  margin-bottom: 16px;
+  display: block;
+}
+
 /* ===== 15. M3 Linear Progress Indicator ===== */
 .progress-bar-container {
   width: 100%;
@@ -923,6 +947,12 @@ tbody tr:hover {
 
 .workflow-title i {
   font-size: 17px;
+  color: var(--dh-accent);
+}
+
+.workflow-title svg[data-lucide] {
+  width: 17px;
+  height: 17px;
   color: var(--dh-accent);
 }
 

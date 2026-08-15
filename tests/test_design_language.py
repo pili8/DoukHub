@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import re
-
 import pytest
 
 from tests.test_api import app_env
@@ -93,6 +92,72 @@ def test_doukhub_dark_theme_is_explicit_and_complete():
     assert "--dh-accent-hover: #7BBFFF;" in dark_block
 
 
+def _declaration_map(block):
+    block = re.sub(r"/\*.*?\*/", "", block, flags=re.DOTALL)
+    declarations = {}
+    for declaration in block.split(";"):
+        name, separator, value = declaration.partition(":")
+        if separator:
+            declarations[name.strip()] = value.strip()
+    return declarations
+
+
+def _style_rules(source):
+    rules = {}
+    for selectors, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", source):
+        for selector in selectors.split(","):
+            rules.setdefault(selector.strip(), declarations.strip())
+    return rules
+
+
+def _resolved_value(value, variables):
+    while True:
+        match = re.fullmatch(r"var\((--[\w-]+)(?:,\s*([^()]+))?\)", value)
+        if not match:
+            return value
+        name, fallback = match.groups()
+        value = variables.get(name, fallback or "")
+
+
+def _rule_declarations(source, selector):
+    match = re.search(rf"{re.escape(selector)}\s*\{{([^{{}}]*)\}}", source)
+    return _declaration_map(match.group(1))
+
+
+def _contrast_ratio(first, second):
+    def relative_luminance(hex_color):
+        channels = [int(hex_color[index : index + 2], 16) / 255 for index in range(1, 7, 2)]
+        linear = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4 for channel in channels]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    lighter = max(relative_luminance(first), relative_luminance(second))
+    darker = min(relative_luminance(first), relative_luminance(second))
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def test_dark_legacy_components_resolve_through_doukhub_palette():
+    css = Path("app/static/css/style.css").read_text(encoding="utf-8")
+    root = _declaration_map(css.split(":root {", 1)[1].split("}", 1)[0])
+    dark = root | _declaration_map(css.split(':root[data-theme="dark"] {', 1)[1].split("}", 1)[0])
+
+    for selector in (".workflow-status.pending", ".toast-info"):
+        rule = _rule_declarations(css, selector)
+        background = _resolved_value(rule["background"], dark)
+        color = _resolved_value(rule["color"], dark)
+        assert _resolved_value(root["--md-surface-container-high"], root) == root["--dh-surface-muted"]
+        assert background == dark["--dh-surface-muted"]
+        assert _contrast_ratio(background, color) >= 4.5
+
+    for role in ("primary", "error", "success", "warning", "info"):
+        assert dark[f"--md-on-{role}"] == "#17130F"
+
+    for selector in (".btn-primary", ".btn-danger"):
+        rule = _rule_declarations(css, selector)
+        background = _resolved_value(rule["background"], dark)
+        color = _resolved_value(rule["color"], dark)
+        assert _contrast_ratio(background, color) >= 4.5
+
+
 def test_sidebar_active_indicator_is_preserved():
     source = Path("app/templates/base.html").read_text(encoding="utf-8")
     assert ".sidebar-nav a.active::before" in source
@@ -165,8 +230,8 @@ def test_shell_css_sizes_lucide_svg_icons():
         ".sb-collapsed .sidebar-brand > svg[data-lucide]": "24px",
         ".sidebar-collapse-btn svg[data-lucide]": "16px",
         ".sb-collapsed .sidebar-collapse-btn svg[data-lucide]": "14px",
-        ".sidebar-nav a svg[data-lucide]": "20px",
-        ".nav-group .nav-group-toggle svg[data-lucide]:first-child": "20px",
+        ".sidebar-nav a svg[data-lucide]": "18px",
+        ".nav-group .nav-group-toggle svg[data-lucide]:first-child": "18px",
         ".nav-group .nav-arrow": "14px",
         ".nav-group .nav-submenu a svg[data-lucide]": "16px",
         ".dh-modal-header h3 svg[data-lucide]": "18px",
@@ -177,6 +242,45 @@ def test_shell_css_sizes_lucide_svg_icons():
     for selector, size in expected_sizes.items():
         assert f"width: {size};" in rules[selector]
         assert f"height: {size};" in rules[selector]
+
+
+def test_core_page_lucide_runtime_svgs_have_explicit_sizes():
+    css = Path("app/static/css/style.css").read_text(encoding="utf-8")
+    rules = _style_rules(css)
+    expected_sizes = {
+        ".btn svg[data-lucide]": "14px",
+        ".card h3 svg[data-lucide]": "17px",
+        ".workflow-title svg[data-lucide]": "17px",
+        ".empty-state svg[data-lucide]": "36px",
+    }
+    for selector, size in expected_sizes.items():
+        assert f"width: {size};" in rules[selector]
+        assert f"height: {size};" in rules[selector]
+
+
+def test_legacy_geometry_aliases_use_doukhub_scale():
+    css = Path("app/static/css/style.css").read_text(encoding="utf-8")
+    variables = _declaration_map(css.split(":root {", 1)[1].split("}", 1)[0])
+    expected_aliases = {
+        "--radius-xs": "--dh-radius-sm",
+        "--radius-sm": "--dh-radius-sm",
+        "--radius": "--dh-radius",
+        "--radius-lg": "--dh-radius-lg",
+        "--radius-xl": "--dh-radius-lg",
+        "--shadow-xs": "--dh-shadow-sm",
+        "--shadow-sm": "--dh-shadow-sm",
+        "--shadow-md": "--dh-shadow-sm",
+        "--shadow-lg": "--dh-shadow-lg",
+        "--shadow-xl": "--dh-shadow-lg",
+    }
+    for alias, canonical in expected_aliases.items():
+        assert variables[alias] == f"var({canonical})"
+
+    toast_rule = _rule_declarations(css, ".toast")
+    status_rule = _rule_declarations(css, ".workflow-status")
+    assert toast_rule["border-radius"] == "var(--radius-sm)"
+    assert status_rule["border-radius"] == "var(--radius-sm)"
+    assert toast_rule["box-shadow"] == "var(--shadow-lg)"
 
 
 @pytest.mark.parametrize(
