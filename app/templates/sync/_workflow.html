@@ -1,0 +1,57 @@
+{% macro workflow_notice(icon, text) -%}
+<div class="workflow-notice">
+    <i class="ph ph-{{ icon }}"></i>
+    <span>{{ text }}</span>
+</div>
+{%- endmacro %}
+
+{% macro workflow_progress(bar_id='progress-bar', text_id='progress-text', count_id='progress-count') -%}
+<div class="progress-bar-container">
+    <div class="progress-bar" id="{{ bar_id }}" style="width:0%"></div>
+</div>
+<div class="workflow-progress-meta">
+    <span id="{{ text_id }}"></span>
+    <span id="{{ count_id }}"></span>
+</div>
+{%- endmacro %}
+
+{% macro workflow_metrics(metrics) -%}
+<div class="workflow-metrics">
+    {% for metric in metrics %}
+    <div class="workflow-metric" style="border-left-color: var({{ metric.color }});">
+        <span class="metric-value" id="{{ metric.id }}" style="color: var({{ metric.color }});">0</span>
+        <span class="metric-label">{{ metric.label }}</span>
+    </div>
+    {% endfor %}
+</div>
+{%- endmacro %}
+
+{% macro workflow_history(history) -%}
+<div class="workflow-panel">
+    <div class="workflow-header">
+        <div class="workflow-title">
+            <i class="ph ph-clock-counter-clockwise"></i>
+            <span>历史记录</span>
+            <span class="workflow-count">（{{ history|length }} 条）</span>
+        </div>
+    </div>
+    {% if history %}
+    {% for item in history %}
+    <div class="workflow-history-item">
+        <div class="workflow-history-header" onclick="toggleHistory(this)">
+            <span>
+                <span class="workflow-status {{ item.status }}">{{ item.status }}</span>
+                成功 {{ item.success }} / 失败 {{ item.failed }}{% if item.skipped %} / 跳过 {{ item.skipped }}{% endif %}
+            </span>
+            <span class="text-muted">{{ item.created_at }}</span>
+        </div>
+        <div class="workflow-history-detail">
+            <div class="workflow-log history-log" data-log="{{ item.log_json }}"></div>
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state"><i class="ph ph-clock-counter-clockwise"></i>暂无历史记录</div>
+    {% endif %}
+</div>
+{%- endmacro %}

@@ -1,99 +1,62 @@
 {% extends "base.html" %}
 {% block title %}导入采集表 - DoukHub{% endblock %}
 {% block content %}
+{% from "sync/_workflow.html" import workflow_history, workflow_metrics, workflow_notice, workflow_progress %}
 <style>
 .sync-textarea { width: 100%; min-height: 120px; resize: vertical; padding: 9px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font-mono); background: var(--bg-input); color: var(--text-primary); }
 .sync-textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
-.sync-log-box { max-height: 300px; overflow-y: auto; background: #0f172a; color: #cbd5e1; border-radius: var(--radius); padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; border: 1px solid #1e293b; }
-.sync-log-box .log-ok { color: #34d399; }
-.sync-log-box .log-err { color: #f87171; }
-.sync-log-box .log-info { color: #60a5fa; }
-.sync-log-box .log-warn { color: #fbbf24; }
-.sync-stats-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(96px,1fr)); gap: 12px; text-align: center; margin-top: 12px; }
-.sync-stat-card { padding:10px; background:var(--bg-muted); border-radius:var(--radius-sm); border:1px solid var(--border-default); }
-.sync-stat-card .num { font-size:20px; font-weight:700; }
-.sync-stat-card .label { font-size:11px; color:var(--text-muted); }
-.history-item { border: 1px solid var(--border-default); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }
-.history-header { padding: 10px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: var(--bg-muted); font-size: 13px; }
-.history-header:hover { background: var(--bg-hover); }
-.history-detail { max-height: 0; overflow: hidden; transition: max-height 0.3s; }
-.history-detail.expanded { max-height: 500px; }
-.history-log { background: #0f172a; color: #cbd5e1; padding: 10px 14px; font-family: var(--font-mono); font-size: 11px; line-height: 1.6; max-height: 400px; overflow-y: auto; }
-.history-log .log-ok { color: #34d399; }
-.history-log .log-err { color: #f87171; }
-.history-log .log-info { color: #60a5fa; }
-.history-log .log-warn { color: #fbbf24; }
-.status-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
-.status-done { background: var(--success-light); color: var(--success); }
-.status-failed { background: var(--danger-light); color: var(--danger); }
-.status-cancelled { background: var(--warning-light); color: var(--warning); }
 </style>
 
 <div class="page-header">
     <h2>导入采集表</h2>
 </div>
 
-<!-- 执行区 -->
-<div class="card">
-    <h3 style="font-size:15px;margin-bottom:12px;"><i class="ph ph-download"></i> 数据导入</h3>
-    <div class="form-group">
-        <label>粘贴数据或拖拽文件（支持多种格式）</label>
-        <textarea id="import-text" rows="8" class="sync-textarea" placeholder="格式1: 个2@iMLuCKjq&#10;格式2: {&quot;地址&quot;:&quot;xxx&quot;,&quot;等级&quot;:&quot;个2，图&quot;,&quot;用户&quot;:&quot;xxx&quot;} | ..." ondrop="handleDrop(event)" ondragover="event.preventDefault()" ondragenter="this.style.borderColor='var(--accent)'" ondragleave="this.style.borderColor=''"></textarea>
+<div class="workflow-panel">
+    <div class="workflow-header">
+        <div class="workflow-title">
+            <i class="ph ph-download"></i>
+            <span>数据导入</span>
+        </div>
+        <div class="workflow-actions">
+            <button class="btn btn-secondary" onclick="parseImport()">
+                <i class="ph ph-magnifying-glass"></i> 解析预览
+            </button>
+            <button class="btn btn-primary" onclick="doImport()" id="exec-btn">
+                <i class="ph ph-download"></i> 执行导入
+            </button>
+        </div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-        <button class="btn btn-secondary" onclick="parseImport()"><i class="ph ph-magnifying-glass"></i> 解析预览</button>
-        <button class="btn btn-primary" onclick="doImport()" id="exec-btn"><i class="ph ph-download"></i> 执行导入</button>
-        <span id="import-status" style="font-size:13px;color:var(--text-muted);"></span>
-    </div>
-    <div id="import-preview" style="display:none;margin-bottom:12px;">
-        <div class="table-scroll"><table>
-            <thead><tr><th>原始内容</th><th>地址</th><th>等级</th><th>标签</th><th>名称</th></tr></thead>
-            <tbody id="preview-body"></tbody>
-        </table></div>
+    <textarea id="import-text" rows="8" class="sync-textarea" placeholder="格式1: 个2@iMLuCKjq&#10;格式2: {&quot;地址&quot;:&quot;xxx&quot;,&quot;等级&quot;:&quot;个2，图&quot;}" ondrop="handleDrop(event)" ondragover="event.preventDefault()" ondragenter="this.style.borderColor='var(--accent)'" ondragleave="this.style.borderColor=''"></textarea>
+    <div id="import-status" class="text-muted" style="margin-top:8px;font-size:13px;"></div>
+    <div class="workflow-panel" id="import-preview" style="display:none;">
+        <div class="table-scroll">
+            <table>
+                <thead><tr><th>原始内容</th><th>地址</th><th>等级</th><th>标签</th><th>名称</th></tr></thead>
+                <tbody id="preview-body"></tbody>
+            </table>
+        </div>
     </div>
 </div>
 
-<!-- 执行结果 -->
-<div class="card" id="result-card" style="display:none;">
-    <h3 style="font-size:15px;margin-bottom:12px;"><i class="ph ph-chart-bar"></i> 执行结果</h3>
-    <div class="sync-stats-grid">
-        <div class="sync-stat-card"><div class="num" id="stat-total" style="color:var(--accent);">0</div><div class="label">总记录</div></div>
-        <div class="sync-stat-card"><div class="num" id="stat-created" style="color:var(--success);">0</div><div class="label">新增</div></div>
-        <div class="sync-stat-card"><div class="num" id="stat-updated" style="color:var(--success);">0</div><div class="label">更新/恢复</div></div>
-        <div class="sync-stat-card"><div class="num" id="stat-duplicate" style="color:var(--warning);">0</div><div class="label">重复</div></div>
-        <div class="sync-stat-card"><div class="num" id="stat-skipped" style="color:var(--warning);">0</div><div class="label">跳过</div></div>
-        <div class="sync-stat-card"><div class="num" id="stat-failed" style="color:var(--danger);">0</div><div class="label">失败</div></div>
+<div class="workflow-panel" id="result-card" style="display:none;">
+    <div class="workflow-header">
+        <div class="workflow-title">
+            <i class="ph ph-chart-bar"></i>
+            <span>执行结果</span>
+        </div>
     </div>
-    <div class="sync-log-box" id="exec-log" style="margin-top:12px;"></div>
+    {{ workflow_metrics([
+        {"id":"stat-total","label":"总记录","color":"--md-primary"},
+        {"id":"stat-created","label":"新增","color":"--md-success"},
+        {"id":"stat-updated","label":"更新/恢复","color":"--md-success"},
+        {"id":"stat-duplicate","label":"重复","color":"--md-warning"},
+        {"id":"stat-skipped","label":"跳过","color":"--md-warning"},
+        {"id":"stat-failed","label":"失败","color":"--md-error"}
+    ]) }}
+    <div class="workflow-log" id="exec-log" style="margin-top:12px;"></div>
 </div>
 
-<!-- 历史记录 -->
-<div class="card">
-    <h3 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCard(this)">
-        <span><i class="ph ph-clock-counter-clockwise"></i> 历史记录 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;margin-left:8px;">（{{ history|length }} 条）</span></span>
-        <span class="collapse-icon"><i class="ph ph-caret-down"></i></span>
-    </h3>
-    <div class="card-content">
-    {% if history %}
-    {% for h in history %}
-    <div class="history-item">
-        <div class="history-header" onclick="toggleHistory(this)">
-            <span>
-                <span class="status-badge status-{{ h.status }}">{{ h.status }}</span>
-                成功 {{ h.success }} / 失败 {{ h.failed }}{% if h.skipped %} / 跳过 {{ h.skipped }}{% endif %}
-            </span>
-            <span style="color:var(--text-muted);">{{ h.created_at }}</span>
-        </div>
-        <div class="history-detail">
-            <div class="history-log" id="history-log-{{ h.id }}" data-log="{{ h.log_json }}"></div>
-        </div>
-    </div>
-    {% endfor %}
-    {% else %}
-    <div class="empty-state"><i class="ph ph-clock-counter-clockwise"></i>暂无历史记录</div>
-    {% endif %}
-    </div>
-</div>
+{{ workflow_history(history) }}
 {% endblock %}
 
 {% block scripts %}
