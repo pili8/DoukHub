@@ -1264,8 +1264,14 @@ tbody tr:hover {
 
   .form-group input, .form-group select, .form-group textarea { font-size: 15px; }
 
-  .btn { height: 40px; padding: 0 20px; font-size: 14px; }
-  .btn-sm { height: 32px; padding: 0 14px; font-size: 13px; }
+  .btn {
+    height: auto;
+    min-height: 40px;
+    padding: 8px 20px;
+    font-size: 14px;
+    white-space: normal;
+  }
+  .btn-sm { height: auto; min-height: 32px; padding: 5px 14px; font-size: 13px; }
 
   th, td { padding: 10px 12px; font-size: 12px; }
 

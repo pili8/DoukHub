@@ -282,3 +282,14 @@ def test_theme_material_is_no_longer_the_canonical_asset(app_env):
     assert 'href="/static/css/style.css?v=5"' in response.text
     assert "theme-material.css" not in response.text
     assert "workflow-panel" in response.text
+
+
+def test_mobile_buttons_allow_wrapping_instead_of_clipping():
+    css = Path("app/static/css/style.css").read_text(encoding="utf-8")
+    mobile_block = css.split("@media (max-width: 720px)", 1)[1]
+    mobile_block = mobile_block.split("@media (max-width: 420px)", 1)[0]
+
+    assert ".btn {" in mobile_block
+    assert "height: auto;" in mobile_block
+    assert "min-height: 40px;" in mobile_block
+    assert "white-space: normal;" in mobile_block
