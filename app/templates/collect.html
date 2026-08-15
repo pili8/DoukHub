@@ -8,26 +8,9 @@
 .mode-card.selected { border-color: var(--accent); background: var(--accent-light); }
 .mode-card h3 { margin-bottom: 6px; }
 .mode-card p { font-size: 13px; color: var(--text-muted); }
-.progress-step {
-    padding: 12px;
-    margin-bottom: 8px;
-    border-radius: var(--radius-sm);
-    background: var(--bg-muted);
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    border: 1px solid var(--border-default);
-}
-.progress-step.active { background: var(--info-light); border-left: 3px solid var(--info); }
-.progress-step.done { background: var(--success-light); border-left: 3px solid var(--success); }
-.progress-step.error { background: var(--danger-light); border-left: 3px solid var(--danger); }
-.step-icon { font-size: 20px; }
-.step-text { font-size: 14px; }
-.collect-stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; text-align: center; }
 #task-modal > div { max-width: 90vw; width: 420px; max-height: 90vh; overflow-y: auto; }
 @media (max-width: 768px) {
     .collect-mode-grid { grid-template-columns: 1fr !important; }
-    .collect-stats-grid { grid-template-columns: repeat(2,1fr) !important; }
 }
 </style>
 
@@ -48,7 +31,7 @@
 
 <div class="card" id="account-form-card">
     <h3><i class="ph ph-download"></i> 整号采集</h3>
-    <form id="account-form" onsubmit="submitAccountCollect(event)">
+    <form id="account-form" onsubmit="startCollectionBatch(event)">
         <div class="form-group">
             <label>等级筛选（只采集选中等级以上）</label>
             <div class="collect-rating-group" style="display:flex;gap:16px;flex-wrap:wrap;">
@@ -59,10 +42,31 @@
             </div>
         </div>
         <div class="form-group">
-            <label>指定账号（留空=采集所有符合条件的账号）</label>
-            <input type="text" name="account_names" placeholder="输入账号名称, 多个用逗号分隔">
+            <label>标签筛选（逗号分隔，留空为全部）</label>
+            <input type="text" name="tags" placeholder="多, 个人">
         </div>
-        <button type="submit" class="btn btn-primary" id="account-submit"><i class="ph ph-download-simple"></i> 开始整号采集</button>
+        <div class="form-group">
+            <label>指定账号（留空为符合条件的全部账号）</label>
+            <input type="text" name="account_names" placeholder="账号名称, 多个用逗号分隔">
+        </div>
+        <div class="form-group">
+            <label>平台</label>
+            <select name="platform">
+                <option value="douyin">抖音</option>
+                <option value="tiktok">TikTok</option>
+                <option value="all">全部</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>采集模式</label>
+            <select name="mode">
+                <option value="incremental">首次全量，后续增量</option>
+                <option value="full">重新全量</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary" id="account-submit">
+            <i class="ph ph-download-simple"></i> 开始整号采集
+        </button>
     </form>
 </div>
 
@@ -77,41 +81,32 @@
     </form>
 </div>
 
-<div class="card" id="progress-card" style="display:none;">
-    <h3><i class="ph ph-spinner"></i> 采集进度</h3>
-    <div id="progress-content">
-        <div class="progress-step" id="step-prepare">
-            <span class="step-icon"><i class="ph ph-hourglass"></i></span>
-            <span class="step-text">准备中...</span>
-        </div>
-        <div class="progress-step" id="step-collecting">
-            <span class="step-icon"><i class="ph ph-hourglass"></i></span>
-            <span class="step-text">等待开始...</span>
-        </div>
-        <div class="progress-step" id="step-complete">
-            <span class="step-icon"><i class="ph ph-hourglass"></i></span>
-            <span class="step-text">完成</span>
-        </div>
-    </div>
-    <div id="progress-stats" style="margin-top:16px;padding:12px;background:var(--info-light);border-radius:var(--radius-sm);display:none;">
-        <div class="collect-stats-grid">
-            <div>
-                <div style="font-size:24px;font-weight:700;color:var(--accent);" id="stat-accounts">0</div>
-                <div style="font-size:12px;color:var(--text-muted);">账号数</div>
-            </div>
-            <div>
-                <div style="font-size:24px;font-weight:700;color:var(--success);" id="stat-works">0</div>
-                <div style="font-size:12px;color:var(--text-muted);">作品数</div>
-            </div>
-            <div>
-                <div style="font-size:24px;font-weight:700;color:var(--warning);" id="stat-api">0</div>
-                <div style="font-size:12px;color:var(--text-muted);">API 调用</div>
-            </div>
-            <div>
-                <div style="font-size:24px;font-weight:700;color:var(--danger);" id="stat-failed">0</div>
-                <div style="font-size:12px;color:var(--text-muted);">失败</div>
-            </div>
-        </div>
+<div class="card" id="batch-card" style="display:none;">
+    <h3><i class="ph ph-list-checks"></i> 批量批次</h3>
+    <div id="batch-detail"></div>
+</div>
+
+<div class="card">
+    <h3><i class="ph ph-clock-counter-clockwise"></i> 批次记录</h3>
+    <div class="table-scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>批次</th>
+                    <th>平台</th>
+                    <th>状态</th>
+                    <th>账号</th>
+                    <th>成功</th>
+                    <th>失败</th>
+                    <th>跳过</th>
+                    <th>开始时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="batch-table-body">
+                <tr><td colspan="9" class="text-muted">暂无批次</td></tr>
+            </tbody>
+        </table>
     </div>
 </div>
 
@@ -197,97 +192,12 @@
 
     showCollectMode('account');
 
-    async function submitAccountCollect(e) {
-        e.preventDefault();
-        const form = new FormData(e.target);
-        const ratings = form.getAll('rating');
-        const minRating = ratings.length ? Math.min(...ratings.map(Number)) : 3;
-
-        showProgress();
-        updateStep('step-prepare', 'active', 'spinner', '准备采集...');
-
-        const btn = document.getElementById('account-submit');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="ph ph-spinner"></i> 采集中...';
-
-        try {
-            updateStep('step-collecting', 'active', 'spinner', '正在采集...');
-
-            const response = await fetch('/api/collect/v2/account', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    account_names: form.get('account_names') || '',
-                    rating_min: minRating,
-                }),
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                updateStep('step-collecting', 'error', 'x', error.message);
-                showToast(error.message, 'error');
-                return;
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let totalWorks = 0;
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.slice(6));
-                            switch (data.type) {
-                                case 'progress':
-                                    updateStep('step-collecting', 'active', 'spinner', data.message);
-                                    break;
-                                case 'stats':
-                                    document.getElementById('stat-accounts').textContent = data.total || 0;
-                                    document.getElementById('stat-works').textContent = totalWorks;
-                                    document.getElementById('progress-stats').style.display = 'block';
-                                    break;
-                                case 'log':
-                                    if (data.level === 'ok') {
-                                        const match = data.message.match(/(\d+) 个作品/);
-                                        if (match) totalWorks += parseInt(match[1]);
-                                    }
-                                    break;
-                                case 'complete':
-                                    if (data.success) {
-                                        updateStep('step-prepare', 'done', 'check', '准备完成');
-                                        updateStep('step-collecting', 'done', 'check', data.message);
-                                        updateStep('step-complete', 'done', 'check', '全部完成');
-                                        document.getElementById('stat-accounts').textContent = data.total || 0;
-                                        document.getElementById('stat-works').textContent = totalWorks;
-                                        showToast('采集完成', 'success');
-                                    } else {
-                                        updateStep('step-collecting', 'error', 'x', data.message);
-                                        showToast(data.message, 'error');
-                                    }
-                                    break;
-                            }
-                        } catch (e) {}
-                    }
-                }
-            }
-
-        } catch (e) {
-            updateStep('step-collecting', 'error', 'x', `请求失败: ${e.message}`);
-            showToast('采集请求失败', 'error');
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="ph ph-download-simple"></i> 开始整号采集';
-        }
-    }
+    if (window.collectionPollTimer) clearInterval(window.collectionPollTimer);
+    var collectionPollTimer = window.collectionPollTimer || null;
+    window._spaCleanup = () => {
+        if (collectionPollTimer) clearInterval(collectionPollTimer);
+        collectionPollTimer = null;
+    };
 
     async function submitDetailCollect(e) {
         e.preventDefault();
@@ -295,29 +205,19 @@
         const body = new FormData();
         body.append('links', form.get('links'));
 
-        showProgress();
-        updateStep('step-prepare', 'active', 'spinner', '准备采集...');
-
         const btn = document.getElementById('detail-submit');
         btn.disabled = true;
         btn.innerHTML = '<i class="ph ph-spinner"></i> 采集中...';
 
         try {
-            updateStep('step-collecting', 'active', 'spinner', '正在采集...');
             const data = await apiCall('/api/collect/detail', 'POST', body);
 
             if (data.success) {
-                updateStep('step-prepare', 'done', 'check', '准备完成');
-                updateStep('step-collecting', 'done', 'check', `采集完成: ${data.results?.length || 0} 个作品`);
-                updateStep('step-complete', 'done', 'check', '全部完成');
-                showCollectStats(data);
-                showToast('采集完成', 'success');
+                showToast(`采集完成: ${data.results?.length || 0} 个作品`, 'success');
             } else {
-                updateStep('step-collecting', 'error', 'x', data.message);
                 showToast(data.message, 'error');
             }
         } catch (e) {
-            updateStep('step-collecting', 'error', 'x', `请求失败: ${e.message}`);
             showToast('采集请求失败', 'error');
         } finally {
             btn.disabled = false;
@@ -325,40 +225,135 @@
         }
     }
 
-    function showProgress() {
-        document.getElementById('progress-card').style.display = 'block';
-        ['step-prepare', 'step-collecting', 'step-complete'].forEach(id => {
-            const el = document.getElementById(id);
-            el.className = 'progress-step';
-            el.querySelector('.step-icon').innerHTML = '<i class="ph ph-hourglass"></i>';
-        });
-        document.getElementById('progress-stats').style.display = 'none';
-    }
-
-    function updateStep(stepId, status, icon, text) {
-        const el = document.getElementById(stepId);
-        el.className = `progress-step ${status}`;
-        const iconMap = { 'spinner': 'ph-spinner', 'check': 'ph-check', 'x': 'ph-x', 'hourglass': 'ph-hourglass' };
-        el.querySelector('.step-icon').innerHTML = `<i class="ph ${iconMap[icon] || icon}"></i>`;
-        el.querySelector('.step-text').textContent = text;
-    }
-
-    function showCollectStats(data) {
-        const statsDiv = document.getElementById('progress-stats');
-        statsDiv.style.display = 'block';
-        let totalWorks = 0;
-        let failedCount = 0;
-        if (data.results) {
-            data.results.forEach(r => {
-                totalWorks += r.works_count || 0;
-                if (r.status !== 'success') failedCount++;
-            });
+    async function startCollectionBatch(e) {
+        e.preventDefault();
+        const form = new FormData(e.target);
+        const ratings = form.getAll('rating').map(Number);
+        const payload = {
+            rating_min: ratings.length ? Math.min(...ratings) : 3,
+            tags: String(form.get('tags') || '')
+                .split(/[,，]/).map(value => value.trim()).filter(Boolean),
+            account_names: form.get('account_names') || '',
+            platform: form.get('platform') || 'douyin',
+            mode: form.get('mode') || 'incremental',
+        };
+        const button = document.getElementById('account-submit');
+        button.disabled = true;
+        button.innerHTML = '<i class="ph ph-spinner"></i> 正在创建...';
+        try {
+            const data = await apiCall('/api/collection/batches', 'POST', payload);
+            showToast(`已创建 ${data.batches.length} 个批次`, 'success');
+            document.getElementById('batch-card').style.display = 'block';
+            await refreshCollectionBatches();
+        } catch (error) {
+            showToast(error.message || '创建批次失败', 'error');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = '<i class="ph ph-download-simple"></i> 开始整号采集';
         }
-        document.getElementById('stat-accounts').textContent = data.results?.length || 0;
-        document.getElementById('stat-works').textContent = totalWorks;
-        document.getElementById('stat-api').textContent = totalWorks;
-        document.getElementById('stat-failed').textContent = failedCount;
     }
+
+    async function refreshCollectionBatches() {
+        const data = await apiCall('/api/collection/batches', 'GET');
+        const body = document.getElementById('batch-table-body');
+        if (!data.batches?.length) {
+            body.innerHTML = '<tr><td colspan="9" class="text-muted">暂无批次</td></tr>';
+            return;
+        }
+        body.innerHTML = data.batches.map(batch => `
+            <tr>
+                <td title="${escapeHtml(batch.id)}">${escapeHtml(batch.id.slice(0, 17))}</td>
+                <td>${formatPlatform(batch.platform)}</td>
+                <td>${formatBatchStatus(batch.status)}</td>
+                <td>${batch.total_accounts || 0}</td>
+                <td>${batch.success_accounts || 0}</td>
+                <td>${batch.failed_accounts || 0}</td>
+                <td>${batch.skipped_accounts || 0}</td>
+                <td>${formatDateTime(batch.started_at)}</td>
+                <td>
+                    <button class="btn btn-secondary" onclick="showBatchDetail('${batch.id}')">详情</button>
+                    ${['pending', 'running', 'cancelling'].includes(batch.status) ? `<button class="btn btn-danger" onclick="cancelCollectionBatch('${batch.id}')">取消</button>` : ''}
+                    ${(batch.failed_accounts || 0) > 0 ? `<button class="btn btn-primary" onclick="retryCollectionBatch('${batch.id}')">失败重试</button>` : ''}
+                </td>
+            </tr>
+        `).join('');
+
+        const active = data.batches.find(batch =>
+            ['pending', 'running', 'cancelling'].includes(batch.status)
+        );
+        if (active) await showBatchDetail(active.id, true);
+    }
+
+    async function showBatchDetail(batchId, silent = false) {
+        const data = await apiCall(`/api/collection/batches/${batchId}`, 'GET');
+        document.getElementById('batch-card').style.display = 'block';
+        const rows = data.items.map(item => `
+            <tr>
+                <td>${escapeHtml(item.account_name || item.sec_user_id)}</td>
+                <td>${formatBatchStatus(item.status)}</td>
+                <td>${formatDateTime(item.last_collected_at)}</td>
+                <td>${escapeHtml(item.message || '')}</td>
+            </tr>
+        `).join('');
+        document.getElementById('batch-detail').innerHTML = `
+            <div class="table-scroll" style="margin-bottom:12px;">
+                <table>
+                    <thead><tr><th>账号</th><th>状态</th><th>上次采集</th><th>信息</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+            <details>
+                <summary class="text-muted">批次日志</summary>
+                <pre style="max-height:240px;overflow:auto;background:var(--bg-muted);padding:12px;border-radius:var(--radius-sm);font-size:12px;">${escapeHtml((data.log || []).join('\n'))}</pre>
+            </details>
+        `;
+        if (!silent) await refreshCollectionBatches();
+    }
+
+    async function cancelCollectionBatch(batchId) {
+        const ok = await confirmDialog(
+            '将停止当前 TTD 批量进程，未完成账号会标记为取消。',
+            {title: '取消批次', confirmText: '取消批次'}
+        );
+        if (!ok) return;
+        await apiCall(`/api/collection/batches/${batchId}/cancel`, 'POST');
+        showToast('已请求取消');
+        await refreshCollectionBatches();
+    }
+
+    async function retryCollectionBatch(batchId) {
+        const data = await apiCall(`/api/collection/batches/${batchId}/retry`, 'POST', {
+            mode: 'incremental',
+        });
+        showToast(`已创建 ${data.batches.length} 个重试批次`, 'success');
+        await refreshCollectionBatches();
+    }
+
+    function formatPlatform(value) {
+        return {douyin: '抖音', tiktok: 'TikTok'}[value] || value || '-';
+    }
+
+    function formatBatchStatus(value) {
+        return {
+            pending: '等待中', running: '运行中', cancelling: '取消中',
+            completed: '已完成', failed: '失败', cancelled: '已取消',
+            success: '成功', skipped: '跳过',
+        }[value] || value || '-';
+    }
+
+    function formatDateTime(value) {
+        return value ? String(value).replace('T', ' ').slice(0, 19) : '-';
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replaceAll('&', '&amp;').replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+    }
+
+    collectionPollTimer = setInterval(refreshCollectionBatches, 3000);
+    refreshCollectionBatches();
 
     function showAddTask() { document.getElementById('task-modal').style.display = 'flex'; }
     function hideAddTask() { document.getElementById('task-modal').style.display = 'none'; }

@@ -802,6 +802,7 @@ input[type="checkbox"]:disabled {
         '标签': { editor: 'tagMultiSelect' },
         '粉丝数': { editor: 'agNumberCellEditor' },
         '作品数': { editor: 'agNumberCellEditor' },
+        'collect_window_days': { editor: 'agNumberCellEditor', params: { min: 0 } },
     };
 
     var FIELD_DISPLAY_NAMES = {
@@ -810,7 +811,7 @@ input[type="checkbox"]:disabled {
     };
 
     var TABLE_EDITABLE_FIELDS = {
-        'account_cache': ['平台', '等级', '标签', '备注', '已获取信息', '获取错误', '采集类型', '启用'],
+        'account_cache': ['平台', '等级', '标签', '备注', '已获取信息', '获取错误', '采集类型', 'collect_window_days', '启用'],
         'collection_cache': ['share_code', '平台', '等级', '标签', '备注', '已解析', '账号名称', '粉丝数', '作品数'],
         'cookie_cache': ['状态', '启用', '备注', '平台'],
         'collection_history': [],
@@ -831,6 +832,7 @@ input[type="checkbox"]:disabled {
         '签名': 200, 'sec_user_id': 200, 'record_id': 200, '同步时间': 140,
         'created_at': 140, '粉丝数': 90, '作品数': 90, '账号名称': 120,
         '已获取信息': 90, '获取错误': 200, '已解析': 80, 'synced': 70,
+        'last_collected_at': 140, 'collect_window_days': 110,
         'local_updated_at': 140, 'is_deleted': 80, 'deleted_at': 140,
         '同步错误': 150, 'share_code': 120, '验证时间': 140, '任务名称': 150,
         'Cron表达式': 130, '等级筛选': 100, '上次运行': 140, '下次运行': 140,
@@ -842,7 +844,7 @@ input[type="checkbox"]:disabled {
         'account_cache': [
             'sec_user_id',
             '平台', '等级', '标签', '备注',
-            '已获取信息', '采集类型', '启用',
+            '已获取信息', '采集类型', 'collect_window_days', 'last_collected_at', '启用',
             '账号名称', '粉丝数', '作品数', '签名', '链接', '头像',
             '获取错误', 'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
         ],
@@ -859,7 +861,8 @@ input[type="checkbox"]:disabled {
         'account_cache': {
             'sec_user_id': 'original',
             '平台': 'edit', '等级': 'edit', '标签': 'edit', '备注': 'edit',
-            '已获取信息': 'control', '获取错误': 'system', '采集类型': 'control', '启用': 'control',
+            '已获取信息': 'control', '获取错误': 'system', '采集类型': 'control',
+            'collect_window_days': 'control', 'last_collected_at': 'system', '启用': 'control',
             '链接': 'fetched', '账号名称': 'fetched', '粉丝数': 'fetched', '作品数': 'fetched', '签名': 'fetched', '头像': 'fetched',
             'record_id': 'system', '同步时间': 'system', 'created_at': 'system',
             'synced': 'system', 'local_updated_at': 'system', 'is_deleted': 'system', 'deleted_at': 'system',

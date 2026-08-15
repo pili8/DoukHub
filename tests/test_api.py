@@ -80,6 +80,13 @@ class TestPageRoutes:
         assert r.status_code == 200
         assert "采集" in r.text
 
+    def test_collect_page_contains_batch_controls(self, app_env):
+        client, *_ = app_env
+        r = client.get("/collect")
+        assert "采集模式" in r.text
+        assert "批次记录" in r.text
+        assert "失败重试" in r.text
+
     def test_sync_overview_page(self, app_env):
         client, *_ = app_env
         r = client.get("/sync/overview")
