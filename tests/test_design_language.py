@@ -264,3 +264,13 @@ def test_system_pages_use_page_head_and_lucide(app_env, path, title):
     assert title in response.text
     assert "data-lucide=" in response.text
     assert 'class="ph ph-' not in response.text
+
+
+def test_settings_page_preserves_system_controls_and_api_calls(app_env):
+    client, *_ = app_env
+    response = client.get("/settings")
+    assert response.status_code == 200
+    assert '<button type="button" onclick="restartSystem()"' in response.text
+    assert '<button type="button" onclick="exitSystem()"' in response.text
+    assert "await apiCall('/api/system/restart', 'POST');" in response.text
+    assert "await apiCall('/api/system/exit', 'POST');" in response.text
