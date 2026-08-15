@@ -135,4 +135,43 @@ def test_global_shell_uses_lucide_icons(app_env):
 def test_spa_router_refreshes_lucide_icons():
     source = Path("app/templates/base.html").read_text(encoding="utf-8")
     assert "function refreshIcons()" in source
-    assert "refreshIcons()" in source.split("async function loadPage", 1)[1]
+    load_page_body = source.split("async function loadPage", 1)[1].split("\n        }", 1)[0]
+    refresh_call = "if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();"
+    assert refresh_call in load_page_body
+    assert "DOMContentLoaded" not in load_page_body
+    assert load_page_body.index("await rebindScripts(ps);") < load_page_body.index(refresh_call)
+
+
+def test_mode_toggle_refreshes_lucide_icon_after_replacement():
+    source = Path("app/templates/base.html").read_text(encoding="utf-8")
+    function_body = source.split("function updateModeToggle", 1)[1].split("\n        }", 1)[0]
+    refresh_call = "if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();"
+    assert "btn.innerHTML" in function_body
+    assert refresh_call in function_body
+    assert function_body.index("btn.innerHTML") < function_body.index(refresh_call)
+
+
+def test_shell_css_sizes_lucide_svg_icons():
+    source = Path("app/templates/base.html").read_text(encoding="utf-8")
+    rules = {}
+    for selectors, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", source):
+        for selector in selectors.split(","):
+            rules[selector.strip()] = declarations
+
+    expected_sizes = {
+        ".sidebar-brand > svg[data-lucide]": "28px",
+        ".sb-collapsed .sidebar-brand > svg[data-lucide]": "24px",
+        ".sidebar-collapse-btn svg[data-lucide]": "16px",
+        ".sb-collapsed .sidebar-collapse-btn svg[data-lucide]": "14px",
+        ".sidebar-nav a svg[data-lucide]": "20px",
+        ".nav-group .nav-group-toggle svg[data-lucide]:first-child": "20px",
+        ".nav-group .nav-arrow": "14px",
+        ".nav-group .nav-submenu a svg[data-lucide]": "16px",
+        ".dh-modal-header h3 svg[data-lucide]": "18px",
+        ".dh-modal-close svg[data-lucide]": "16px",
+        "#mode-toggle svg[data-lucide]": "16px",
+        "#task-badge svg[data-lucide]": "16px",
+    }
+    for selector, size in expected_sizes.items():
+        assert f"width: {size};" in rules[selector]
+        assert f"height: {size};" in rules[selector]
