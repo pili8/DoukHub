@@ -370,6 +370,10 @@ def test_collection_preview_is_read_only(batch_client):
     assert data["platforms"][0]["platform"] == "douyin"
     assert data["platforms"][0]["total_accounts"] == 2
     assert manager.start.await_count == 0
+    database.create_collection_batch.assert_not_called()
+    database.insert_account.assert_not_called()
+    database.update_account.assert_not_called()
+    database.delete_account.assert_not_called()
 
 
 def test_collection_preview_returns_400_when_no_accounts_match(batch_client):

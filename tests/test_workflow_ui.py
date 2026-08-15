@@ -53,6 +53,26 @@ def test_sync_pages_use_shared_workflow_panels(app_env, path):
     response = client.get(path)
     assert response.status_code == 200
     assert "workflow-panel" in response.text
+    assert "历史记录" in response.text or path in ("/sync/overview", "/sync/import")
+    assert 'class="workflow-log history-log"' in response.text or path == "/sync/overview"
+
+    if path == "/sync/overview":
+        for element_id in ("sync-all-btn", "sync-progress", "sync-progress-bar", "sync-progress-text"):
+            assert f'id="{element_id}"' in response.text
+    elif path == "/sync/import":
+        for element_id in ("import-text", "exec-btn", "result-card", "exec-log"):
+            assert f'id="{element_id}"' in response.text
+        assert 'class="workflow-log"' in response.text
+    else:
+        for element_id in (
+            "exec-btn",
+            "exec-progress",
+            "progress-bar",
+            "progress-text",
+            "progress-count",
+            "exec-log",
+        ):
+            assert f'id="{element_id}"' in response.text
 
 
 def test_sync_overview_preserves_four_step_flow(app_env):
@@ -106,3 +126,19 @@ def test_collect_page_uses_workflow_tab_active_state(app_env):
     client, *_ = app_env
     response = client.get("/collect")
     assert "classList.toggle('active', mode === 'account')" in response.text
+
+
+def test_all_workflow_pages_use_shared_status_component(app_env):
+    client, *_ = app_env
+    for path in [
+        "/sync/overview",
+        "/sync/import",
+        "/sync/resolve",
+        "/sync/account",
+        "/sync/refresh",
+        "/collect",
+    ]:
+        response = client.get(path)
+        assert response.status_code == 200
+        assert "workflow-panel" in response.text
+        assert "workflow-status" in response.text or path in ("/sync/import", "/sync/overview")
