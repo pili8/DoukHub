@@ -2,6 +2,8 @@ from pathlib import Path
 
 import re
 
+import pytest
+
 from tests.test_api import app_env
 
 
@@ -175,3 +177,49 @@ def test_shell_css_sizes_lucide_svg_icons():
     for selector, size in expected_sizes.items():
         assert f"width: {size};" in rules[selector]
         assert f"height: {size};" in rules[selector]
+
+
+@pytest.mark.parametrize(
+    "path,title",
+    [
+        ("/sync/overview", "同步概览"),
+        ("/sync/import", "导入采集表"),
+        ("/sync/resolve", "解析采集表"),
+        ("/sync/account", "同步账号表"),
+        ("/sync/refresh", "更新账号表"),
+    ],
+)
+def test_sync_pages_use_page_head_and_lucide(app_env, path, title):
+    client, *_ = app_env
+    response = client.get(path)
+    assert response.status_code == 200
+    assert 'class="page-head"' in response.text
+    assert title in response.text
+    assert "data-lucide=" in response.text
+    assert 'class="ph ph-' not in response.text
+
+
+def test_sync_workflow_macros_use_lucide():
+    source = Path("app/templates/sync/_workflow.html").read_text(encoding="utf-8")
+    assert 'data-lucide="clock-3"' in source
+    assert 'class="ph ph-' not in source
+
+
+def test_sync_runtime_lucide_replacements_refresh_icons():
+    refresh_call = "if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();"
+    for path in [
+        "app/templates/sync/overview.html",
+        "app/templates/sync/import.html",
+        "app/templates/sync/resolve.html",
+        "app/templates/sync/account.html",
+        "app/templates/sync/refresh.html",
+    ]:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+        replacements = [
+            index
+            for index, line in enumerate(lines)
+            if "btn.innerHTML = '<i data-lucide=" in line
+        ]
+        assert replacements
+        for index in replacements:
+            assert refresh_call in lines[index + 1]

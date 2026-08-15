@@ -1,6 +1,6 @@
 {% macro workflow_notice(icon, text) -%}
 <div class="workflow-notice">
-    <i class="ph ph-{{ icon }}"></i>
+    <i data-lucide="{{ icon }}"></i>
     <span>{{ text }}</span>
 </div>
 {%- endmacro %}
@@ -30,7 +30,7 @@
 <div class="workflow-panel">
     <div class="workflow-header">
         <div class="workflow-title">
-            <i class="ph ph-clock-counter-clockwise"></i>
+            <i data-lucide="clock-3"></i>
             <span>历史记录</span>
             <span class="workflow-count">（{{ history|length }} 条）</span>
         </div>
@@ -51,7 +51,7 @@
     </div>
     {% endfor %}
     {% else %}
-    <div class="empty-state"><i class="ph ph-clock-counter-clockwise"></i>暂无历史记录</div>
+    <div class="empty-state"><i data-lucide="clock-3"></i>暂无历史记录</div>
     {% endif %}
 </div>
 {%- endmacro %}

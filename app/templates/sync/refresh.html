@@ -3,19 +3,22 @@
 {% block content %}
 {% from "sync/_workflow.html" import workflow_history, workflow_metrics, workflow_notice, workflow_progress %}
 
-<div class="page-header">
-    <h2>更新账号表</h2>
+<div class="page-head">
+    <div>
+        <h1 class="page-title">更新账号表</h1>
+        <div class="page-sub">补齐未获取详情的账号资料</div>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-warning" onclick="execStep()" id="exec-btn"><i data-lucide="play"></i> 执行</button>
+        <button class="btn btn-danger" onclick="cancelStep()" id="cancel-btn" style="display:none;"><i data-lucide="square"></i> 取消</button>
+    </div>
 </div>
 
 {{ workflow_notice('info', '获取账号表中未获取信息的账号资料。需要 TTD 服务和 Cookie。') }}
 
 <div class="workflow-panel">
     <div class="workflow-header">
-        <div class="workflow-title"><i class="ph ph-arrow-clockwise"></i><span>执行</span></div>
-        <div class="workflow-actions">
-            <button class="btn btn-warning" onclick="execStep()" id="exec-btn"><i class="ph ph-play"></i> 执行</button>
-            <button class="btn btn-danger" onclick="cancelStep()" id="cancel-btn" style="display:none;"><i class="ph ph-stop"></i> 取消</button>
-        </div>
+        <div class="workflow-title"><i data-lucide="rotate-cw"></i><span>执行</span></div>
     </div>
     <div id="exec-progress" style="display:none;">
         {{ workflow_progress() }}
@@ -60,7 +63,10 @@ function toggleCard(header) {
     var content = header.nextElementSibling;
     var icon = header.querySelector('.collapse-icon i');
     content.classList.toggle('collapsed');
-    if (icon) icon.className = content.classList.contains('collapsed') ? 'ph ph-caret-right' : 'ph ph-caret-down';
+    if (icon) {
+        icon.setAttribute('data-lucide', content.classList.contains('collapsed') ? 'chevron-right' : 'chevron-down');
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    }
 }
 
 function toggleHistory(el) {
@@ -97,7 +103,8 @@ async function execStep() {
     var btn = document.getElementById('exec-btn');
     var cancelBtn = document.getElementById('cancel-btn');
     btn.disabled = true;
-    btn.innerHTML = '<i class="ph ph-spinner"></i> 执行中...';
+    btn.innerHTML = '<i data-lucide="loader-circle"></i> 执行中...';
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     cancelBtn.style.display = 'inline-flex';
     document.getElementById('exec-progress').style.display = 'block';
     document.getElementById('exec-log').innerHTML = '';
@@ -134,7 +141,8 @@ function resetButtons() {
     var btn = document.getElementById('exec-btn');
     var cancelBtn = document.getElementById('cancel-btn');
     btn.disabled = false;
-    btn.innerHTML = '<i class="ph ph-play"></i> 执行';
+    btn.innerHTML = '<i data-lucide="play"></i> 执行';
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     cancelBtn.style.display = 'none';
 }
 
@@ -152,7 +160,11 @@ var _stepTaskHandler = function(tasks) {
             currentTaskId = t.task_id;
             var btn = document.getElementById('exec-btn');
             var cancelBtn = document.getElementById('cancel-btn');
-            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ph ph-spinner"></i> 执行中...'; }
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i data-lucide="loader-circle"></i> 执行中...';
+                if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+            }
             if (cancelBtn) cancelBtn.style.display = 'inline-flex';
             document.getElementById('exec-progress').style.display = 'block';
         }

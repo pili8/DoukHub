@@ -7,8 +7,16 @@
 .sync-textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
 </style>
 
-<div class="page-header">
-    <h2>导入采集表</h2>
+<div class="page-head">
+    <div>
+        <h1 class="page-title">导入采集表</h1>
+        <div class="page-sub">粘贴或拖入分享数据，预览后写入本地库</div>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-secondary" onclick="parseImport()">
+            <i data-lucide="search"></i> 解析预览
+        </button>
+    </div>
 </div>
 
 {{ workflow_notice('info', '粘贴采集表内容并写入本地数据库；此步骤无需 TTD 服务和 Cookie。') }}
@@ -16,15 +24,12 @@
 <div class="workflow-panel">
     <div class="workflow-header">
         <div class="workflow-title">
-            <i class="ph ph-download"></i>
+            <i data-lucide="download"></i>
             <span>数据导入</span>
         </div>
         <div class="workflow-actions">
-            <button class="btn btn-secondary" onclick="parseImport()">
-                <i class="ph ph-magnifying-glass"></i> 解析预览
-            </button>
             <button class="btn btn-primary" onclick="doImport()" id="exec-btn">
-                <i class="ph ph-download"></i> 执行导入
+                <i data-lucide="download"></i> 执行导入
             </button>
         </div>
     </div>
@@ -43,7 +48,7 @@
 <div class="workflow-panel" id="result-card" style="display:none;">
     <div class="workflow-header">
         <div class="workflow-title">
-            <i class="ph ph-chart-bar"></i>
+            <i data-lucide="bar-chart-3"></i>
             <span>执行结果</span>
         </div>
     </div>
@@ -67,7 +72,10 @@
         const content = header.nextElementSibling;
         const icon = header.querySelector('.collapse-icon i');
         content.classList.toggle('collapsed');
-        if (icon) icon.className = content.classList.contains('collapsed') ? 'ph ph-caret-right' : 'ph ph-caret-down';
+        if (icon) {
+            icon.setAttribute('data-lucide', content.classList.contains('collapsed') ? 'chevron-right' : 'chevron-down');
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+        }
     }
     function toggleHistory(el) {
         var detail = el.nextElementSibling;
@@ -211,7 +219,8 @@
         if (!text.trim()) { showToast('请先输入要导入的文本', 'error'); return; }
         var btn = document.getElementById('exec-btn');
         btn.disabled = true;
-        btn.innerHTML = '<i class="ph ph-spinner"></i> 导入中...';
+        btn.innerHTML = '<i data-lucide="loader-circle"></i> 导入中...';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         document.getElementById('result-card').style.display = 'block';
         document.getElementById('exec-log').innerHTML = '<div class="log-info">开始导入...</div>';
         document.getElementById('stat-total').textContent = '...';
@@ -253,7 +262,8 @@
             showToast('导入请求失败', 'error');
         } finally {
             btn.disabled = false;
-            btn.innerHTML = '<i class="ph ph-download"></i> 执行导入';
+            btn.innerHTML = '<i data-lucide="download"></i> 执行导入';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         }
     }
 </script>

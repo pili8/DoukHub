@@ -3,8 +3,19 @@
 {% block content %}
 {% from "sync/_workflow.html" import workflow_progress %}
 
-<div class="page-header">
-    <h2>同步概览</h2>
+<div class="page-head">
+    <div>
+        <h1 class="page-title">同步概览</h1>
+        <div class="page-sub">数据准备流程 · {{ accounts|length }} 个账号</div>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-primary" onclick="syncAll()" id="sync-all-btn">
+            <i data-lucide="zap"></i> 一键同步
+        </button>
+        <button class="btn btn-danger" onclick="stopSync()" id="stop-sync-btn" style="display:none;">
+            <i data-lucide="square"></i> 停止
+        </button>
+    </div>
 </div>
 
 <div class="workflow-flow">
@@ -13,7 +24,7 @@
         <span>
             <span class="step-name">
                 导入采集表
-                <span class="step-status"><i class="ph ph-circle" aria-hidden="true"></i></span>
+                <span class="step-status"><i data-lucide="circle" aria-hidden="true"></i></span>
             </span>
             <span class="step-desc">粘贴分享链接、等级和标签，写入本地数据库</span>
         </span>
@@ -23,7 +34,7 @@
         <span>
             <span class="step-name">
                 解析采集表
-                <span class="step-status"><i class="ph ph-circle" aria-hidden="true"></i></span>
+                <span class="step-status"><i data-lucide="circle" aria-hidden="true"></i></span>
             </span>
             <span class="step-desc">解析短链接并获取 sec_user_id</span>
         </span>
@@ -33,7 +44,7 @@
         <span>
             <span class="step-name">
                 同步账号表
-                <span class="step-status"><i class="ph ph-circle" aria-hidden="true"></i></span>
+                <span class="step-status"><i data-lucide="circle" aria-hidden="true"></i></span>
             </span>
             <span class="step-desc">生成账号记录并获取账号详情</span>
         </span>
@@ -43,7 +54,7 @@
         <span>
             <span class="step-name">
                 更新账号表
-                <span class="step-status"><i class="ph ph-circle" aria-hidden="true"></i></span>
+                <span class="step-status"><i data-lucide="circle" aria-hidden="true"></i></span>
             </span>
             <span class="step-desc">补齐未获取详情的账号资料</span>
         </span>
@@ -53,16 +64,8 @@
 <div class="workflow-panel">
     <div class="workflow-header">
         <div class="workflow-title">
-            <i class="ph ph-lightning"></i>
+            <i data-lucide="zap"></i>
             <span>一键执行</span>
-        </div>
-        <div class="workflow-actions">
-            <button class="btn btn-primary" onclick="syncAll()" id="sync-all-btn">
-                <i class="ph ph-lightning"></i> 一键同步
-            </button>
-            <button class="btn btn-danger" onclick="stopSync()" id="stop-sync-btn" style="display:none;">
-                <i class="ph ph-stop"></i> 停止
-            </button>
         </div>
     </div>
     <div class="text-muted" style="font-size:12px;line-height:1.7;">
@@ -76,7 +79,7 @@
 <div class="workflow-panel">
     <div class="workflow-header">
         <div class="workflow-title">
-            <i class="ph ph-users"></i>
+            <i data-lucide="users"></i>
             <span>账号列表</span>
             <span class="workflow-count">（{{ accounts|length }} 个）</span>
         </div>
@@ -112,7 +115,7 @@
         </table>
     </div>
     {% if not accounts %}
-    <div class="empty-state"><i class="ph ph-users"></i>暂无账号, 请先导入数据并执行同步</div>
+    <div class="empty-state"><i data-lucide="users"></i>暂无账号, 请先导入数据并执行同步</div>
     {% endif %}
 </div>
 {% endblock %}
@@ -123,7 +126,10 @@
         const content = header.nextElementSibling;
         const icon = header.querySelector('.collapse-icon i');
         content.classList.toggle('collapsed');
-        if (icon) icon.className = content.classList.contains('collapsed') ? 'ph ph-caret-right' : 'ph ph-caret-down';
+        if (icon) {
+            icon.setAttribute('data-lucide', content.classList.contains('collapsed') ? 'chevron-right' : 'chevron-down');
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+        }
     }
 
     var currentTaskId = null;
@@ -133,7 +139,8 @@
         var btn = document.getElementById('sync-all-btn');
         var stopBtn = document.getElementById('stop-sync-btn');
         btn.disabled = true;
-        btn.innerHTML = '<i class="ph ph-spinner"></i> 同步中...';
+        btn.innerHTML = '<i data-lucide="loader-circle"></i> 同步中...';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         stopBtn.style.display = 'inline-flex';
         document.getElementById('sync-progress').style.display = 'block';
         document.getElementById('sync-progress-bar').style.width = '0%';
@@ -149,7 +156,8 @@
         } catch (e) {
             document.getElementById('sync-progress-text').textContent = '导入失败: ' + e.message;
             btn.disabled = false;
-            btn.innerHTML = '<i class="ph ph-lightning"></i> 一键同步';
+            btn.innerHTML = '<i data-lucide="zap"></i> 一键同步';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
             stopBtn.style.display = 'none';
         }
     }
@@ -207,7 +215,8 @@
             var btn = document.getElementById('sync-all-btn');
             var stopBtn = document.getElementById('stop-sync-btn');
             btn.disabled = false;
-            btn.innerHTML = '<i class="ph ph-lightning"></i> 一键同步';
+            btn.innerHTML = '<i data-lucide="zap"></i> 一键同步';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
             stopBtn.style.display = 'none';
             var bar = document.getElementById('sync-progress-bar');
             bar.style.width = '100%';
