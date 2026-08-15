@@ -27,3 +27,4 @@ XHS-Downloader/
 # 临时文件
 *_launcher.py
 *.log
+.worktrees/
