@@ -11,6 +11,8 @@ DB_PATH = Path.home() / ".doukhub" / "doukhub.db"
 class Database:
     """本地 SQLite 数据库管理"""
 
+    SCHEMA_VERSION = 1
+
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = db_path or DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -209,6 +211,7 @@ sec_user_id TEXT,
                     conn.execute(sql)
                 except sqlite3.OperationalError:
                     pass
+            self._migrate_schema_version(conn)
 
     def _migrate_legacy_columns(self, conn):
         """迁移旧库字段，使其对齐飞书 + 系统字段英文化（v2）。
@@ -339,10 +342,19 @@ sec_user_id TEXT,
 
 
     def _connect(self) -> sqlite3.Connection:
-        """创建数据库连接"""
-        conn = sqlite3.connect(str(self.db_path))
+        """Create one SQLite connection with the project's standard pragmas."""
+        conn = sqlite3.connect(str(self.db_path), timeout=5.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
+
+    def _migrate_schema_version(self, conn: sqlite3.Connection) -> None:
+        """Persist schema version without ever downgrading a newer database."""
+        current = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        if current < self.SCHEMA_VERSION:
+            conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
 
     # ========== 采集表缓存操作 ==========
 
