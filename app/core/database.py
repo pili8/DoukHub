@@ -602,6 +602,13 @@ sec_user_id TEXT,
             ).fetchone()
             return dict(row) if row else None
 
+    def get_collection_batch_item_by_id(self, item_id: int) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM collection_batch_items WHERE id = ?", (item_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
     def update_collection_batch(self, batch_id: str, **fields) -> bool:
         valid = {key: value for key, value in fields.items() if key in self._BATCH_FIELDS}
         if not valid:
