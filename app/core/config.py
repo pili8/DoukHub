@@ -16,7 +16,7 @@ DEFAULT_CONFIG = {
         "app_id": "",
         "app_secret": "",
         "app_token": "",
-        "collection_table_id": "",   # 采集表
+        "collection_table_id": "",   # 分享表
         "account_table_id": "",      # 账号表
         "cookie_table_id": "",       # Cookie 表
     },
@@ -65,6 +65,19 @@ DEFAULT_CONFIG = {
         "南充": "南充",
     },
     "concurrent_accounts": 3,
+    "single_work": {
+        "download_path": "",
+        "recent_dirs": [],
+        "default_template_id": "default",
+        "templates": [{
+            "id": "default",
+            "name": "默认模板",
+            "template": "{create_time} {author} {title}",
+            "is_default": True,
+            "created_at": "2026-08-16 00:00:00",
+            "updated_at": "2026-08-16 00:00:00",
+        }],
+    },
 }
 
 
@@ -153,6 +166,10 @@ class Config:
         return self._data.get("cookie", {})
 
     @property
+    def single_work(self) -> dict:
+        return self._data.get("single_work", {})
+
+    @property
     def concurrent_accounts(self) -> int:
         return self._data.get("concurrent_accounts", 3)
 
@@ -167,7 +184,10 @@ class Config:
 
     @property
     def download_path(self) -> Path:
-        """下载文件存储路径，默认在 DoukHub/Download"""
+        """下载文件存储路径：优先单作品目录，其次本地配置，默认 DoukHub/Download"""
+        single_path = self.single_work.get("download_path", "")
+        if single_path:
+            return Path(single_path)
         path = self.local.get("download_path", "")
         if not path:
             return Path(__file__).resolve().parent.parent.parent / "Download"

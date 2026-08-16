@@ -81,3 +81,17 @@ class TestConfig:
         assert isinstance(cfg.download_path, Path)
         assert isinstance(cfg.ttd_path, str)
         assert isinstance(cfg.xhs_path, str)
+
+    def test_single_work_preferences_have_defaults(self, tmp_path):
+        cfg = Config(tmp_path / "config.json")
+        assert cfg.single_work["default_template_id"] == "default"
+        assert cfg.single_work["templates"][0]["template"] == (
+            "{create_time} {author} {title}"
+        )
+        assert cfg.single_work["recent_dirs"] == []
+
+    def test_single_work_download_path_overrides_local_path(self, tmp_path):
+        cfg = Config(tmp_path / "config.json")
+        expected = tmp_path / "SingleWorks"
+        cfg.set("single_work.download_path", str(expected))
+        assert cfg.download_path == expected
