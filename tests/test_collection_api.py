@@ -143,6 +143,69 @@ def single_client(monkeypatch):
         app_main.single_work_client = saved
 
 
+@pytest.fixture
+def prefs_client(tmp_path):
+    """提供临时 Config，隔离单作品偏好持久化"""
+    from app.core.config import Config
+    saved_config = app_main.config
+    app_main.config = Config(tmp_path / "config.json")
+    try:
+        yield TestClient(app_main.app), app_main.config, tmp_path
+    finally:
+        app_main.config = saved_config
+
+
+def test_get_single_work_preferences_returns_defaults(prefs_client):
+    client, config, _ = prefs_client
+    response = client.get("/api/collection/single-work/preferences")
+    assert response.status_code == 200
+    prefs = response.json()["preferences"]
+    assert prefs["default_template_id"] == "default"
+    assert prefs["templates"][0]["template"] == "{create_time} {author} {title}"
+    assert prefs["recent_dirs"] == []
+
+
+def test_save_single_work_preferences_persists(prefs_client):
+    client, config, tmp_path = prefs_client
+    download_dir = tmp_path / "SingleWorks"
+    download_dir.mkdir()
+    response = client.put(
+        "/api/collection/single-work/preferences",
+        json={
+            "download_path": str(download_dir),
+            "recent_dirs": [str(download_dir), str(tmp_path)],
+            "default_template_id": "archival",
+            "templates": [{
+                "id": "archival",
+                "name": "归档",
+                "template": "{create_time} {id} {title}",
+                "is_default": True,
+            }],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert config.download_path == download_dir
+    assert config.single_work["recent_dirs"][0] == str(download_dir)
+    assert config.single_work["default_template_id"] == "archival"
+
+
+def test_save_single_work_preferences_rejects_unsafe_template(prefs_client):
+    client, config, tmp_path = prefs_client
+    response = client.put(
+        "/api/collection/single-work/preferences",
+        json={
+            "templates": [{
+                "id": "bad",
+                "name": "坏",
+                "template": "../{title}",
+            }],
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["message"] == "命名模板不能包含路径分隔符或绝对路径"
+
+
 def test_resolve_single_works(single_client, monkeypatch):
     from app.core import single_work
 
@@ -194,7 +257,7 @@ def test_download_single_works(single_client, tmp_path, monkeypatch):
 
 
 def test_collect_page_state_is_safe_for_spa_script_reload():
-    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    source = Path("app/templates/collect_detail.html").read_text(encoding="utf-8")
     declarations = re.search(
         r"(?m)^\s*let\s+(?:resolvedSingleLinks|singleDirCurrent|singleDirEntries)\b",
         source,
@@ -241,7 +304,7 @@ def test_download_rejects_unsafe_filename_templates(
 
 
 def test_collect_page_invalidates_resolved_links_on_edit():
-    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    source = Path("app/templates/collect_detail.html").read_text(encoding="utf-8")
     assert "invalidateResolvedSingleWorks" in source
     assert (
         'oninput="invalidateResolvedSingleWorks()" '
@@ -251,7 +314,7 @@ def test_collect_page_invalidates_resolved_links_on_edit():
 
 
 def test_collect_page_discards_stale_resolve_response():
-    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    source = Path("app/templates/collect_detail.html").read_text(encoding="utf-8")
     assert "var resolveGeneration = 0;" in source
     assert "resolveGeneration += 1;" in source
     assert "const submittedLinks = String(form.get('links') || '');" in source
@@ -292,14 +355,14 @@ def test_download_rejects_malformed_filename_templates(
 
 
 def test_collect_page_uses_canonical_browse_parent():
-    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    source = Path("app/templates/collect_detail.html").read_text(encoding="utf-8")
     assert "singleDirParent = data.parent || '';" in source
     assert "if (!parent || parent === singleDirCurrent) return;" in source
     assert "singleDirCurrent.replace(/[\\\\/]" not in source
 
 
 def test_collect_page_formats_single_work_storage_time():
-    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    source = Path("app/templates/collect_detail.html").read_text(encoding="utf-8")
     assert ".replace(/ (\\d\\d)-(\\d\\d)-(\\d\\d)$/, ' $1:$2:$3')" in source
 
 

@@ -9,7 +9,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -209,9 +209,9 @@ async def lifespan(app: FastAPI):
             try:
                 logger.info("启动时自动增量同步开始...")
                 fs.sync_incremental()
-                logger.info("启动时自动增量同步完成")
+                logger.info("启动时自动增量账号处理完成")
             except Exception as e:
-                logger.warning(f"启动时自动增量同步失败（不影响使用）: {e}")
+                logger.warning(f"启动时自动增量账号处理失败（不影响使用）: {e}")
         threading.Thread(target=_bg_sync, daemon=True).start()
 
     get_collection_batch_manager().recover_interrupted_batches()
@@ -267,6 +267,8 @@ def _is_unsafe_filename_template(template: str) -> bool:
         author="作者",
         title="标题",
         id="123",
+        type="视频",
+        platform="douyin",
     )
     path = PureWindowsPath(rendered)
     return (
@@ -275,53 +277,94 @@ def _is_unsafe_filename_template(template: str) -> bool:
     )
 
 
+def _sync_workflow_stats(db: Database) -> dict[str, int]:
+    collections = db.get_all_collections()
+    accounts = db.get_all_accounts()
+    account_ids = {
+        str(item.get("sec_user_id") or "") for item in accounts if item.get("sec_user_id")
+    }
+    return {
+        "collections_total": len(collections),
+        "pending_resolve": sum(
+            1
+            for item in collections
+            if not item.get("sec_user_id") and str(item.get("share_code", "")).strip()
+        ),
+        "ready_accounts": sum(1 for item in collections if item.get("sec_user_id")),
+        "ready_to_sync": sum(
+            1
+            for item in collections
+            if item.get("sec_user_id") and str(item["sec_user_id"]) not in account_ids
+        ),
+        "accounts_total": len(accounts),
+        "pending_refresh": sum(
+            1 for item in accounts if item.get("sec_user_id") and not item.get("已获取信息")
+        ),
+        "cookies": len(db.get_enabled_cookies()),
+    }
+
+
+def _sync_recent_results(db: Database) -> tuple[dict[str, dict], dict[str, str]]:
+    task_types = {
+        "import_collection": "导入分享表",
+        "update_collection": "解析分享表",
+        "sync_account": "生成账号表",
+        "refresh_accounts": "更新账号表",
+    }
+    histories = {}
+    for task_type in task_types:
+        items = db.get_sync_history(task_type, limit=1)
+        histories[task_type] = items[0] if items else None
+    return histories, task_types
+
+
+def _sync_overview_context(db: Database) -> dict:
+    histories, labels = _sync_recent_results(db)
+    return {
+        "stats": _sync_workflow_stats(db),
+        "recent_histories": histories,
+        "recent_labels": labels,
+    }
+
+
 # ========== 页面路由 ==========
 
 @app.get("/", response_class=HTMLResponse)
 async def page_sync_overview_redirect(request: Request):
-    """根路径重定向到同步概览页"""
+    """根路径重定向到账号状态页"""
+    db = get_database()
     return templates.TemplateResponse(request, "sync/overview.html", context={
         "request": request,
         "page": "sync_overview",
-        "accounts": [],
+        **_sync_overview_context(db),
     })
 
 
 @app.get("/sync", response_class=HTMLResponse)
 async def page_sync_overview_redirect2(request: Request):
     """旧 /sync 重定向到 /sync/overview"""
+    db = get_database()
     return templates.TemplateResponse(request, "sync/overview.html", context={
         "request": request,
         "page": "sync_overview",
-        "accounts": [],
+        **_sync_overview_context(db),
     })
 
 
 @app.get("/sync/overview", response_class=HTMLResponse)
 async def page_sync_overview(request: Request):
-    """同步概览页 - 一键执行 + 账号列表"""
+    """账号状态页 - 判断下一步应该执行什么"""
     db = get_database()
-    accounts = db.get_all_accounts()
-    import json as _json
-    for acc in accounts:
-        tags_str = acc.get("标签", "")
-        if tags_str:
-            try:
-                acc["tags_list"] = _json.loads(tags_str)
-            except (ValueError, TypeError):
-                acc["tags_list"] = []
-        else:
-            acc["tags_list"] = []
     return templates.TemplateResponse(request, "sync/overview.html", context={
         "request": request,
-        "accounts": accounts,
         "page": "sync_overview",
+        **_sync_overview_context(db),
     })
 
 
 @app.get("/sync/import", response_class=HTMLResponse)
 async def page_sync_import(request: Request):
-    """导入采集表页面"""
+    """导入分享表页面"""
     db = get_database()
     history = db.get_sync_history("import_collection", limit=20)
     return templates.TemplateResponse(request, "sync/import.html", context={
@@ -339,18 +382,20 @@ async def page_sync_resolve(request: Request):
     return templates.TemplateResponse(request, "sync/resolve.html", context={
         "request": request,
         "history": history,
+        "stats": _sync_workflow_stats(db),
         "page": "sync_resolve",
     })
 
 
 @app.get("/sync/account", response_class=HTMLResponse)
 async def page_sync_account(request: Request):
-    """同步账号表页面"""
+    """生成账号表页面"""
     db = get_database()
     history = db.get_sync_history("sync_account", limit=20)
     return templates.TemplateResponse(request, "sync/account.html", context={
         "request": request,
         "history": history,
+        "stats": _sync_workflow_stats(db),
         "page": "sync_account",
     })
 
@@ -363,6 +408,7 @@ async def page_sync_refresh(request: Request):
     return templates.TemplateResponse(request, "sync/refresh.html", context={
         "request": request,
         "history": history,
+        "stats": _sync_workflow_stats(db),
         "page": "sync_refresh",
     })
 
@@ -370,15 +416,7 @@ async def page_sync_refresh(request: Request):
 @app.get("/sync/cloud", response_class=HTMLResponse)
 async def page_sync_cloud(request: Request):
     """云端同步页面"""
-    db = get_database()
-    history = db.get_sync_history("cloud_sync", limit=20)
-    feishu_ok = get_feishu() is not None
-    return templates.TemplateResponse(request, "sync/cloud.html", context={
-        "request": request,
-        "history": history,
-        "feishu_ok": feishu_ok,
-        "page": "sync_cloud",
-    })
+    return RedirectResponse("/database", status_code=307)
 
 
 @app.get("/status", response_class=HTMLResponse)
@@ -412,8 +450,9 @@ async def page_table(request: Request):
 
 @app.get("/collect", response_class=HTMLResponse)
 async def page_collect(request: Request):
-    s = get_syncer()
-    accounts = s.load_local_accounts() if s else []
+    if request.query_params.get("mode") == "detail":
+        return RedirectResponse("/collect/detail", status_code=307)
+
     h = get_history()
     tasks = h.get_tasks()
     sched = get_scheduler()
@@ -423,10 +462,33 @@ async def page_collect(request: Request):
         task["next_run"] = job["next_run"] if job else None
     return templates.TemplateResponse(request, "collect.html", context={
         "request": request,
-        "accounts": accounts,
         "tasks": tasks,
+        "page": "collect_account",
+        "collect_mode": "account",
+    })
+
+
+@app.get("/collect/overview", response_class=HTMLResponse)
+async def page_collect_overview(request: Request):
+    db = get_database()
+    batches = db.list_collection_batches(limit=5)
+    return templates.TemplateResponse(request, "collect/overview.html", context={
+        "request": request,
+        "batches": batches,
+        "latest_batch": batches[0] if batches else None,
+        "cookies": len(db.get_enabled_cookies()),
+        "accounts_total": len(db.get_all_accounts()),
+        "page": "collect_overview",
+    })
+
+
+@app.get("/collect/detail", response_class=HTMLResponse)
+async def page_collect_detail(request: Request):
+    return templates.TemplateResponse(request, "collect_detail.html", context={
+        "request": request,
         "download_path": str(config.download_path),
-        "page": "collect",
+        "page": "collect_detail",
+        "collect_mode": "detail",
     })
 
 
@@ -748,15 +810,15 @@ async def api_sync():
         """SSE 流式同步，实时返回进度"""
         try:
             # 发送开始事件
-            yield f"data: {json.dumps({'type': 'start', 'message': '开始同步'})}\n\n"
+            yield f"data: {json.dumps({'type': 'start', 'message': '开始处理'})}\n\n"
             
-            # 1. 读取采集表
+            # 1. 读取分享表
             yield f"data: {json.dumps({'type': 'progress', 'message': '连接飞书...'})}\n\n"
             records = s.feishu.get_all_records(s.app_token, s.collection_table_id)
             total = len(records)
             
             yield f"data: {json.dumps({'type': 'stats', 'total': total, 'success': 0, 'api_calls': 0, 'failed': 0})}\n\n"
-            yield f"data: {json.dumps({'type': 'progress', 'message': f'读取采集表: {total} 条记录'})}\n\n"
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'读取分享表: {total} 条记录'})}\n\n"
             
             # 2. 解析记录
             from .core.syncer import _parse_collection_record
@@ -846,7 +908,7 @@ async def api_sync():
                     yield f"data: {json.dumps({'type': 'stats', 'total': total, 'success': new_count + updated_count, 'api_calls': api_calls, 'failed': failed})}\n\n"
                     yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ [{i+1}/{len(entries)}] {account.name or sec_user_id}'})}\n\n"
                     
-                    # 更新采集表状态
+                    # 更新分享表状态
                     s._update_collection_status(record_id, "已解析", "", sec_user_id)
                     
                     # 让出控制权，避免阻塞
@@ -871,11 +933,11 @@ async def api_sync():
                 s._sync_to_feishu_account_table(list(existing_accounts.values()), result)
             
             # 发送完成事件
-            yield f"data: {json.dumps({'type': 'complete', 'success': True, 'message': f'同步完成: 新增 {new_count}, 更新 {updated_count}', 'total': total, 'new_count': new_count, 'updated_count': updated_count, 'api_calls': api_calls, 'error_count': failed, 'errors': errors[:5]})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'success': True, 'message': f'账号处理完成: 新增 {new_count}, 更新 {updated_count}', 'total': total, 'new_count': new_count, 'updated_count': updated_count, 'api_calls': api_calls, 'error_count': failed, 'errors': errors[:5]})}\n\n"
             
         except Exception as e:
-            logger.error(f"同步失败: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'同步失败: {str(e)}', 'total': 0, 'new_count': 0, 'updated_count': 0, 'api_calls': 0, 'error_count': 1, 'errors': [str(e)]})}\n\n"
+            logger.error(f"账号处理失败: {e}")
+            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'账号处理失败: {str(e)}', 'total': 0, 'new_count': 0, 'updated_count': 0, 'api_calls': 0, 'error_count': 1, 'errors': [str(e)]})}\n\n"
     
     return StreamingResponse(sync_stream(), media_type="text/event-stream")
 
@@ -913,7 +975,7 @@ async def api_sync_fetch_info():
 
 @app.post("/api/sync/v2/import")
 async def api_sync_v2_import(request: Request):
-    """步骤1：导入采集表（使用新同步器）"""
+    """步骤1：导入分享表（使用新同步器）"""
     s = get_syncer_v2()
     if not s:
         return JSONResponse(
@@ -926,7 +988,7 @@ async def api_sync_v2_import(request: Request):
         text = data.get("text", "")
         
         result = s.import_to_collection(text)
-        import_logs = [{"level": "info", "message": "开始导入采集表"}]
+        import_logs = [{"level": "info", "message": "开始导入分享表"}]
         import_logs.extend({"level": "error", "message": err} for err in result.errors)
         import_logs.extend({"level": "warning", "message": warning} for warning in result.warnings)
         detail = (
@@ -966,7 +1028,7 @@ async def api_sync_v2_import(request: Request):
 
 @app.post("/api/sync/v2/update-collection")
 async def api_sync_v2_update_collection():
-    """步骤2:更新采集表(获取 sec_user_id) - 后台任务,立即返回 task_id"""
+    """步骤2:更新分享表(获取 sec_user_id) - 后台任务,立即返回 task_id"""
     s = get_syncer_v2()
     if not s:
         return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
@@ -985,7 +1047,7 @@ async def _run_update_collection(task):
         tm.add_log(task.task_id, "飞书未配置", "error")
         tm.update(task.task_id, status="failed", error="飞书未配置")
         return
-    tm.add_log(task.task_id, "开始更新采集表", "info")
+    tm.add_log(task.task_id, "开始更新分享表", "info")
     # TTD 预检(避免逐条等 30s 超时)
     ttd_available = False
     try:
@@ -1003,7 +1065,7 @@ async def _run_update_collection(task):
     to_process = [c for c in collections if not c.get("sec_user_id") and str(c.get("share_code", "")).strip()]
     tm.update(task.task_id, total=len(to_process))
     if not to_process:
-        tm.add_log(task.task_id, "没有需要解析的记录（所有采集记录已获取 sec_user_id）", "info")
+        tm.add_log(task.task_id, "没有需要解析的记录（所有分享记录已获取 sec_user_id）", "info")
         tm.add_log(task.task_id, "完成: 0 条", "ok")
         return
     tm.add_log(task.task_id, f"需要处理 {len(to_process)} 条记录", "info")
@@ -1055,7 +1117,7 @@ async def _run_update_collection(task):
 
 @app.post("/api/sync/v2/sync-account")
 async def api_sync_v2_sync_account():
-    """步骤3:同步账号表 - 后台任务,立即返回 task_id"""
+    """步骤3:生成账号表 - 后台任务,立即返回 task_id"""
     s = get_syncer_v2()
     if not s:
         return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
@@ -1066,7 +1128,7 @@ async def api_sync_v2_sync_account():
 
 
 async def _run_sync_account(task):
-    """后台执行:同步账号表(走 TTD API 拉账号详情)。串行队列内运行。"""
+    """后台执行:生成账号表(走 TTD API 拉账号详情)。串行队列内运行。"""
     import json
     tm = get_task_manager()
     s = get_syncer_v2()
@@ -1074,12 +1136,12 @@ async def _run_sync_account(task):
         tm.add_log(task.task_id, "飞书未配置", "error")
         tm.update(task.task_id, status="failed", error="飞书未配置")
         return
-    tm.add_log(task.task_id, "开始同步账号表", "info")
+    tm.add_log(task.task_id, "开始生成账号表", "info")
     collections = s.db.get_all_collections()
     to_process = [c for c in collections if s.is_ready_for_account(c)]
     tm.update(task.task_id, total=len(to_process))
     if not to_process:
-        tm.add_log(task.task_id, "没有需要同步的记录（请先执行第二步解析账号标识）", "info")
+        tm.add_log(task.task_id, "没有需要生成的记录（请先执行第二步解析账号标识）", "info")
         tm.add_log(task.task_id, "完成: 0 条", "ok")
         return
     tm.add_log(task.task_id, f"需要处理 {len(to_process)} 条记录", "info")
@@ -1087,7 +1149,7 @@ async def _run_sync_account(task):
     cookies = db.get_enabled_cookies()
     cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
     if not cookie_list:
-        tm.add_log(task.task_id, "Cookie 表为空,仅同步账号基础数据,跳过详情获取", "warning")
+        tm.add_log(task.task_id, "Cookie 表为空,仅生成账号基础数据,跳过详情获取", "warning")
     else:
         tm.add_log(task.task_id, f"已加载 {len(cookie_list)} 个 Cookie", "info")
     # 预检 TTD 服务是否可用(避免逐条等 15s 超时)
@@ -1326,7 +1388,7 @@ async def _run_refresh_accounts(task):
 
 @app.post("/api/sync/v2/all")
 async def api_sync_v2_all(request: Request):
-    """一键同步（使用新同步器）"""
+    """处理账号数据（使用新同步器）"""
     s = get_syncer_v2()
     if not s:
         return JSONResponse(
@@ -1341,11 +1403,11 @@ async def api_sync_v2_all(request: Request):
         results = await s.sync_all(text)
         return {
             "success": True,
-            "message": "一键同步完成",
+            "message": "处理账号数据完成",
             **results
         }
     except Exception as e:
-        logger.error(f"一键同步失败: {e}")
+        logger.error(f"处理账号数据失败: {e}")
         return JSONResponse(
             {"success": False, "message": f"同步异常: {str(e)}"},
             status_code=500,
@@ -1388,7 +1450,7 @@ class SingleWorkDownloadRequest(SingleWorkResolveRequest):
 
 @app.post("/api/import/collection")
 async def api_import_collection(request: ImportCollectionRequest):
-    """将解析后的数据写入飞书采集表（批量写入，一次最多500条）"""
+    """将解析后的数据写入飞书分享表（批量写入，一次最多500条）"""
     f = get_feishu()
     if not f:
         return JSONResponse({"success": False, "message": "飞书未配置"}, status_code=400)
@@ -1396,7 +1458,7 @@ async def api_import_collection(request: ImportCollectionRequest):
     app_token = config.feishu.get("app_token", "")
     table_id = config.feishu.get("collection_table_id", "")
     if not app_token or not table_id:
-        return JSONResponse({"success": False, "message": "未配置采集表 Table ID"}, status_code=400)
+        return JSONResponse({"success": False, "message": "未配置分享表 Table ID"}, status_code=400)
 
     # 构建批量记录
     records = []
@@ -1404,7 +1466,7 @@ async def api_import_collection(request: ImportCollectionRequest):
         fields = {
             "地址": item.link,
             "等级": item.rating,
-            "同步状态": "待同步",
+            "账号状态": "待生成",
         }
         if item.tags:
             fields["标签"] = item.tags
@@ -1780,12 +1842,12 @@ async def api_database_delete_record(table_name: str, record_id: str):
     db = get_database()
     
     # 验证表名
-    valid_tables = ["collection_cache", "account_cache", "cookie_cache"]
+    valid_tables = ["share_cache", "account_cache", "cookie_cache"]
     if table_name not in valid_tables:
         return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
     
     try:
-        if table_name == "collection_cache":
+        if table_name == "share_cache":
             success = db.delete_collection(record_id)
         elif table_name == "account_cache":
             success = db.delete_account(record_id)
@@ -1805,13 +1867,13 @@ async def api_database_clear_table(table_name: str):
     db = get_database()
     
     # 验证表名
-    valid_tables = ["collection_cache", "account_cache", "cookie_cache", "collection_history", "scheduled_tasks"]
+    valid_tables = ["share_cache", "account_cache", "cookie_cache", "collection_history", "scheduled_tasks"]
     if table_name not in valid_tables:
         return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
     
     try:
-        if table_name == "collection_cache":
-            success = db.clear_collection_cache()
+        if table_name == "share_cache":
+            success = db.clear_share_cache()
         elif table_name == "account_cache":
             success = db.clear_account_cache()
         elif table_name == "cookie_cache":
@@ -1903,7 +1965,7 @@ async def api_database_duplicates(table_name: str):
 
 @app.get("/api/database/stats-detailed")
 async def api_database_stats_detailed():
-    """获取各表的详细统计（含同步状态、启用状态等细分）"""
+    """获取各表的详细统计（含账号状态、启用状态等细分）"""
     db = get_database()
     stats = db.get_stats_detailed()
     return {"success": True, "data": stats}
@@ -2280,6 +2342,117 @@ async def api_collect_detail(links: str = Form("")):
         })
 
     return {"success": True, "results": results}
+
+
+SINGLE_WORK_TEMPLATE_FIELDS = {"create_time", "author", "title", "id", "type", "platform"}
+
+
+def _single_work_preferences() -> dict:
+    prefs = config.single_work
+    templates = prefs.get("templates", []) or []
+    if not templates:
+        templates = [{
+            "id": "default",
+            "name": "默认模板",
+            "template": "{create_time} {author} {title}",
+            "is_default": True,
+            "created_at": "2026-08-16 00:00:00",
+            "updated_at": "2026-08-16 00:00:00",
+        }]
+    default_id = prefs.get("default_template_id") or "default"
+    if not any(t.get("id") == default_id for t in templates):
+        default_id = templates[0]["id"]
+    synced = []
+    for tpl in templates:
+        copy = dict(tpl)
+        copy["is_default"] = copy.get("id") == default_id
+        synced.append(copy)
+    return {
+        "download_path": prefs.get("download_path", ""),
+        "recent_dirs": prefs.get("recent_dirs", []) or [],
+        "default_template_id": default_id,
+        "templates": synced,
+    }
+
+
+def _save_single_work_preferences(data: dict) -> dict:
+    import time
+
+    prefs = {
+        "download_path": str(data.get("download_path") or ""),
+        "recent_dirs": [],
+        "default_template_id": str(data.get("default_template_id") or ""),
+        "templates": [],
+    }
+
+    seen_dirs = set()
+    for path in data.get("recent_dirs") or []:
+        p = str(path)
+        if p and p not in seen_dirs:
+            seen_dirs.add(p)
+            prefs["recent_dirs"].append(p)
+    prefs["recent_dirs"] = prefs["recent_dirs"][:10]
+
+    existing = config.single_work.get("templates", []) or []
+    existing_map = {t.get("id"): t for t in existing if t.get("id")}
+    for tpl in data.get("templates") or []:
+        name = str(tpl.get("name") or "").strip()
+        if not name:
+            raise ValueError("模板名称不能为空")
+        template = str(tpl.get("template") or "")
+        try:
+            unsafe = _is_unsafe_filename_template(template)
+        except (AttributeError, KeyError, IndexError, ValueError):
+            raise ValueError("命名模板格式无效")
+        if unsafe:
+            raise ValueError("命名模板不能包含路径分隔符或绝对路径")
+        tpl_id = str(tpl.get("id") or "")
+        if not tpl_id or tpl_id == "new":
+            tpl_id = f"tpl_{int(time.time() * 1000)}"
+        now = "2026-08-16 00:00:00"
+        old = existing_map.get(tpl_id, {})
+        prefs["templates"].append({
+            "id": tpl_id,
+            "name": name,
+            "template": template,
+            "is_default": bool(tpl.get("is_default")),
+            "created_at": old.get("created_at") or now,
+            "updated_at": now,
+        })
+    if not prefs["templates"]:
+        prefs["templates"].append({
+            "id": "default",
+            "name": "默认模板",
+            "template": "{create_time} {author} {title}",
+            "is_default": True,
+            "created_at": "2026-08-16 00:00:00",
+            "updated_at": "2026-08-16 00:00:00",
+        })
+    if not prefs["default_template_id"] or not any(
+        t["id"] == prefs["default_template_id"] for t in prefs["templates"]
+    ):
+        prefs["default_template_id"] = prefs["templates"][0]["id"]
+    for tpl in prefs["templates"]:
+        tpl["is_default"] = tpl["id"] == prefs["default_template_id"]
+    config.set("single_work", prefs)
+    config.save()
+    return _single_work_preferences()
+
+
+@app.get("/api/collection/single-work/preferences")
+async def api_get_single_work_preferences():
+    return {"preferences": _single_work_preferences()}
+
+
+@app.put("/api/collection/single-work/preferences")
+async def api_save_single_work_preferences(request: Request):
+    try:
+        prefs = _save_single_work_preferences(await request.json())
+    except ValueError as error:
+        return JSONResponse(
+            {"success": False, "message": str(error)}, status_code=400
+        )
+    return {"success": True, "message": "单作品偏好已保存", "preferences": prefs}
 
 
 @app.post("/api/collection/works/resolve")
