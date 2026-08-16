@@ -1,141 +1,140 @@
-# TTD Collection UI Roadmap Design
+# TTD 采集 UI 路线设计
 
-- Date: 2026-08-16
-- Status: Ready for review
-- Scope: DoukHub positioning, collection feature phases, phase one single-work closed loop
+- 日期：2026-08-16
+- 状态：已确认，进入第一阶段实施
+- 范围：DoukHub 定位、采集功能分期、第一阶段单作品闭环
 
-## 1. Background
+## 1. 背景
 
-DoukHub already contains an account workflow, TTD service management, a persistent account batch downloader, and a basic single-work page. TTD itself supports more collection and data functions than DoukHub currently exposes.
+DoukHub 已有账号工作流、TTD 服务管理、常驻账号批量下载进程和一个基础单作品页面。TTD 本身支持的能力明显多于 DoukHub 当前暴露出来的能力。
 
-The user does not want to operate TTD through API documentation or terminal menus. DoukHub is therefore positioned as both:
+使用者不需要通过 API 文档或终端菜单操作 TTD。因此 DoukHub 的定位是：
 
-1. The management console for TTD services, accounts, tasks, and configuration.
-2. The graphical UI for TTD functions.
+1. TTD 服务、账号、任务和配置的管理台。
+2. TTD 功能的图形界面端。
 
-Where TTD's Web API can fulfill an action, DoukHub calls that API. Where the action only exists in TTD's terminal workflow, DoukHub launches and supervises a TTD process while presenting the operation as a normal web task.
+Web API 能完成的功能，DoukHub 直接调用 Web API。只有终端流程才能完成的功能，由 DoukHub 启动并监管 TTD 进程，同时把操作呈现为普通网页任务。
 
-## 2. Product Direction
+## 2. 产品方向
 
-DoukHub must not merely expose API fields. It translates TTD capability into task-oriented pages, forms, progress, logs, cancel/retry actions, file paths, and readable errors.
+DoukHub 不能只暴露 API 参数。它要把 TTD 能力翻译成任务页面、表单、进度、日志、取消、重试、文件路径和可读的错误信息。
 
-The priority is:
+优先级为：
 
-1. Single-work collection.
-2. Account batch collection.
-3. Live collection.
-4. Remaining TTD capabilities.
+1. 单作品采集。
+2. 账号批量采集。
+3. 直播采集。
+4. TTD 其余功能。
 
-Navigation entries appear only when their underlying function is ready. The exception is live collection, which may appear earlier as a clearly marked reserved submenu because live download is already a confirmed phase-three target.
+导航入口只随功能落地。唯一例外是直播采集：直播下载已确定为第三阶段目标，可以提前出现一个明确标记为预留的子菜单。
 
-## 3. Phase Roadmap
+## 3. 阶段路线
 
-### 3.1 Phase One: Single-Work Closed Loop
+### 3.1 第一阶段：单作品闭环
 
-Goal: paste one or more Douyin/TikTok work links and complete retrieval without leaving DoukHub.
+目标：粘贴一个或多个抖音 / TikTok 作品链接后，不离开 DoukHub 就能完成取件。
 
-Scope:
+范围：
 
-- Support ordinary videos.
-- Support Douyin and TikTok image sets.
-- Support Douyin live-photo works.
-- Support animated works represented by TTD as video files.
-- Preserve per-asset type and order instead of flattening every URL into one list.
-- Allow users to copy, open, and directly download individual asset URLs.
-- Allow a work-level filename override while retaining the template-generated default.
-- Add a reusable filename template library.
-- Add a drag-and-drop template builder with live preview.
-- Persist a default save directory and recent directories.
-- Record lightweight download history with file paths, status, time, and errors.
-- Allow retrying failed downloads.
+- 支持普通视频。
+- 支持抖音和 TikTok 图集。
+- 支持抖音实况作品。
+- 支持 TTD 以视频文件表示的动图作品。
+- 保留每个资产的材料类型和顺序，不再把所有 URL 压平成一个列表。
+- 每个资产支持复制地址、浏览器打开、单独下载。
+- 支持作品级文件名覆盖，同时保留模板生成的默认文件名。
+- 增加可复用的文件名模板库。
+- 增加拖拽排序、分隔符编辑和实时预览的模板构建器。
+- 持久化默认保存目录和最近使用目录。
+- 记录轻量下载历史，包括文件路径、状态、时间和错误。
+- 支持失败重试。
 
-Non-goals:
+非目标：
 
-- No GIF conversion.
-- No multi-threaded custom download kernel for small ad-hoc downloads.
-- No cloud synchronization of history.
-- No global work metadata database.
-- Batch account downloads continue using TTD's downloader and archive behavior.
+- 不做 GIF 转换。
+- 不为少量临时取件自建多线程下载内核。
+- 不做历史云同步。
+- 不建全局作品元数据库。
+- 账号批量下载继续使用 TTD 下载器和归档去重。
 
-### 3.2 Phase Two: Account Batch Collection
+### 3.2 第二阶段：账号批量采集完善
 
-Goal: complete the existing account batch workflow.
+目标：补完现有账号批量工作流。
 
-Scope:
+范围：
 
-- Make the account collection type effective: published works, liked works, and collected works.
-- Apply date-window and incremental strategy by collection type.
-- Continue using one supervised TTD terminal process at a time.
-- Represent account progress, logs, cancellation, retry, and confirmed successes accurately.
-- Connect DoukHub filename templates to TTD `name_format` where useful without duplicating TTD's downloader.
-- Keep TTD `download_data` and archive deduplication under TTD ownership.
+- 让账号表中的采集类型真正生效：发布、喜欢、收藏。
+- 按采集类型应用日期窗口和增量策略。
+- 继续保证同一时间只存在一个受监管的 TTD 终端下载进程。
+- 准确展示账号进度、日志、取消、重试和确认成功。
+- 在有价值的位置把 DoukHub 文件名模板映射到 TTD `name_format`，但避免复制 TTD 下载器。
+- TTD 的 `download_data` 和归档去重继续由 TTD 管理。
 
-### 3.3 Phase Three: Live Collection
+### 3.3 第三阶段：直播采集
 
-Goal: provide a complete live-collection UI rather than only a link parser.
+目标：提供完整直播采集 UI，而不只是链接解析器。
 
-Expected progression:
+预期推进：
 
-1. Add the live submenu.
-2. Resolve live links and show room state.
-3. Show available qualities and stream URLs.
-4. Copy URLs and generate ffmpeg commands.
-5. Detect ffmpeg availability.
-6. Start, monitor, and stop managed recording processes.
-7. Record output paths, elapsed time, process status, and errors.
+1. 增加直播子菜单。
+2. 解析直播链接并展示房间状态。
+3. 展示可用清晰度和拉流地址。
+4. 复制地址并生成 ffmpeg 命令。
+5. 检测 ffmpeg 是否可用。
+6. 启动、监控和停止受监管的录制进程。
+7. 记录输出路径、耗时、进程状态和错误。
 
-Live recording is a long-running process and should reuse lessons from the account batch process manager rather than the synchronous single-work request flow.
+直播录制是长任务，应复用账号批量进程管理的经验，不放入单作品同步请求流。
 
-### 3.4 Phase Four: Remaining TTD Functions
+### 3.4 第四阶段：其余 TTD 功能
 
-Goal: gradually turn other TTD terminal or API capabilities into normal DoukHub UI.
+目标：逐步把 TTD 的其他 API 或终端能力做成普通 DoukHub 页面。
 
-File-oriented functions:
+文件类功能：
 
-- Douyin and TikTok collections/playlists.
-- Logged-in Douyin collected works.
-- Favorites folders.
-- Collected music.
+- 抖音合集和 TikTok 合辑。
+- 已登录抖音账号的收藏作品。
+- 收藏夹。
+- 收藏音乐。
 
-Data-export functions:
+数据导出类功能：
 
-- Comments and replies.
-- General, video, user, and live search.
-- Douyin hot boards.
+- 评论和回复。
+- 综合、视频、用户、直播搜索。
+- 抖音热榜。
 
-File-oriented functions can reuse batch task management. Data-export functions should focus first on structured result display and local export, then optional Feishu integration.
+文件类功能可以复用批量任务管理。数据导出类功能先做结构化结果展示和本地导出，再考虑飞书集成。
 
-## 4. Phase One Data Design
+## 4. 第一阶段数据设计
 
-### 4.1 Work Assets
+### 4.1 作品资产
 
-A resolved work exposes a normalized asset list. Each asset contains:
+解析后的作品暴露标准化资产列表。每个资产包含：
 
-- `kind`: `video`, `image`, `live_photo`, `music`, `static_cover`, or `dynamic_cover`.
-- `index`: stable display and filename index.
-- `url`: downloadable URL.
-- Optional paired URLs for a live-photo asset.
+- `kind`：`video`、`image`、`live_photo`、`music`、`static_cover`、`dynamic_cover`。
+- `index`：稳定的展示和文件名序号。
+- `url`：可下载地址。
 
-Existing `downloads` behavior may remain as a compatibility field while the UI and downloader migrate to assets.
+现有 `downloads` 字段可以在迁移期间保留为兼容字段，UI 和下载器逐步改用 `assets`。
 
-TTD types map as follows:
+TTD 类型映射：
 
-- Video work: one or more video URLs.
-- Image set: ordered image URLs.
-- Live-photo work: ordered live-photo assets represented by TTD as MP4 output.
-- Animated work: video output retained as MP4; no GIF conversion.
+- 视频作品：一个或多个视频地址。
+- 图集：有序图片地址。
+- 实况作品：TTD 输出的 MP4 资产。
+- 动图作品：保留 MP4 视频，不转 GIF。
 
-### 4.2 Filename Templates
+### 4.2 文件名模板
 
-Templates are user-defined and reusable. Each template contains:
+模板由用户定义并可复用。每个模板包含：
 
-- Unique ID.
-- Name.
-- Ordered parts.
-- Default flag.
-- Creation and update times.
+- 唯一 ID。
+- 名称。
+- 模板字符串。
+- 是否默认。
+- 创建和更新时间。
 
-Parts are field tokens or literal separator text. Supported initial fields are:
+模板字符串支持初始字段：
 
 - `create_time`
 - `author`
@@ -144,93 +143,93 @@ Parts are field tokens or literal separator text. Supported initial fields are:
 - `type`
 - `platform`
 
-The builder supports dragging field order, inserting separator text, live preview, saving, renaming, deletion, and setting one default. A work-level filename override replaces the generated stem but not the extension.
+构建器支持拖拽字段顺序、插入分隔文本、实时预览、保存、重命名、删除和设置默认。作品级文件名覆盖只替换生成的主文件名，不改变扩展名。
 
-All templates are sanitized through the existing filename rules. Path separators, absolute paths, malformed format fields, and template syntax are rejected.
+所有模板必须经过现有文件名清理规则。路径分隔符、绝对路径、非法格式字段和无效模板语法都要拒绝。
 
-### 4.3 Save Preferences
+### 4.3 保存偏好
 
-DoukHub persists:
+DoukHub 持久化：
 
-- Default save directory.
-- Recent directories in most-recent-first order.
-- Default filename template ID.
+- 默认保存目录。
+- 最近使用目录，按最新在前排序。
+- 默认文件名模板 ID。
 
-The single-work form defaults to the default directory and template while allowing per-run changes.
+单作品表单默认使用默认目录和默认模板，同时允许本次运行临时修改。
 
-### 4.4 Download History
+### 4.4 下载历史
 
-Add a local history table for single-work downloads with:
+新增本地单作品下载历史表，记录：
 
-- Work ID and source link.
-- Platform and work type.
-- Title and author.
-- Template used and optional filename override.
-- Save directory and output file paths.
-- Status and error message.
-- Created and updated times.
+- 作品 ID 和来源链接。
+- 平台和作品类型。
+- 标题和作者。
+- 使用的模板和可选文件名覆盖。
+- 保存目录和输出文件路径。
+- 状态和错误信息。
+- 创建和更新时间。
 
-History is one work action per row, with file paths stored as JSON when a work produces multiple files. Failed actions retain enough normalized work data to retry without requiring the user to paste the source link again.
+一次作品下载动作对应一行历史；一个作品生成多个文件时，文件路径以 JSON 保存。失败动作保留足够的标准化作品数据，重试时不要求用户重新粘贴来源链接。
 
-## 5. Phase One Interface Design
+## 5. 第一阶段界面设计
 
-The single-work page keeps its current two-step model:
+单作品页保留现有两步模型：
 
-1. Paste links and resolve.
-2. Review assets, edit overrides, then download.
+1. 粘贴链接并解析。
+2. 检查资产、调整覆盖文件名，然后下载。
 
-Resolved results show:
+解析结果显示：
 
-- Work title, author, publish time, platform, and type.
-- Asset kind and count.
-- Per-asset actions: copy URL, open URL, download.
-- Work-level filename override and generated filename preview.
+- 作品标题、作者、发布时间、平台和类型。
+- 资产类型和数量。
+- 单资产操作：复制地址、打开地址、下载。
+- 作品级文件名覆盖和生成文件名预览。
 
-The template builder is reachable from the single-work page. It edits templates without forcing the user to understand TTD's `name_format` syntax.
+模板构建器从单作品页进入。用户不需要理解 TTD 的 `name_format` 语法。
 
-Download history appears below or beside the active form, showing recent outcomes and a retry action for failures.
+下载历史显示在表单下方或旁边，展示最近结果，并为失败项提供重试按钮。
 
-## 6. Error Handling
+## 6. 错误处理
 
-- Unsupported or unrecognized links are reported individually and do not abort the batch.
-- TTD unavailable state gives an actionable service error.
-- Missing asset URLs are shown per asset.
-- A failed file is removed from its temporary path.
-- Existing target files are deduplicated with a stable suffix rather than overwritten.
-- Filename validation rejects unsafe templates before any network request or file write.
-- A retry reuses stored work data and user preferences.
+- 不支持或未识别的链接逐项报错，不中断整批。
+- TTD 不可用时返回可操作的服务错误。
+- 缺失资产地址按资产显示。
+- 下载失败时清理临时文件。
+- 目标文件已存在时使用稳定后缀去重，不覆盖。
+- 文件名校验必须发生在任何网络请求和文件写入前。
+- 重试复用已保存的作品数据和用户偏好。
 
-## 7. Verification Plan
+## 7. 验证计划
 
-Unit tests:
+单元测试：
 
-- TTD type normalization to assets.
-- Live-photo and image-set ordering.
-- Filename template construction and sanitization.
-- Unsafe and malformed template rejection.
-- Save preference defaults and recent-directory ordering.
-- Download history creation, failure recording, and retry data.
+- TTD 类型标准化为资产。
+- 实况和图集顺序。
+- 文件名模板构建和清理。
+- 非法和格式错误模板拒绝。
+- 保存偏好默认值和最近目录排序。
+- 下载历史创建、失败记录和重试数据。
 
-Integration tests:
+集成测试：
 
-- Resolve and download mocked video, image-set, and live-photo works.
-- Direct-download of one selected asset.
-- Work-level filename override.
-- Persisting selected directory and template.
-- Retry of a previously failed work.
+- 使用 mock 解析并下载视频、图集、实况作品。
+- 单独下载选中的资产。
+- 作品级文件名覆盖。
+- 持久化所选目录和模板。
+- 重试之前失败的作品。
 
-Manual checks:
+手工检查：
 
-- Resolve real Douyin video, image-set, live-photo, and animated links.
-- Verify actual output extensions and filenames on Windows.
-- Verify duplicate filename handling.
-- Verify template drag-and-drop and preview.
-- Verify recent history and file paths.
+- 解析真实抖音视频、图集、实况、动图链接。
+- 在 Windows 上验证实际扩展名和文件名。
+- 验证重复文件名处理。
+- 验证模板拖拽和预览。
+- 验证最近历史和文件路径。
 
-## 8. Implementation Notes
+## 8. 实施约束
 
-- Keep TTD Web API as the metadata source for phase one.
-- Keep single-work downloads outside TTD's `download_data`.
-- Keep the existing temporary-file and atomic-replace behavior.
-- Add only the persistence and API surface needed by phase one.
-- Do not pre-build empty pages for phase four.
+- 第一阶段继续以 TTD Web API 作为元数据来源。
+- 单作品下载不写 TTD 的 `download_data`。
+- 保留现有临时文件和原子替换行为。
+- 只增加第一阶段需要的持久化和 API。
+- 不提前构建第四阶段的空页面。
