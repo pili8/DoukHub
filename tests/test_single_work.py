@@ -8,6 +8,7 @@ from app.core.single_work import (
     download_work,
     extract_detail_id,
     fetch_work,
+    normalize_assets,
     normalize_work,
     sanitize_filename_part,
 )
@@ -111,3 +112,68 @@ def test_fetch_and_download_work(tmp_path):
     assert [path.name for path in paths] == ["作者 标题_1.jpg", "作者 标题_2.jpg"]
     assert all(path.read_bytes() == b"image" for path in paths)
     assert not list(tmp_path.glob("*.part"))
+
+
+def test_normalize_work_preserves_asset_types_and_order():
+    work = normalize_work(
+        {
+            "id": "1234567890123456789",
+            "desc": "实况标题",
+            "nickname": "作者",
+            "create_time": "2026-08-15 10:00:00",
+            "type": "实况",
+            "downloads": [
+                "https://cdn.example/live-1.mp4",
+                "https://cdn.example/live-2.mp4",
+            ],
+            "music_url": "https://cdn.example/music.mp3",
+            "static_cover": "https://cdn.example/static.jpg",
+            "dynamic_cover": "https://cdn.example/dynamic.jpg",
+        },
+        "douyin",
+    )
+    assert [asset["kind"] for asset in work["assets"]] == [
+        "live_photo", "live_photo", "music", "static_cover", "dynamic_cover"
+    ]
+    assert [asset["index"] for asset in work["assets"]] == [1, 2, 3, 4, 5]
+    assert work["downloads"] == [
+        "https://cdn.example/live-1.mp4",
+        "https://cdn.example/live-2.mp4",
+    ]
+
+
+def test_download_work_selects_asset_and_uses_override(tmp_path):
+    async def handler(request):
+        return httpx.Response(
+            200,
+            content=b"data",
+            headers={"content-type": "image/jpeg"},
+        )
+
+    async def run():
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            downloads = [
+                "https://cdn.example/a.jpg",
+                "https://cdn.example/b.jpg",
+            ]
+            work = {
+                "id": "1",
+                "title": "标题",
+                "author": "作者",
+                "create_time": "2026-08-15 10-00-00",
+                "type": "图集",
+                "platform": "douyin",
+                "downloads": downloads,
+                "assets": normalize_assets("图集", downloads),
+            }
+            return await download_work(
+                client,
+                work,
+                tmp_path,
+                filename_override="自定义名字",
+                asset_indexes=[2],
+            )
+
+    paths = asyncio.run(run())
+    assert [path.name for path in paths] == ["自定义名字.jpg"]

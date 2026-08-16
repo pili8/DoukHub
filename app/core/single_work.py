@@ -12,6 +12,8 @@ URL = re.compile(r"https?://[^\s\"'<>]+")
 INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 MAX_FILENAME_STEM = 160
 
+PRIMARY_ASSET_KINDS = {"video", "image", "live_photo"}
+
 
 def detect_single_platform(link: str) -> str:
     if "douyin.com" in link or "iesdouyin.com" in link:
@@ -26,15 +28,59 @@ def extract_detail_id(link: str) -> str:
     return match.group(1) if match else ""
 
 
+def _asset(kind: str, index: int, url: str) -> dict:
+    return {"kind": kind, "index": index, "url": str(url or "")}
+
+
+def normalize_assets(
+    work_type: str,
+    downloads: list[str],
+    music_url: str = "",
+    static_cover: str = "",
+    dynamic_cover: str = "",
+) -> list[dict]:
+    work_type = str(work_type or "")
+    if "实况" in work_type:
+        primary_kind = "live_photo"
+    elif any(word in work_type for word in ("视频", "动图")):
+        primary_kind = "video"
+    else:
+        primary_kind = "image"
+
+    assets = []
+    index = 1
+    for url in downloads:
+        if url:
+            assets.append(_asset(primary_kind, index, url))
+            index += 1
+    for kind, url in (
+        ("music", music_url),
+        ("static_cover", static_cover),
+        ("dynamic_cover", dynamic_cover),
+    ):
+        if url:
+            assets.append(_asset(kind, index, url))
+            index += 1
+    return assets
+
+
 def normalize_work(raw: dict, platform: str) -> dict:
     work_id = str(raw.get("id") or "")
+    downloads = [url for url in raw.get("downloads") or [] if url]
     return {
         "id": work_id,
         "title": str(raw.get("desc") or work_id),
         "author": str(raw.get("mark") or raw.get("nickname") or ""),
         "create_time": str(raw.get("create_time") or "").replace(":", "-"),
         "type": str(raw.get("type") or ""),
-        "downloads": [url for url in raw.get("downloads") or [] if url],
+        "downloads": downloads,
+        "assets": normalize_assets(
+            str(raw.get("type") or ""),
+            downloads,
+            raw.get("music_url") or "",
+            raw.get("static_cover") or "",
+            raw.get("dynamic_cover") or "",
+        ),
         "share_url": str(raw.get("share_url") or ""),
         "platform": platform,
     }
@@ -50,13 +96,19 @@ def build_filename(
     work: dict,
     template: str = "{create_time} {author} {title}",
     index: int = 0,
+    override: str = "",
 ) -> str:
-    stem = template.format(
-        create_time=sanitize_filename_part(work.get("create_time"), 24),
-        author=sanitize_filename_part(work.get("author")),
-        title=sanitize_filename_part(work.get("title")),
-        id=sanitize_filename_part(work.get("id"), 24),
-    ).strip()
+    if override:
+        stem = sanitize_filename_part(override, MAX_FILENAME_STEM)
+    else:
+        stem = template.format(
+            create_time=sanitize_filename_part(work.get("create_time"), 24),
+            author=sanitize_filename_part(work.get("author")),
+            title=sanitize_filename_part(work.get("title")),
+            id=sanitize_filename_part(work.get("id"), 24),
+            type=sanitize_filename_part(work.get("type")),
+            platform=sanitize_filename_part(work.get("platform")),
+        ).strip()
     if index:
         stem = f"{stem}_{index}"
     stem = stem[:MAX_FILENAME_STEM].rstrip(" .")
@@ -95,7 +147,7 @@ async def fetch_work(
     return normalize_work(raw, platform)
 
 
-def _extension(response: httpx.Response, work_type: str) -> str:
+def _extension(response: httpx.Response, asset_kind: str) -> str:
     content_type = (
         response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     )
@@ -108,7 +160,11 @@ def _extension(response: httpx.Response, work_type: str) -> str:
     }
     if content_type in mapping:
         return mapping[content_type]
-    return ".mp4" if "视频" in work_type else ".jpg"
+    if asset_kind in ("video", "live_photo"):
+        return ".mp4"
+    if asset_kind == "music":
+        return ".mp3"
+    return ".jpg"
 
 
 def _unique_path(path: Path) -> Path:
@@ -127,19 +183,47 @@ async def download_work(
     work: dict,
     target_dir: Path,
     template: str = "{create_time} {author} {title}",
+    filename_override: str = "",
+    asset_indexes=None,
+    include_music: bool = False,
+    include_static_cover: bool = False,
+    include_dynamic_cover: bool = False,
 ) -> list[Path]:
-    if not work.get("downloads"):
+    assets = work.get("assets") or []
+    if not assets and not work.get("downloads"):
+        raise ValueError("作品没有可用下载地址")
+    if asset_indexes:
+        wanted = set(asset_indexes)
+        selected = [a for a in assets if a["index"] in wanted]
+        if not selected:
+            selected = [a for a in assets if a["kind"] in PRIMARY_ASSET_KINDS]
+            selected.extend(a for a in assets if (
+                (a["kind"] == "music" and include_music)
+                or (a["kind"] == "static_cover" and include_static_cover)
+                or (a["kind"] == "dynamic_cover" and include_dynamic_cover)
+            ))
+    else:
+        selected = [a for a in assets if a["kind"] in PRIMARY_ASSET_KINDS]
+        selected.extend(a for a in assets if (
+            (a["kind"] == "music" and include_music)
+            or (a["kind"] == "static_cover" and include_static_cover)
+            or (a["kind"] == "dynamic_cover" and include_dynamic_cover)
+        ))
+    if not selected:
         raise ValueError("作品没有可用下载地址")
     target_dir = Path(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     saved: list[Path] = []
-    multiple = len(work["downloads"]) > 1
+    multiple = len(selected) > 1
 
-    for index, url in enumerate(work["downloads"], start=1):
+    for offset, asset in enumerate(selected, start=1):
+        url = asset["url"]
         async with client.stream("GET", url) as response:
             response.raise_for_status()
-            extension = _extension(response, work.get("type", ""))
-            stem = build_filename(work, template, index if multiple else 0)
+            extension = _extension(response, asset["kind"])
+            stem = build_filename(
+                work, template, offset if multiple else 0, filename_override
+            )
             final_path = _unique_path(target_dir / f"{stem}{extension}")
             temporary = final_path.with_suffix(f"{final_path.suffix}.part")
             try:
