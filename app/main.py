@@ -487,6 +487,7 @@ async def page_collect_detail(request: Request):
     return templates.TemplateResponse(request, "collect_detail.html", context={
         "request": request,
         "download_path": str(config.download_path),
+        "single_work_preferences": _single_work_preferences(),
         "page": "collect_detail",
         "collect_mode": "detail",
     })

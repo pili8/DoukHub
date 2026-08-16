@@ -371,6 +371,20 @@ def test_collect_page_formats_single_work_storage_time():
     assert ".replace(/ (\\d\\d)-(\\d\\d)-(\\d\\d)$/, ' $1:$2:$3')" in source
 
 
+def test_collect_detail_page_contains_asset_template_and_history_controls():
+    source = Path("app/templates/collect_detail.html").read_text(encoding="utf-8")
+    for token in (
+        'id="single-work-list"',
+        'id="single-history-list"',
+        'id="template-modal"',
+        'id="template-parts"',
+        "downloadSingleAsset",
+        "retrySingleWorkHistory",
+        "dragSingleTemplatePart",
+    ):
+        assert token in source
+
+
 def test_collect_page_shows_batch_progress_summary():
     source = Path("app/templates/collect.html").read_text(encoding="utf-8")
     assert ".batch-summary-grid" not in source

@@ -1,0 +1,708 @@
+{% extends "base.html" %}
+{% block title %}单作品采集 - DoukHub{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1 class="page-title">单作品采集</h1>
+        <div class="page-sub">解析抖音 / TikTok 作品链接并下载</div>
+    </div>
+    <div class="page-actions">
+        <span class="workflow-status pending">手动执行</span>
+    </div>
+</div>
+
+<script type="application/json" id="single-work-preferences">
+{{ single_work_preferences | tojson }}
+</script>
+
+<div class="workflow-panel" id="detail-form-card">
+    <div class="workflow-header">
+        <div class="workflow-title">
+            <i data-lucide="link"></i>
+            <span>作品链接</span>
+        </div>
+    </div>
+    <form id="detail-form" onsubmit="resolveSingleWorks(event)">
+        <div class="form-group">
+            <label>粘贴作品链接（一行一个，支持抖音 / TikTok）</label>
+            <textarea name="links" rows="8" oninput="invalidateResolvedSingleWorks()" onchange="invalidateResolvedSingleWorks()" placeholder="https://www.douyin.com/video/...&#10;https://www.tiktok.com/@user/video/..."></textarea>
+        </div>
+        <div class="workflow-form-grid">
+            <div class="form-group">
+                <label>保存目录</label>
+                <div style="display:flex;gap:8px;">
+                    <input type="text" name="target_dir" id="single-target-dir" value="{{ download_path or '' }}" style="flex:1;">
+                    <button type="button" class="btn btn-secondary" onclick="openSingleDirDialog()" title="选择目录">
+                        <i data-lucide="folder-open"></i>
+                    </button>
+                </div>
+                <select id="single-recent-dirs" onchange="useRecentSingleDir(this.value)" style="margin-top:6px;">
+                    <option value="">最近目录...</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>命名模板</label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <select id="single-template-select" onchange="onTemplateSelectChange()" style="flex:1;"></select>
+                    <input type="hidden" id="single-template-input" name="filename_template" value="{create_time} {author} {title}">
+                    <button type="button" class="btn btn-secondary" onclick="openTemplateModal()" title="管理模板">
+                        <i data-lucide="settings-2"></i>
+                    </button>
+                </div>
+                <div id="single-template-preview" class="text-muted" style="margin-top:4px;font-size:13px;"></div>
+            </div>
+        </div>
+        <div class="btn-group">
+            <button type="submit" class="btn btn-secondary" id="detail-resolve">
+                <i data-lucide="search"></i> 解析作品
+            </button>
+            <button type="button" class="btn btn-primary workflow-primary" id="detail-submit" onclick="downloadSingleWorks()" disabled>
+                <i data-lucide="download"></i> 下载作品
+            </button>
+        </div>
+    </form>
+    <div id="single-work-list" style="margin-top:16px;"></div>
+</div>
+
+<div class="workflow-panel" style="margin-top:16px;">
+    <div class="workflow-header">
+        <div class="workflow-title">
+            <i data-lucide="history"></i>
+            <span>下载历史</span>
+        </div>
+    </div>
+    <div id="single-history-list" style="padding:12px;">
+        <div class="text-muted">暂无下载记录</div>
+    </div>
+</div>
+
+<div id="single-dir-modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,.45);">
+    <div class="workflow-panel" style="width:min(560px,92vw);max-height:80vh;display:flex;flex-direction:column;margin-bottom:0;">
+        <div class="workflow-header">
+            <div class="workflow-title"><i data-lucide="folder-open"></i><span>选择目录</span></div>
+        </div>
+        <div class="form-group">
+            <label>当前目录</label>
+            <input type="text" id="single-dir-current" readonly>
+        </div>
+        <div id="single-dir-list" style="overflow:auto;flex:1;min-height:160px;"></div>
+        <div class="btn-group" style="justify-content:flex-end;margin-top:12px;">
+            <button type="button" class="btn btn-secondary" onclick="goSingleDirParent()">上一级</button>
+            <button type="button" class="btn btn-secondary" onclick="closeSingleDirDialog()">取消</button>
+            <button type="button" class="btn btn-primary" onclick="chooseSingleDir()">使用此目录</button>
+        </div>
+    </div>
+</div>
+
+<div id="template-modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,.45);">
+    <div class="workflow-panel" style="width:min(640px,92vw);max-height:85vh;display:flex;flex-direction:column;margin-bottom:0;">
+        <div class="workflow-header">
+            <div class="workflow-title"><i data-lucide="settings-2"></i><span>模板管理</span></div>
+        </div>
+        <div style="overflow:auto;flex:1;padding:0 16px;">
+            <div class="form-group">
+                <label>模板库</label>
+                <select id="template-library" onchange="loadSelectedTemplate()" style="width:100%;"></select>
+            </div>
+            <div class="form-group">
+                <label>模板名称</label>
+                <input type="text" id="template-name" placeholder="输入模板名称">
+            </div>
+            <div class="form-group">
+                <label>可拖字段（拖入或点击追加）</label>
+                <div class="template-field-row" id="template-fields">
+                    <span class="template-part" draggable="true" onclick="appendTemplateField('create_time')" ondragstart="dragSingleField(event,'create_time')">发布时间</span>
+                    <span class="template-part" draggable="true" onclick="appendTemplateField('author')" ondragstart="dragSingleField(event,'author')">作者</span>
+                    <span class="template-part" draggable="true" onclick="appendTemplateField('title')" ondragstart="dragSingleField(event,'title')">标题</span>
+                    <span class="template-part" draggable="true" onclick="appendTemplateField('id')" ondragstart="dragSingleField(event,'id')">作品ID</span>
+                    <span class="template-part" draggable="true" onclick="appendTemplateField('type')" ondragstart="dragSingleField(event,'type')">类型</span>
+                    <span class="template-part" draggable="true" onclick="appendTemplateField('platform')" ondragstart="dragSingleField(event,'platform')">平台</span>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>分隔文本</label>
+                <div style="display:flex;gap:8px;">
+                    <input type="text" id="template-separator" placeholder="如 空格、下划线" style="flex:1;">
+                    <button type="button" class="btn btn-secondary" onclick="appendTemplateSeparator()">添加</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>已排序字段</label>
+                <div class="template-part-list" id="template-parts" ondragover="event.preventDefault()" ondrop="dropSingleTemplatePart(event,-1)"></div>
+            </div>
+            <div class="form-group">
+                <label>实时预览</label>
+                <div id="template-live-preview" class="text-muted" style="padding:8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);"></div>
+            </div>
+        </div>
+        <div class="btn-group" style="justify-content:flex-end;padding:12px 16px;">
+            <button type="button" class="btn btn-secondary" onclick="closeTemplateModal()">取消</button>
+            <button type="button" class="btn btn-secondary" onclick="saveSingleTemplate()">保存模板</button>
+            <button type="button" class="btn btn-primary" onclick="useThisTemplate()">使用此模板</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    var resolvedSingleLinks = [];
+    var resolveGeneration = 0;
+
+    var singleWorkState = {
+        works: [],
+        preferences: JSON.parse(document.getElementById('single-work-preferences').textContent),
+        selectedTemplateId: '',
+        templateParts: [],
+        draggedTemplateIndex: null
+    };
+
+    function invalidateResolvedSingleWorks() {
+        resolveGeneration += 1;
+        resolvedSingleLinks = [];
+        document.getElementById('detail-submit').disabled = true;
+    }
+
+    function parseSingleTemplate(template) {
+        var parts = [];
+        var regex = /\{(\w+)\}/g;
+        var last = 0;
+        var match;
+        while ((match = regex.exec(template)) !== null) {
+            if (match.index > last) {
+                parts.push({type: 'text', value: template.slice(last, match.index)});
+            }
+            parts.push({type: 'field', value: match[1]});
+            last = regex.lastIndex;
+        }
+        if (last < template.length) {
+            parts.push({type: 'text', value: template.slice(last)});
+        }
+        return parts;
+    }
+
+    function templatePartsToString() {
+        return singleWorkState.templateParts.map(function(p) {
+            return p.type === 'field' ? '{' + p.value + '}' : p.value;
+        }).join('');
+    }
+
+    function buildFilenamePreview(template, work) {
+        if (!work) work = {create_time: '2026-08-15 10-00-00', author: '作者', title: '标题', id: '123', type: '视频', platform: 'douyin'};
+        try {
+            return template.format(work);
+        } catch(e) {
+            return template;
+        }
+    }
+
+    String.prototype.format = function(obj) {
+        return this.replace(/\{(\w+)\}/g, function(m, key) {
+            return obj[key] !== undefined ? String(obj[key]) : m;
+        });
+    };
+
+    function renderTemplateBuilder() {
+        var container = document.getElementById('template-parts');
+        if (!singleWorkState.templateParts.length) {
+            container.innerHTML = '<span class="text-muted" style="padding:8px;">拖入字段或点击上方按钮</span>';
+            return;
+        }
+        container.innerHTML = singleWorkState.templateParts.map(function(part, index) {
+            var label = part.type === 'field' ? part.value : '"' + escapeHtml(part.value) + '"';
+            var icon = part.type === 'field' ? 'code' : 'minus';
+            return '<span class="template-part" draggable="true" ondragstart="dragSingleTemplatePart(event,' + index + ')" ondragover="event.preventDefault()" ondrop="dropSingleTemplatePart(event,' + index + ',event.stopPropagation())">' +
+                '<i data-lucide="' + icon + '"></i> ' + escapeHtml(label) +
+                ' <a href="javascript:void(0)" onclick="removeTemplatePart(' + index + ')" style="margin-left:4px;">×</a>' +
+                '</span>';
+        }).join('');
+        var preview = templatePartsToString();
+        document.getElementById('template-live-preview').textContent = preview;
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    }
+
+    function dragSingleField(event, key) {
+        event.dataTransfer.setData('text/plain', JSON.stringify({type: 'field', value: key}));
+    }
+
+    function dragSingleTemplatePart(event, index) {
+        singleWorkState.draggedTemplateIndex = index;
+        event.dataTransfer.setData('text/plain', JSON.stringify({type: 'move', index: index}));
+    }
+
+    function dropSingleTemplatePart(event, index, stopPropagation) {
+        event.preventDefault();
+        if (stopPropagation) event.stopPropagation();
+        var raw = event.dataTransfer.getData('text/plain');
+        if (!raw) return;
+        var data;
+        try { data = JSON.parse(raw); } catch(e) { return; }
+        if (!data) return;
+
+        if (data.type === 'move') {
+            var from = data.index;
+            var to = index < 0 ? singleWorkState.templateParts.length : index;
+            if (from === to) return;
+            var item = singleWorkState.templateParts.splice(from, 1)[0];
+            singleWorkState.templateParts.splice(to, 0, item);
+        } else if (data.type === 'field') {
+            var insertAt = index < 0 ? singleWorkState.templateParts.length : index;
+            singleWorkState.templateParts.splice(insertAt, 0, {type: 'field', value: data.value});
+        } else if (data.type === 'text') {
+            var insertAt2 = index < 0 ? singleWorkState.templateParts.length : index;
+            singleWorkState.templateParts.splice(insertAt2, 0, {type: 'text', value: data.value});
+        }
+        singleWorkState.draggedTemplateIndex = null;
+        renderTemplateBuilder();
+    }
+
+    function appendTemplateField(key) {
+        singleWorkState.templateParts.push({type: 'field', value: key});
+        renderTemplateBuilder();
+    }
+
+    function appendTemplateSeparator() {
+        var input = document.getElementById('template-separator');
+        var value = input.value;
+        if (!value) return;
+        singleWorkState.templateParts.push({type: 'text', value: value});
+        input.value = '';
+        renderTemplateBuilder();
+    }
+
+    function removeTemplatePart(index) {
+        singleWorkState.templateParts.splice(index, 1);
+        renderTemplateBuilder();
+    }
+
+    function loadSelectedTemplate() {
+        var select = document.getElementById('template-library');
+        var id = select.value;
+        var tpl = singleWorkState.preferences.templates.find(function(t) { return t.id === id; });
+        if (!tpl) return;
+        document.getElementById('template-name').value = tpl.name;
+        singleWorkState.templateParts = parseSingleTemplate(tpl.template);
+        singleWorkState.selectedTemplateId = id;
+        renderTemplateBuilder();
+    }
+
+    function openTemplateModal() {
+        var select = document.getElementById('template-library');
+        select.innerHTML = singleWorkState.preferences.templates.map(function(t) {
+            return '<option value="' + escapeHtml(t.id) + '">' + escapeHtml(t.name) + '</option>';
+        }).join('');
+        if (singleWorkState.preferences.templates.length) {
+            select.value = singleWorkState.preferences.templates[0].id;
+            loadSelectedTemplate();
+        }
+        document.getElementById('template-modal').style.display = 'flex';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    }
+
+    function closeTemplateModal() {
+        document.getElementById('template-modal').style.display = 'none';
+    }
+
+    async function saveSingleTemplate() {
+        var name = document.getElementById('template-name').value.trim();
+        if (!name) { showToast('模板名称不能为空', 'error'); return; }
+        var template = templatePartsToString();
+        var id = singleWorkState.selectedTemplateId || 'new';
+        var templates = singleWorkState.preferences.templates.filter(function(t) { return t.id !== id; });
+        templates.push({id: id, name: name, template: template, is_default: false});
+        var prefs = {
+            download_path: singleWorkState.preferences.download_path,
+            recent_dirs: singleWorkState.preferences.recent_dirs,
+            default_template_id: singleWorkState.preferences.default_template_id,
+            templates: templates,
+        };
+        try {
+            var data = await apiCall('/api/collection/single-work/preferences', 'PUT', prefs);
+            if (data.success) {
+                singleWorkState.preferences = data.preferences;
+                renderTemplateSelect();
+                showToast('模板已保存', 'success');
+            } else {
+                showToast(data.message || '保存失败', 'error');
+            }
+        } catch(error) {
+            showToast(error.message || '保存失败', 'error');
+        }
+    }
+
+    async function useThisTemplate() {
+        var template = templatePartsToString();
+        document.getElementById('single-template-input').value = template;
+        var select = document.getElementById('single-template-select');
+        var name = document.getElementById('template-name').value.trim() || '自定义';
+        var option = '<option value="' + escapeHtml(template) + '">' + escapeHtml(name) + '</option>';
+        if (!Array.from(select.options).some(function(o) { return o.value === template; })) {
+            select.insertAdjacentHTML('beforeend', option);
+        }
+        select.value = template;
+        updateTemplatePreview();
+        closeTemplateModal();
+    }
+
+    function renderTemplateSelect() {
+        var select = document.getElementById('single-template-select');
+        var prefs = singleWorkState.preferences;
+        var defaultId = prefs.default_template_id;
+        select.innerHTML = prefs.templates.map(function(t) {
+            return '<option value="' + escapeHtml(t.template) + '">' + escapeHtml(t.name) + (t.id === defaultId ? ' (默认)' : '') + '</option>';
+        }).join('');
+        var defaultTpl = prefs.templates.find(function(t) { return t.id === defaultId; });
+        if (defaultTpl) {
+            select.value = defaultTpl.template;
+            document.getElementById('single-template-input').value = defaultTpl.template;
+        }
+        updateTemplatePreview();
+    }
+
+    function onTemplateSelectChange() {
+        var select = document.getElementById('single-template-select');
+        document.getElementById('single-template-input').value = select.value;
+        updateTemplatePreview();
+    }
+
+    function updateTemplatePreview() {
+        var template = document.getElementById('single-template-input').value;
+        var preview = buildFilenamePreview(template, null);
+        document.getElementById('single-template-preview').textContent = '预览: ' + preview;
+    }
+
+    function renderRecentDirs() {
+        var select = document.getElementById('single-recent-dirs');
+        var dirs = singleWorkState.preferences.recent_dirs || [];
+        select.innerHTML = '<option value="">最近目录...</option>' + dirs.map(function(d) {
+            return '<option value="' + escapeHtml(d) + '">' + escapeHtml(d) + '</option>';
+        }).join('');
+    }
+
+    function useRecentSingleDir(path) {
+        if (path) {
+            document.getElementById('single-target-dir').value = path;
+        }
+    }
+
+    async function saveRecentSingleDir(path) {
+        if (!path) return;
+        var dirs = singleWorkState.preferences.recent_dirs || [];
+        dirs = dirs.filter(function(d) { return d !== path; });
+        dirs.unshift(path);
+        dirs = dirs.slice(0, 10);
+        singleWorkState.preferences.recent_dirs = dirs;
+        try {
+            await apiCall('/api/collection/single-work/preferences', 'PUT', {
+                download_path: singleWorkState.preferences.download_path,
+                recent_dirs: dirs,
+                default_template_id: singleWorkState.preferences.default_template_id,
+                templates: singleWorkState.preferences.templates,
+            });
+        } catch(e) {}
+        renderRecentDirs();
+    }
+
+    async function resolveSingleWorks(event) {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        const submittedLinks = String(form.get('links') || '');
+        const linksInput = event.target.elements.links;
+        const generation = ++resolveGeneration;
+        const button = document.getElementById('detail-resolve');
+        button.disabled = true;
+        button.innerHTML = '<i data-lucide="loader-circle"></i> 解析中...';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+        try {
+            const data = await apiCall('/api/collection/works/resolve', 'POST', {
+                links: submittedLinks,
+            });
+            const currentLinks = String(linksInput.value || '');
+            if (generation !== resolveGeneration || currentLinks !== submittedLinks) return;
+            if (!data.works?.length) {
+                throw new Error(data.message || data.errors?.[0]?.message || '解析失败');
+            }
+            resolvedSingleLinks = data.works.map(work => work.share_url).filter(Boolean);
+            singleWorkState.works = data.works;
+            renderSingleWorks(data.works);
+            document.getElementById('detail-submit').disabled = false;
+            showToast(`解析到 ${data.works.length} 个作品`, 'success');
+        } catch (error) {
+            const currentLinks = String(linksInput.value || '');
+            if (generation !== resolveGeneration || currentLinks !== submittedLinks) return;
+            showToast(error.message || '解析作品失败', 'error');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = '<i data-lucide="search"></i> 解析作品';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+        }
+    }
+
+    async function downloadSingleWorks() {
+        const form = new FormData(document.getElementById('detail-form'));
+        const originalLinks = String(form.get('links') || '');
+        const links = resolvedSingleLinks.length
+            ? resolvedSingleLinks.join('\n')
+            : originalLinks;
+        const targetDir = form.get('target_dir') || '';
+        const template = document.getElementById('single-template-input').value ||
+            '{create_time} {author} {title}';
+        var overrides = {};
+        singleWorkState.works.forEach(function(work) {
+            var input = document.querySelector('[data-filename-work="' + work.id + '"]');
+            if (input && input.value.trim()) {
+                overrides[work.id] = input.value.trim();
+            }
+        });
+        var assetIndexes = [];
+        document.querySelectorAll('[data-asset-index]:checked').forEach(function(cb) {
+            assetIndexes.push(parseInt(cb.getAttribute('data-asset-index')));
+        });
+        const button = document.getElementById('detail-submit');
+        button.disabled = true;
+        button.innerHTML = '<i data-lucide="loader-circle"></i> 下载中...';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+        try {
+            const data = await apiCall('/api/collection/works/download', 'POST', {
+                links: links,
+                target_dir: targetDir,
+                filename_template: template,
+                filename_overrides: overrides,
+                asset_indexes: assetIndexes,
+            });
+            renderSingleResults(data.results || []);
+            await saveRecentSingleDir(targetDir);
+            await loadSingleWorkHistory();
+            showToast(
+                data.success ? '下载完成' : '部分作品下载失败',
+                data.success ? 'success' : 'error'
+            );
+        } catch (error) {
+            showToast(error.message || '下载作品失败', 'error');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = '<i data-lucide="download"></i> 下载作品';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+        }
+    }
+
+    async function downloadSingleAsset(link, assetIndex) {
+        var targetDir = document.getElementById('single-target-dir').value || '';
+        if (!targetDir) { showToast('请先选择保存目录', 'error'); return; }
+        var template = document.getElementById('single-template-input').value || '{create_time} {author} {title}';
+        try {
+            var data = await apiCall('/api/collection/works/download', 'POST', {
+                links: link,
+                target_dir: targetDir,
+                filename_template: template,
+                asset_indexes: [assetIndex],
+            });
+            if (data.success) {
+                showToast('下载成功', 'success');
+            } else {
+                showToast('下载失败', 'error');
+            }
+            await loadSingleWorkHistory();
+        } catch (error) {
+            showToast(error.message || '下载失败', 'error');
+        }
+    }
+
+    function assetKindLabel(kind) {
+        var labels = {
+            video: '视频',
+            image: '图片',
+            live_photo: '实况',
+            music: '音乐',
+            static_cover: '静态封面',
+            dynamic_cover: '动态封面',
+        };
+        return labels[kind] || kind;
+    }
+
+    function copyAssetUrl(url) {
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(url).then(function() {
+                showToast('已复制', 'success');
+            });
+        }
+    }
+
+    function renderSingleWorks(works) {
+        document.getElementById('single-work-list').innerHTML = works.map(function(work) {
+            var assets = work.assets || [];
+            return '<div class="single-work-result">' +
+                '<div class="single-work-summary">' +
+                    '<div><strong>' + escapeHtml(work.title) + '</strong></div>' +
+                    '<div class="text-muted">' + escapeHtml(work.author) + ' · ' + escapeHtml(work.type) + ' · ' + (work.downloads?.length || 0) + '个资产</div>' +
+                '</div>' +
+                '<div class="form-group">' +
+                    '<label>覆盖文件名（可选，留空使用模板）</label>' +
+                    '<input type="text" data-filename-work="' + escapeHtml(work.id) + '" placeholder="自定义文件名">' +
+                '</div>' +
+                (assets.length ? '<div class="table-scroll"><table><thead><tr><th>序号</th><th>类型</th><th>URL</th><th>操作</th></tr></thead><tbody>' +
+                    assets.map(function(a) {
+                        return '<tr>' +
+                            '<td>' + a.index + '</td>' +
+                            '<td>' + assetKindLabel(a.kind) + '</td>' +
+                            '<td class="asset-url">' + escapeHtml(a.url) + '</td>' +
+                            '<td>' +
+                                '<button type="button" class="btn btn-secondary" onclick="copyAssetUrl(\'' + a.url.replace(/'/g, "\\'") + '\')">复制</button> ' +
+                                '<a href="' + escapeHtml(a.url) + '" target="_blank" class="btn btn-secondary">打开</a> ' +
+                                '<button type="button" class="btn btn-secondary" onclick="downloadSingleAsset(\'' + work.share_url + '\',' + a.index + ')">下载</button>' +
+                            '</td>' +
+                        '</tr>';
+                    }).join('') + '</tbody></table></div>' : '') +
+            '</div>';
+        }).join('');
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    }
+
+    function renderSingleResults(results) {
+        document.getElementById('single-work-list').innerHTML = results.map(function(result) {
+            return '<div class="single-work-result">' +
+                '<div class="single-work-summary">' +
+                    '<div><strong>' + escapeHtml(result.title || result.link) + '</strong></div>' +
+                    '<div>' + (result.status === 'success' ? '✓ 成功' : '✗ 失败') + '</div>' +
+                '</div>' +
+                '<div class="text-muted">' + escapeHtml(result.files ? result.files.join('\n') : result.message || '') + '</div>' +
+            '</div>';
+        }).join('');
+    }
+
+    function safeParseJsonArray(value) {
+        try {
+            var parsed = JSON.parse(value);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch(e) { return []; }
+    }
+
+    async function loadSingleWorkHistory() {
+        try {
+            var data = await apiCall('/api/collection/works/history', 'GET');
+            renderSingleWorkHistory(data.history || []);
+        } catch(e) {}
+    }
+
+    function renderSingleWorkHistory(rows) {
+        var container = document.getElementById('single-history-list');
+        if (!rows.length) {
+            container.innerHTML = '<div class="text-muted">暂无下载记录</div>';
+            return;
+        }
+        container.innerHTML = '<div class="table-scroll"><table><thead><tr><th>作品</th><th>状态</th><th>文件/错误</th><th>时间</th><th>操作</th></tr></thead><tbody>' +
+            rows.map(function(row) {
+                var files = safeParseJsonArray(row.files_json);
+                var display = row.status === 'success' ? escapeHtml(files.join('\n')) : escapeHtml(row.error || '');
+                var action = row.status === 'failed' ? ' <button type="button" class="btn btn-secondary" onclick="retrySingleWorkHistory(' + row.id + ')">重试</button>' : '';
+                return '<tr>' +
+                    '<td>' + escapeHtml(row.title || row.work_id) + '</td>' +
+                    '<td>' + (row.status === 'success' ? '✓ 成功' : '✗ 失败') + '</td>' +
+                    '<td class="asset-url">' + display + '</td>' +
+                    '<td>' + formatDateTime(row.created_at) + '</td>' +
+                    '<td>' + action + '</td>' +
+                '</tr>';
+            }).join('') + '</tbody></table></div>';
+    }
+
+    async function retrySingleWorkHistory(historyId) {
+        var targetDir = document.getElementById('single-target-dir').value || '';
+        var button = event.target;
+        button.disabled = true;
+        try {
+            var data = await apiCall('/api/collection/works/history/' + historyId + '/retry', 'POST', {
+                target_dir: targetDir,
+            });
+            if (data.success) {
+                showToast('重试成功', 'success');
+            } else {
+                showToast('重试失败', 'error');
+            }
+            await loadSingleWorkHistory();
+        } catch(e) {
+            showToast(e.message || '重试失败', 'error');
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    var singleDirCurrent = '';
+    var singleDirEntries = [];
+    var singleDirParent = '';
+
+    async function openSingleDirDialog() {
+        const input = document.getElementById('single-target-dir');
+        await loadSingleDirs(input.value || '');
+        document.getElementById('single-dir-modal').style.display = 'flex';
+    }
+
+    async function loadSingleDirs(path) {
+        const data = await apiCall(
+            `/api/browse-dir?path=${encodeURIComponent(path || '')}`,
+            'GET'
+        );
+        singleDirCurrent = data.current || '';
+        singleDirParent = data.parent || '';
+        singleDirEntries = data.dirs || [];
+        document.getElementById('single-dir-current').value = singleDirCurrent || '此电脑';
+        renderSingleDirs();
+    }
+
+    function renderSingleDirs() {
+        const list = document.getElementById('single-dir-list');
+        if (!singleDirEntries.length) {
+            list.innerHTML = '<div class="text-muted" style="padding:12px;">没有子目录</div>';
+            return;
+        }
+        list.innerHTML = singleDirEntries.map(dir => {
+            const name = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
+            return `
+                <div style="padding:8px 10px;border-bottom:1px solid var(--border-default);cursor:pointer;">
+                    <a href="javascript:void(0)" onclick="loadSingleDirs('${dir.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">
+                        <i data-lucide="folder"></i> ${escapeHtml(name)}
+                    </a>
+                </div>
+            `;
+        }).join('');
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    }
+
+    async function goSingleDirParent() {
+        if (!singleDirCurrent) return;
+        const parent = singleDirParent;
+        if (!parent || parent === singleDirCurrent) return;
+        await loadSingleDirs(parent);
+    }
+
+    function closeSingleDirDialog() {
+        document.getElementById('single-dir-modal').style.display = 'none';
+    }
+
+    function chooseSingleDir() {
+        if (singleDirCurrent) {
+            document.getElementById('single-target-dir').value = singleDirCurrent;
+        }
+        closeSingleDirDialog();
+    }
+
+    function formatDateTime(value) {
+        return value
+            ? String(value).replace('T', ' ').slice(0, 19)
+                .replace(/ (\d\d)-(\d\d)-(\d\d)$/, ' $1:$2:$3')
+            : '-';
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replaceAll('&', '&amp;').replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+    }
+
+    (function init() {
+        renderTemplateSelect();
+        renderRecentDirs();
+        loadSingleWorkHistory();
+    })();
+</script>
+{% endblock %}

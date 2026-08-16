@@ -974,6 +974,21 @@ tbody tr:hover {
   flex-wrap: wrap;
 }
 
+.workflow-primary {
+  height: 36px;
+  min-width: 148px;
+  padding: 0 16px;
+  font-weight: 600;
+}
+
+.workflow-checklist {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
 .workflow-notice {
   display: flex;
   align-items: center;
@@ -1052,8 +1067,10 @@ tbody tr:hover {
 
 .workflow-step .step-status {
   display: inline-flex;
+  align-items: center;
   color: var(--md-primary);
-  font-size: 10px;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .workflow-step .step-status svg[data-lucide] {
@@ -1387,3 +1404,11 @@ tbody tr:hover {
   border-radius: var(--radius-xl) !important;
   box-shadow: var(--shadow-xl) !important;
 }
+
+/* ===== 23. Single-Work Collection ===== */
+.single-work-result { display:grid; gap:12px; padding:14px 0; border-bottom:1px solid var(--border-default); }
+.single-work-summary { display:flex; align-items:baseline; justify-content:space-between; gap:12px; min-width:0; }
+.single-work-summary strong, .asset-url { overflow-wrap:anywhere; }
+.template-field-row, .template-part-list { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-height:40px; }
+.template-part-list { padding:10px; border:1px dashed var(--border-default); border-radius:var(--radius-sm); }
+.template-part { display:inline-flex; align-items:center; gap:6px; min-height:32px; padding:6px 10px; border:1px solid var(--border-default); border-radius:var(--radius-sm); background:var(--bg-muted); cursor:grab; }
