@@ -162,3 +162,69 @@ def test_list_batches_orders_newest_first(db):
         "batch1",
         "batch0",
     ]
+
+
+def test_single_work_history_create_get_update_and_list(db):
+    history_id = db.create_single_work_history(
+        work_id="1234567890123456789",
+        source_link="https://www.douyin.com/video/1234567890123456789",
+        platform="douyin",
+        work_type="图集",
+        title="标题",
+        author="作者",
+        filename_template="{author} {title}",
+        filename_override="",
+        target_dir="/tmp/works",
+        request_json='{}',
+    )
+    assert history_id > 0
+
+    row = db.get_single_work_history(history_id)
+    assert row["work_id"] == "1234567890123456789"
+    assert row["status"] == "running"
+    assert row["title"] == "标题"
+    assert row["author"] == "作者"
+    assert row["filename_template"] == "{author} {title}"
+    assert row["target_dir"] == "/tmp/works"
+
+    assert db.update_single_work_history(
+        history_id,
+        status="success",
+        files_json='["/tmp/works/a.jpg"]',
+        work_json='{"id":"1234567890123456789"}',
+    )
+    row = db.get_single_work_history(history_id)
+    assert row["status"] == "success"
+    assert row["files_json"] == '["/tmp/works/a.jpg"]'
+    assert row["error"] is None
+
+    second_id = db.create_single_work_history(
+        work_id="2",
+        source_link="https://www.tiktok.com/@user/video/2",
+        platform="tiktok",
+        work_type="视频",
+        title="second",
+        author="user",
+        filename_template="{title}",
+        filename_override="",
+        target_dir="/tmp/works",
+        request_json='{}',
+    )
+    rows = db.list_single_work_history(limit=10)
+    assert [row["id"] for row in rows] == [second_id, history_id]
+
+
+def test_update_single_work_history_rejects_unknown_field(db):
+    history_id = db.create_single_work_history(
+        work_id="1",
+        source_link="",
+        platform="douyin",
+        work_type="",
+        title="",
+        author="",
+        filename_template="",
+        filename_override="",
+        target_dir="",
+        request_json='{}',
+    )
+    assert not db.update_single_work_history(history_id, unknown_field="x")

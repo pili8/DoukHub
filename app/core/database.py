@@ -26,9 +26,11 @@ class Database:
         - 系统字段：英文，本地专用不进飞书（record_id/is_deleted/deleted_at/synced/created_at）
         """
         with self._connect() as conn:
-            # 表1：采集表缓存
+            self._migrate_collection_cache_to_share_cache(conn)
+
+            # 表1：分享表缓存
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS collection_cache (
+                CREATE TABLE IF NOT EXISTS share_cache (
                     record_id TEXT PRIMARY KEY,
                     share_code TEXT UNIQUE NOT NULL,
                     平台 TEXT,
@@ -156,6 +158,28 @@ sec_user_id TEXT,
                 )
             """)
 
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS single_work_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    work_id TEXT,
+                    source_link TEXT,
+                    platform TEXT,
+                    work_type TEXT,
+                    title TEXT,
+                    author TEXT,
+                    filename_template TEXT,
+                    filename_override TEXT,
+                    target_dir TEXT,
+                    files_json TEXT NOT NULL DEFAULT '[]',
+                    request_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'running',
+                    error TEXT,
+                    work_json TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # 表6：同步历史（记录每次同步任务执行的摘要+日志）
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS sync_history (
@@ -197,8 +221,8 @@ sec_user_id TEXT,
             # 创建索引（依赖字段名，必须在迁移之后）
             # 用 try/except 容错：旧库迁移后字段可能仍缺失（如 sec_user_id）
             for sql in [
-                "CREATE INDEX IF NOT EXISTS idx_collection_share ON collection_cache(share_code)",
-                "CREATE INDEX IF NOT EXISTS idx_collection_sec_user_id ON collection_cache(sec_user_id)",
+                "CREATE INDEX IF NOT EXISTS idx_share_share_code ON share_cache(share_code)",
+                "CREATE INDEX IF NOT EXISTS idx_share_sec_user_id ON share_cache(sec_user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_account_sec_user_id ON account_cache(sec_user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_history_sec_user_id ON collection_history(sec_user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_history_created_at ON collection_history(created_at)",
@@ -206,12 +230,47 @@ sec_user_id TEXT,
                 "CREATE INDEX IF NOT EXISTS idx_sync_history_created ON sync_history(created_at)",
                 "CREATE INDEX IF NOT EXISTS idx_collection_batch_status ON collection_batches(status, created_at)",
                 "CREATE INDEX IF NOT EXISTS idx_collection_batch_item_batch ON collection_batch_items(batch_id, sec_user_id)",
+                "CREATE INDEX IF NOT EXISTS idx_single_work_history_created ON single_work_history(created_at)",
             ]:
                 try:
                     conn.execute(sql)
                 except sqlite3.OperationalError:
                     pass
             self._migrate_schema_version(conn)
+
+    def _migrate_collection_cache_to_share_cache(self, conn: sqlite3.Connection) -> None:
+        """Rename the legacy collection_cache table without losing local data."""
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        old_table = "collection_cache"
+        new_table = "share_cache"
+
+        if old_table not in tables:
+            return
+
+        if new_table not in tables:
+            conn.execute(f"ALTER TABLE {old_table} RENAME TO {new_table}")
+        else:
+            old_columns = {
+                row[1] for row in conn.execute(f"PRAGMA table_info({old_table})")
+            }
+            new_columns = {
+                row[1] for row in conn.execute(f"PRAGMA table_info({new_table})")
+            }
+            shared_columns = old_columns & new_columns
+            if shared_columns:
+                columns = ", ".join(sorted(shared_columns))
+                conn.execute(
+                    f"INSERT OR IGNORE INTO {new_table} ({columns}) "
+                    f"SELECT {columns} FROM {old_table}"
+                )
+            conn.execute(f"DROP TABLE {old_table}")
+
+        for index_name in ("idx_collection_share", "idx_collection_sec_user_id"):
+            conn.execute(f"DROP INDEX IF EXISTS {index_name}")
+        conn.commit()
 
     def _migrate_legacy_columns(self, conn):
         """迁移旧库字段，使其对齐飞书 + 系统字段英文化（v2）。
@@ -222,7 +281,7 @@ sec_user_id TEXT,
 
         v1 历史迁移（保留兼容）：
         - account_cache: 账号标识→sec_user_id, 更新错误→备注, 更新时间→同步时间, 已更新→已获取信息
-        - collection_cache: 账号标识→sec_user_id, 更新时间→同步时间
+        - share_cache: 账号标识→sec_user_id, 更新时间→同步时间
         - collection_history: 账号标识→sec_user_id
         - cookie_cache: 更新时间→同步时间
         - scheduled_tasks: 更新时间→同步时间
@@ -237,7 +296,7 @@ sec_user_id TEXT,
         """
         # v1 历史重命名（业务字段对齐飞书）
         rename_map = {
-            "collection_cache": [
+            "share_cache": [
                 ("账号标识", "sec_user_id"),
                 ("更新时间", "同步时间"),
                 ("分享码", "share_code"),
@@ -261,7 +320,7 @@ sec_user_id TEXT,
         }
         # v2 系统字段英文化（三张同步表）
         v2_renames = {
-            "collection_cache": [("记录ID", "record_id"), ("创建时间", "created_at")],
+            "share_cache": [("记录ID", "record_id"), ("创建时间", "created_at")],
             "account_cache": [("记录ID", "record_id"), ("创建时间", "created_at")],
             "cookie_cache": [("记录ID", "record_id"), ("创建时间", "created_at")],
             "collection_history": [("创建时间", "created_at")],
@@ -269,7 +328,7 @@ sec_user_id TEXT,
         }
         # v2 新增字段
         add_columns = {
-            "collection_cache": [
+            "share_cache": [
                 ("账号名称", "TEXT"),
             ],
             "account_cache": [
@@ -281,18 +340,18 @@ sec_user_id TEXT,
             ],
         }
         # 软删除字段（墓碑）：三张同步表都加上
-        for _tbl in ("collection_cache", "account_cache", "cookie_cache"):
+        for _tbl in ("share_cache", "account_cache", "cookie_cache"):
             add_columns.setdefault(_tbl, []).extend([
                 ("is_deleted", "BOOLEAN DEFAULT 0"),
                 ("deleted_at", "DATETIME"),
             ])
         # 同步标记：记录是否已确认存在于飞书（区分"本地新建未推送"和"飞书已删除"）
-        for _tbl in ("collection_cache", "account_cache", "cookie_cache"):
+        for _tbl in ("share_cache", "account_cache", "cookie_cache"):
             add_columns.setdefault(_tbl, []).append(
                 ("synced", "BOOLEAN DEFAULT 0"),
             )
         # 方案 B：LWW 时间戳（本地最后修改时间，用于与飞书「最后更新时间」比较）
-        for _tbl in ("collection_cache", "account_cache", "cookie_cache"):
+        for _tbl in ("share_cache", "account_cache", "cookie_cache"):
             add_columns.setdefault(_tbl, []).append(
                 ("local_updated_at", "DATETIME"),
             )
@@ -300,7 +359,7 @@ sec_user_id TEXT,
         # v2.1：删除 account_cache.昵称（与 账号名称 重复，统一用 账号名称）
         drop_columns = {
             "account_cache": ["昵称"],
-        "collection_cache": ["昵称", "签名", "头像"],
+        "share_cache": ["昵称", "签名", "头像"],
         }
 
         # 执行 v1 业务字段重命名
@@ -356,30 +415,30 @@ sec_user_id TEXT,
         if current < self.SCHEMA_VERSION:
             conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
 
-    # ========== 采集表缓存操作 ==========
+    # ========== 分享表缓存操作 ==========
 
     def get_all_collections(self) -> list[dict]:
-        """获取所有采集表记录"""
+        """获取所有分享表记录"""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM collection_cache WHERE is_deleted = 0 ORDER BY created_at DESC").fetchall()
+            rows = conn.execute("SELECT * FROM share_cache WHERE is_deleted = 0 ORDER BY created_at DESC").fetchall()
             return [dict(row) for row in rows]
 
     def get_collection_by_share(self, share: str) -> Optional[dict]:
         """根据 share_code 获取记录（排除软删除）"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM collection_cache WHERE share_code = ? AND is_deleted = 0", (share,)).fetchone()
+            row = conn.execute("SELECT * FROM share_cache WHERE share_code = ? AND is_deleted = 0", (share,)).fetchone()
             return dict(row) if row else None
 
     def revive_collection_if_deleted(self, share: str) -> Optional[str]:
-        """复活软删除的采集记录，返回 record_id"""
+        """复活软删除的分享记录，返回 record_id"""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT record_id FROM collection_cache WHERE share_code = ? AND is_deleted = 1",
+                "SELECT record_id FROM share_cache WHERE share_code = ? AND is_deleted = 1",
                 (share,),
             ).fetchone()
             if row:
                 conn.execute(
-                    "UPDATE collection_cache SET is_deleted = 0, deleted_at = NULL WHERE record_id = ?",
+                    "UPDATE share_cache SET is_deleted = 0, deleted_at = NULL WHERE record_id = ?",
                     (row["record_id"],),
                 )
                 conn.commit()
@@ -387,28 +446,28 @@ sec_user_id TEXT,
         return None
 
     def get_collection_by_id(self, record_id: str) -> Optional[dict]:
-        """根据记录ID获取采集表记录"""
+        """根据记录ID获取分享表记录"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM collection_cache WHERE record_id = ?", (record_id,)).fetchone()
+            row = conn.execute("SELECT * FROM share_cache WHERE record_id = ?", (record_id,)).fetchone()
             return dict(row) if row else None
 
     def get_collection_by_sec_user_id(self, sec_user_id: str) -> Optional[dict]:
         """根据 sec_user_id 获取记录（排除软删除）"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM collection_cache WHERE sec_user_id = ? AND is_deleted = 0", (sec_user_id,)).fetchone()
+            row = conn.execute("SELECT * FROM share_cache WHERE sec_user_id = ? AND is_deleted = 0", (sec_user_id,)).fetchone()
             return dict(row) if row else None
 
     def insert_collection(self, data: dict) -> bool:
-        """插入采集表记录。UNIQUE 冲突会抛出 sqlite3.IntegrityError，调用方按需捕获。"""
+        """插入分享表记录。UNIQUE 冲突会抛出 sqlite3.IntegrityError，调用方按需捕获。"""
         with self._connect() as conn:
             fields = ", ".join(data.keys())
             placeholders = ", ".join(["?" for _ in data])
-            conn.execute(f"INSERT INTO collection_cache ({fields}) VALUES ({placeholders})", list(data.values()))
+            conn.execute(f"INSERT INTO share_cache ({fields}) VALUES ({placeholders})", list(data.values()))
             conn.commit()
             return True
 
     def update_collection(self, record_id: str, data: dict) -> bool:
-        """更新采集表记录
+        """更新分享表记录
 
         方案 B：自动维护 local_updated_at（用于 LWW 比较）。
         如果 data 中已显式传入 local_updated_at（如同步流程），则用传入值。
@@ -417,24 +476,24 @@ sec_user_id TEXT,
             if "local_updated_at" not in data:
                 data["local_updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
-            conn.execute(f"UPDATE collection_cache SET {set_clause} WHERE record_id = ?", list(data.values()) + [record_id])
+            conn.execute(f"UPDATE share_cache SET {set_clause} WHERE record_id = ?", list(data.values()) + [record_id])
             conn.commit()
             return True
 
     def delete_collection(self, record_id: str) -> bool:
-        """软删除采集表记录（打墓碑）"""
+        """软删除分享表记录（打墓碑）"""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE collection_cache SET is_deleted = 1, deleted_at = ? WHERE record_id = ?",
+                "UPDATE share_cache SET is_deleted = 1, deleted_at = ? WHERE record_id = ?",
                 (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id),
             )
             conn.commit()
             return True
 
-    def clear_collection_cache(self) -> bool:
-        """清空采集表缓存"""
+    def clear_share_cache(self) -> bool:
+        """清空分享表缓存"""
         with self._connect() as conn:
-            conn.execute("DELETE FROM collection_cache")
+            conn.execute("DELETE FROM share_cache")
             conn.commit()
             return True
 
@@ -522,6 +581,11 @@ sec_user_id TEXT,
     }
     _BATCH_ITEM_FIELDS = {
         "status", "message", "started_at", "finished_at",
+    }
+    _SINGLE_WORK_HISTORY_FIELDS = {
+        "work_id", "source_link", "platform", "work_type", "title", "author",
+        "filename_template", "filename_override", "target_dir", "files_json",
+        "request_json", "status", "error", "work_json",
     }
 
     def create_collection_batch(
@@ -689,7 +753,76 @@ sec_user_id TEXT,
             conn.commit()
             return counts
 
-    # ========== Cookie表缓存操作 ==========
+    # ========== 单作品下载历史操作 ==========
+
+    def create_single_work_history(
+        self,
+        work_id: str,
+        source_link: str,
+        platform: str,
+        work_type: str,
+        title: str,
+        author: str,
+        filename_template: str,
+        filename_override: str,
+        target_dir: str,
+        request_json: str,
+    ) -> int:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO single_work_history
+                (work_id, source_link, platform, work_type, title, author,
+                 filename_template, filename_override, target_dir,
+                 request_json, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)
+                """,
+                (work_id, source_link, platform, work_type, title, author,
+                 filename_template, filename_override, target_dir,
+                 request_json, now, now),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_single_work_history(self, history_id: int) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM single_work_history WHERE id = ?",
+                (history_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def list_single_work_history(self, limit: int = 50) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM single_work_history
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def update_single_work_history(self, history_id: int, **fields) -> bool:
+        valid = {
+            key: value
+            for key, value in fields.items()
+            if key in self._SINGLE_WORK_HISTORY_FIELDS
+        }
+        if not valid:
+            return False
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        valid["updated_at"] = now
+        assignments = ", ".join(f"{key} = ?" for key in valid)
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"UPDATE single_work_history SET {assignments} WHERE id = ?",
+                list(valid.values()) + [history_id],
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def get_all_cookies(self) -> list[dict]:
         """获取所有 Cookie 记录"""
@@ -807,7 +940,7 @@ sec_user_id TEXT,
 
     # ========== 软删除辅助（删除同步专用） ==========
 
-    _SYNC_TABLES = {"collection_cache", "account_cache", "cookie_cache"}
+    _SYNC_TABLES = {"share_cache", "account_cache", "cookie_cache"}
 
     def get_deleted_ids(self, table: str) -> list[str]:
         """获取墓碑记录（is_deleted=1）的 record_id 列表"""
@@ -856,14 +989,14 @@ sec_user_id TEXT,
     def get_table_counts(self) -> dict:
         """获取各表记录数"""
         tables = [
-            "collection_cache",
+            "share_cache",
             "account_cache",
             "cookie_cache",
             "collection_history",
             "scheduled_tasks",
             "sync_history",
         ]
-        soft_delete_tables = {"collection_cache", "account_cache", "cookie_cache"}
+        soft_delete_tables = {"share_cache", "account_cache", "cookie_cache"}
         counts = {}
         with self._connect() as conn:
             for table in tables:
@@ -892,7 +1025,7 @@ sec_user_id TEXT,
 
     # 允许操作的表白名单
     VALID_TABLES = {
-        "collection_cache", "account_cache", "cookie_cache",
+        "share_cache", "account_cache", "cookie_cache",
         "collection_history", "scheduled_tasks", "sync_history",
     }
 
@@ -1250,7 +1383,7 @@ sec_user_id TEXT,
             [{business_key, count, records: [{record_id, ...}]}, ...]
         """
         business_keys = {
-            "collection_cache": "share_code",
+            "share_cache": "share_code",
             "account_cache": "sec_user_id",
             "cookie_cache": "Cookie",
         }
@@ -1282,12 +1415,12 @@ sec_user_id TEXT,
         """获取各表的详细统计（含同步状态、启用状态等细分）"""
         stats = {}
         with self._connect() as conn:
-            # 采集表
-            stats["collection_cache"] = {
-"total": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0").fetchone()[0],
-"resolved": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND 已解析=1").fetchone()[0],
-"not_synced": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND (已解析=0 OR 已解析 IS NULL)").fetchone()[0],
-"has_error": conn.execute("SELECT COUNT(*) FROM collection_cache WHERE is_deleted=0 AND 同步错误 IS NOT NULL AND 同步错误 != ''").fetchone()[0],
+            # 分享表
+            stats["share_cache"] = {
+"total": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0").fetchone()[0],
+"resolved": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND 已解析=1").fetchone()[0],
+"not_synced": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND (已解析=0 OR 已解析 IS NULL)").fetchone()[0],
+"has_error": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND 同步错误 IS NOT NULL AND 同步错误 != ''").fetchone()[0],
             }
             # 账号表
             stats["account_cache"] = {
