@@ -135,12 +135,17 @@ def test_retry_returns_400_when_no_source_accounts_remain_eligible(
 
 @pytest.fixture
 def single_client(monkeypatch):
-    saved = app_main.single_work_client
+    saved_client = app_main.single_work_client
+    saved_db = app_main.database
     app_main.single_work_client = MagicMock()
+    mock_db = MagicMock()
+    mock_db.create_single_work_history.return_value = 1
+    app_main.database = mock_db
     try:
         yield TestClient(app_main.app)
     finally:
-        app_main.single_work_client = saved
+        app_main.single_work_client = saved_client
+        app_main.database = saved_db
 
 
 @pytest.fixture
@@ -235,7 +240,7 @@ def test_download_single_works(single_client, tmp_path, monkeypatch):
     async def fake_fetch(client, ttd_url, link, platform):
         return {"id": "1", "title": "标题", "downloads": ["https://example.com/a"]}
 
-    async def fake_download(client, work, target_dir, template):
+    async def fake_download(client, work, target_dir, template="", **kwargs):
         path = target_dir / "saved.mp4"
         path.write_bytes(b"data")
         return [path]
@@ -280,7 +285,7 @@ def test_download_rejects_unsafe_filename_templates(
 ):
     from app.core import single_work
 
-    async def fake_download(client, work, target_dir, template):
+    async def fake_download(client, work, target_dir, template="", **kwargs):
         path = target_dir / "saved.mp4"
         path.write_bytes(b"data")
         return [path]
@@ -486,3 +491,173 @@ def test_collect_page_discards_stale_preview_response():
     )
     assert queue is not None and "previewGeneration += 1;" in queue.group(1)
     assert cleanup is not None and "previewGeneration += 1;" in cleanup.group(1)
+
+
+@pytest.fixture
+def history_client(tmp_path, monkeypatch):
+    """提供临时 Config + mock 数据库的客户端，用于下载历史和重试测试"""
+    from app.core.config import Config
+    saved_config = app_main.config
+    saved_db = app_main.database
+    saved_client = app_main.single_work_client
+    app_main.config = Config(tmp_path / "config.json")
+    mock_db = MagicMock()
+    mock_db.create_single_work_history.return_value = 1
+    mock_db.get_single_work_history.return_value = {
+        "id": 1,
+        "work_id": "1234567890123456789",
+        "source_link": "https://www.douyin.com/video/1234567890123456789",
+        "platform": "douyin",
+        "work_type": "图集",
+        "title": "标题",
+        "author": "作者",
+        "filename_template": "{author} {title}",
+        "filename_override": "",
+        "target_dir": str(tmp_path),
+        "files_json": "[]",
+        "request_json": '{"asset_indexes":[2]}',
+        "status": "failed",
+        "error": "timeout",
+        "work_json": None,
+        "created_at": "2026-08-16 10:00:00",
+        "updated_at": "2026-08-16 10:01:00",
+    }
+    mock_db.list_single_work_history.return_value = [mock_db.get_single_work_history.return_value]
+    app_main.database = mock_db
+    app_main.single_work_client = MagicMock()
+    try:
+        yield TestClient(app_main.app), mock_db, tmp_path
+    finally:
+        app_main.config = saved_config
+        app_main.database = saved_db
+        app_main.single_work_client = saved_client
+
+
+def test_download_records_history_with_asset_selection(history_client, monkeypatch):
+    from app.core import single_work
+
+    async def fake_fetch(client, ttd_url, link, platform):
+        return {
+            "id": "1234567890123456789",
+            "title": "标题",
+            "author": "作者",
+            "type": "图集",
+            "platform": "douyin",
+            "downloads": ["https://example.com/a", "https://example.com/b"],
+            "assets": [
+                {"kind": "image", "index": 1, "url": "https://example.com/a"},
+                {"kind": "image", "index": 2, "url": "https://example.com/b"},
+            ],
+        }
+
+    async def fake_download(client, work, target_dir, template="", **kwargs):
+        path = target_dir / "saved.jpg"
+        path.write_bytes(b"data")
+        return [path]
+
+    monkeypatch.setattr(single_work, "fetch_work", fake_fetch)
+    monkeypatch.setattr(single_work, "download_work", fake_download)
+    link = "https://www.douyin.com/video/1234567890123456789"
+    monkeypatch.setattr(
+        app_main, "_extract_single_work_links", lambda text: [(link, "douyin")]
+    )
+    client, mock_db, tmp_path = history_client
+    response = client.post(
+        "/api/collection/works/download",
+        json={
+            "links": link,
+            "target_dir": str(tmp_path),
+            "filename_template": "{author} {title}",
+            "filename_overrides": {"1234567890123456789": "自定义"},
+            "asset_indexes": [2],
+        },
+    )
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result["status"] == "success"
+    assert "history_id" in result
+    mock_db.create_single_work_history.assert_called_once()
+    mock_db.update_single_work_history.assert_called()
+
+
+def test_download_records_failed_history(history_client, monkeypatch):
+    from app.core import single_work
+
+    async def fake_fetch(client, ttd_url, link, platform):
+        raise RuntimeError("network error")
+
+    monkeypatch.setattr(single_work, "fetch_work", fake_fetch)
+    link = "https://www.douyin.com/video/1234567890123456789"
+    monkeypatch.setattr(
+        app_main, "_extract_single_work_links", lambda text: [(link, "douyin")]
+    )
+    client, mock_db, tmp_path = history_client
+    response = client.post(
+        "/api/collection/works/download",
+        json={
+            "links": link,
+            "target_dir": str(tmp_path),
+            "filename_template": "{author} {title}",
+        },
+    )
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result["status"] == "failed"
+    assert "history_id" in result
+    mock_db.update_single_work_history.assert_called_with(
+        1, status="failed", error="network error"
+    )
+
+
+def test_get_single_work_history_list(history_client):
+    client, mock_db, _ = history_client
+    response = client.get("/api/collection/works/history")
+    assert response.status_code == 200
+    data = response.json()
+    assert "history" in data
+    assert len(data["history"]) == 1
+
+
+def test_retry_single_work_history(history_client, monkeypatch):
+    from app.core import single_work
+
+    async def fake_fetch(client, ttd_url, link, platform):
+        return {
+            "id": "1234567890123456789",
+            "title": "标题",
+            "author": "作者",
+            "type": "图集",
+            "platform": "douyin",
+            "downloads": ["https://example.com/a"],
+            "assets": [
+                {"kind": "image", "index": 1, "url": "https://example.com/a"},
+            ],
+        }
+
+    async def fake_download(client, work, target_dir, template="", **kwargs):
+        path = target_dir / "saved.jpg"
+        path.write_bytes(b"data")
+        return [path]
+
+    monkeypatch.setattr(single_work, "fetch_work", fake_fetch)
+    monkeypatch.setattr(single_work, "download_work", fake_download)
+    client, mock_db, tmp_path = history_client
+    mock_db.create_single_work_history.return_value = 2
+    response = client.post(
+        "/api/collection/works/history/1/retry",
+        json={"target_dir": str(tmp_path)},
+    )
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result["status"] == "success"
+    assert result["history_id"] == 2
+
+
+def test_retry_returns_404_for_missing_history(history_client):
+    client, mock_db, _ = history_client
+    mock_db.get_single_work_history.return_value = None
+    response = client.post(
+        "/api/collection/works/history/999/retry",
+        json={"target_dir": str(history_client[2])},
+    )
+    assert response.status_code == 404

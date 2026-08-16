@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .core.config import Config
 from .core.feishu import FeishuClient
@@ -1446,6 +1446,18 @@ class SingleWorkResolveRequest(BaseModel):
 class SingleWorkDownloadRequest(SingleWorkResolveRequest):
     target_dir: str
     filename_template: str = "{create_time} {author} {title}"
+    filename_overrides: dict[str, str] = Field(default_factory=dict)
+    asset_indexes: list[int] = Field(default_factory=list)
+    include_music: bool = False
+    include_static_cover: bool = False
+    include_dynamic_cover: bool = False
+
+
+class SingleWorkRetryRequest(BaseModel):
+    target_dir: str = ""
+    filename_template: str = ""
+    filename_override: str | None = None
+    asset_indexes: list[int] | None = None
 
 
 @app.post("/api/import/collection")
@@ -2455,6 +2467,83 @@ async def api_save_single_work_preferences(request: Request):
     return {"success": True, "message": "单作品偏好已保存", "preferences": prefs}
 
 
+async def _download_single_work_and_record(
+    db: Database,
+    client: httpx.AsyncClient,
+    ttd_url: str,
+    link: str,
+    platform: str,
+    target_dir: Path,
+    template: str,
+    filename_override: str = "",
+    asset_indexes=None,
+    include_music: bool = False,
+    include_static_cover: bool = False,
+    include_dynamic_cover: bool = False,
+    old_history: dict | None = None,
+    work: dict | None = None,
+) -> dict:
+    source_link = (
+        old_history.get("source_link", link) if old_history else link
+    )
+    history_id = db.create_single_work_history(
+        work_id=str(work.get("id", "") if work else ""),
+        source_link=source_link,
+        platform=platform,
+        work_type=str(work.get("type", "") if work else ""),
+        title=str(work.get("title", "") if work else ""),
+        author=str(work.get("author", "") if work else ""),
+        filename_template=template,
+        filename_override=filename_override,
+        target_dir=str(target_dir),
+        request_json=json.dumps({
+            "filename_template": template,
+            "filename_override": filename_override,
+            "asset_indexes": asset_indexes or [],
+            "include_music": include_music,
+            "include_static_cover": include_static_cover,
+            "include_dynamic_cover": include_dynamic_cover,
+        }),
+    )
+    try:
+        if work is None:
+            work = await single_work.fetch_work(client, ttd_url, link, platform)
+        paths = await single_work.download_work(
+            client,
+            work,
+            target_dir,
+            template,
+            filename_override=filename_override,
+            asset_indexes=asset_indexes,
+            include_music=include_music,
+            include_static_cover=include_static_cover,
+            include_dynamic_cover=include_dynamic_cover,
+        )
+        db.update_single_work_history(
+            history_id,
+            status="success",
+            files_json=json.dumps([str(p) for p in paths]),
+            work_json=json.dumps(work, ensure_ascii=False),
+        )
+        return {
+            "link": source_link,
+            "status": "success",
+            "title": work.get("title", ""),
+            "files": [str(path) for path in paths],
+            "history_id": history_id,
+        }
+    except Exception as error:
+        db.update_single_work_history(
+            history_id, status="failed", error=str(error)
+        )
+        return {
+            "link": source_link,
+            "status": "failed",
+            "message": str(error),
+            "history_id": history_id,
+        }
+
+
 @app.post("/api/collection/works/resolve")
 async def api_resolve_single_works(request: SingleWorkResolveRequest):
     links = _extract_single_work_links(request.links)
@@ -2504,34 +2593,106 @@ async def api_download_single_works(request: SingleWorkDownloadRequest):
             status_code=400,
         )
 
+    db = get_database()
     client = get_single_work_client()
     ttd_url = f"http://127.0.0.1:{config.ttd_port}"
     results = []
     for link, platform in links:
+        work = None
         try:
             work = await single_work.fetch_work(client, ttd_url, link, platform)
-            paths = await single_work.download_work(
-                client,
-                work,
-                target,
-                request.filename_template,
-            )
-            results.append(
-                {
-                    "link": link,
-                    "status": "success",
-                    "title": work["title"],
-                    "files": [str(path) for path in paths],
-                }
-            )
         except Exception as error:
-            results.append(
-                {"link": link, "status": "failed", "message": str(error)}
+            result = await _download_single_work_and_record(
+                db, client, ttd_url, link, platform, target,
+                request.filename_template,
+                work=work,
             )
+            result["message"] = str(error)
+            results.append(result)
+            continue
+        override = request.filename_overrides.get(work.get("id", ""), "")
+        results.append(
+            await _download_single_work_and_record(
+                db, client, ttd_url, link, platform, target,
+                request.filename_template,
+                filename_override=override,
+                asset_indexes=request.asset_indexes,
+                include_music=request.include_music,
+                include_static_cover=request.include_static_cover,
+                include_dynamic_cover=request.include_dynamic_cover,
+                work=work,
+            )
+        )
     return {
         "success": any(item["status"] == "success" for item in results),
         "results": results,
     }
+
+
+@app.get("/api/collection/works/history")
+async def api_list_single_work_history(limit: int = 50):
+    db = get_database()
+    return {"history": db.list_single_work_history(limit=limit)}
+
+
+@app.post("/api/collection/works/history/{history_id}/retry")
+async def api_retry_single_work_history(history_id: int, request: SingleWorkRetryRequest):
+    db = get_database()
+    old = db.get_single_work_history(history_id)
+    if not old:
+        return JSONResponse(
+            {"success": False, "message": "历史记录不存在"},
+            status_code=404,
+        )
+    link = old.get("source_link") or ""
+    platform = single_work.detect_single_platform(link) or old.get("platform", "")
+    target_dir = Path(request.target_dir or old.get("target_dir") or str(config.download_path)).expanduser()
+    if not target_dir.exists() or not target_dir.is_dir():
+        return JSONResponse(
+            {"success": False, "message": "保存目录不存在"},
+            status_code=400,
+        )
+    template = request.filename_template or old.get("filename_template") or "{create_time} {author} {title}"
+    try:
+        unsafe_template = _is_unsafe_filename_template(template)
+    except (AttributeError, KeyError, IndexError, ValueError):
+        return JSONResponse(
+            {"success": False, "message": "命名模板格式无效"},
+            status_code=400,
+        )
+    if unsafe_template:
+        return JSONResponse(
+            {"success": False, "message": "命名模板不能包含路径分隔符或绝对路径"},
+            status_code=400,
+        )
+
+    old_request = {}
+    try:
+        old_request = json.loads(old.get("request_json") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        old_request = {}
+    filename_override = request.filename_override
+    if filename_override is None:
+        filename_override = old.get("filename_override") or old_request.get("filename_override", "")
+    asset_indexes = request.asset_indexes
+    if asset_indexes is None:
+        asset_indexes = old_request.get("asset_indexes", [])
+    include_music = old_request.get("include_music", False)
+    include_static_cover = old_request.get("include_static_cover", False)
+    include_dynamic_cover = old_request.get("include_dynamic_cover", False)
+
+    client = get_single_work_client()
+    ttd_url = f"http://127.0.0.1:{config.ttd_port}"
+    result = await _download_single_work_and_record(
+        db, client, ttd_url, link, platform, target_dir, template,
+        filename_override=filename_override,
+        asset_indexes=asset_indexes,
+        include_music=include_music,
+        include_static_cover=include_static_cover,
+        include_dynamic_cover=include_dynamic_cover,
+        old_history=old,
+    )
+    return {"success": result["status"] == "success", "results": [result]}
 
 
 # ========== 采集批次 ==========
