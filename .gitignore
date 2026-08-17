@@ -31,3 +31,10 @@ XHS-Downloader/
 
 # 采集下载的本地数据
 downloads/
+Download/
+
+# 浏览器自动化测试产物（playwright 等）
+.workbuddy/
+node_modules/
+package.json
+package-lock.json

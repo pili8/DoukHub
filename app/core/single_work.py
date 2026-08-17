@@ -343,6 +343,18 @@ def _unique_path(path: Path) -> Path:
         counter += 1
 
 
+_DOWNLOAD_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/139.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://www.douyin.com/",
+    "Accept": "*/*",
+    "Accept-Encoding": "identity",
+}
+
+
 async def download_work(
     client: httpx.AsyncClient,
     work: dict,
@@ -381,23 +393,30 @@ async def download_work(
     saved: list[Path] = []
     multiple = len(selected) > 1
 
-    for offset, asset in enumerate(selected, start=1):
-        url = asset["url"]
-        async with client.stream("GET", url) as response:
-            response.raise_for_status()
-            extension = _extension(response, asset["kind"])
-            stem = build_filename(
-                work, template, offset if multiple else 0, filename_override
-            )
-            final_path = _unique_path(target_dir / f"{stem}{extension}")
-            temporary = final_path.with_suffix(f"{final_path.suffix}.part")
-            try:
-                with temporary.open("wb") as file:
-                    async for chunk in response.aiter_bytes():
-                        file.write(chunk)
-                temporary.replace(final_path)
-            finally:
-                if temporary.exists():
-                    temporary.unlink()
-            saved.append(final_path)
+    # Use a standalone client with proper headers for CDN downloads
+    # (the shared single_work_client lacks Referer/UA needed by Douyin CDN)
+    async with httpx.AsyncClient(
+        timeout=300,
+        follow_redirects=True,
+        headers=_DOWNLOAD_HEADERS,
+    ) as dl_client:
+        for offset, asset in enumerate(selected, start=1):
+            url = asset["url"]
+            async with dl_client.stream("GET", url) as response:
+                response.raise_for_status()
+                extension = _extension(response, asset["kind"])
+                stem = build_filename(
+                    work, template, offset if multiple else 0, filename_override
+                )
+                final_path = _unique_path(target_dir / f"{stem}{extension}")
+                temporary = final_path.with_suffix(f"{final_path.suffix}.part")
+                try:
+                    with temporary.open("wb") as file:
+                        async for chunk in response.aiter_bytes():
+                            file.write(chunk)
+                    temporary.replace(final_path)
+                finally:
+                    if temporary.exists():
+                        temporary.unlink()
+                saved.append(final_path)
     return saved

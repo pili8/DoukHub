@@ -2,11 +2,14 @@
 import asyncio
 import json
 import logging
+import secrets
+import socket
 import httpx
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -782,7 +785,11 @@ async def api_validate_cookies():
             logger.error(f"Cookie 验证失败: {e}")
             yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'验证失败: {str(e)}', 'total': 0, 'valid': 0, 'invalid': 0})}\n\n"
 
-    return StreamingResponse(validate_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        validate_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # --- 飞书同步 ---
@@ -951,7 +958,11 @@ async def api_sync():
             logger.error(f"账号处理失败: {e}")
             yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'账号处理失败: {str(e)}', 'total': 0, 'new_count': 0, 'updated_count': 0, 'api_calls': 0, 'error_count': 1, 'errors': [str(e)]})}\n\n"
     
-    return StreamingResponse(sync_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        sync_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/sync/fetch-info")
@@ -2263,7 +2274,11 @@ async def api_collect_v2_account(request: Request):
             logger.error(f"采集失败: {e}")
             yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'采集失败: {str(e)}', 'total': 0, 'success_count': 0, 'failed': 1})}\n\n"
 
-    return StreamingResponse(collect_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        collect_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # --- 原有采集 ---
@@ -2654,7 +2669,11 @@ async def api_resolve_single_works_stream(request: SingleWorkResolveRequest):
         except Exception as e:
             yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'异常: {str(e)}'})}\n\n"
 
-    return StreamingResponse(resolve_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        resolve_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/collection/works/download")
@@ -2813,7 +2832,11 @@ async def api_download_single_works_stream(request: SingleWorkDownloadRequest):
         except Exception as e:
             yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'异常: {str(e)}'})}\n\n"
 
-    return StreamingResponse(download_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        download_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/collection/works/proxy-download")
@@ -2877,7 +2900,15 @@ async def api_proxy_download(url: str, filename: str = "download"):
                 async for chunk in resp.aiter_bytes(65536):
                     yield chunk
 
-    headers_out = {"Content-Disposition": f'attachment; filename="{download_filename}"'}
+    ascii_filename = download_filename.encode("ascii", "ignore").decode("ascii").strip()
+    if not ascii_filename or ascii_filename.startswith("."):
+        ascii_filename = f"download{ext}"
+    headers_out = {
+        "Content-Disposition": (
+            f'attachment; filename="{ascii_filename}"; '
+            f"filename*=UTF-8''{quote(download_filename, safe='')}"
+        )
+    }
     if total_size:
         headers_out["Content-Length"] = str(total_size)
 
@@ -3391,6 +3422,204 @@ async def exit_system():
     asyncio.create_task(_delayed_exit())
 
     return {"success": True, "message": "正在退出..."}
+
+
+# ========== API v1 — 外部设备调用 ==========
+
+def _generate_api_key() -> str:
+    """生成专属 API Key"""
+    return "dk_" + secrets.token_hex(24)
+
+
+def _verify_api_request(request: Request) -> tuple[bool, str]:
+    """验证 API 请求鉴权，返回 (是否通过, 错误消息)"""
+    if not config.api_enabled:
+        return False, "API 请求模式未启用，请在设置中开启"
+    expected_key = config.api_key
+    if expected_key:
+        provided_key = request.headers.get("X-API-Key", "")
+        if provided_key != expected_key:
+            return False, "API Key 无效"
+    return True, ""
+
+
+def _get_local_ip() -> str:
+    """获取本机局域网 IP"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+
+
+@app.post("/api/v1/api-key")
+async def api_v1_regenerate_key(request: Request):
+    """生成或重新生成 API Key（仅本机调用，无需鉴权）"""
+    new_key = _generate_api_key()
+    config.set("api.api_key", new_key)
+    config.save()
+    logger.info("API Key 已重新生成")
+    return {"success": True, "api_key": new_key, "message": "API Key 已生成"}
+
+
+@app.get("/api/v1/status")
+async def api_v1_status(request: Request):
+    """外部设备检查 DoukHub 服务状态"""
+    ok, msg = _verify_api_request(request)
+    if not ok:
+        return JSONResponse({"success": False, "message": msg}, status_code=401)
+    return {
+        "success": True,
+        "message": "DoukHub 服务正常",
+        "version": "1.0",
+        "download_path": str(config.download_path),
+    }
+
+
+class ApiV1ResolveRequest(BaseModel):
+    links: str
+    resolve_mode: str = "auto"
+
+
+@app.post("/api/v1/works/resolve")
+async def api_v1_resolve_works(request: Request, body: ApiV1ResolveRequest):
+    """API 3a：解析链接，返回结构化作品数据（含下载地址）
+
+    其他设备调用后获取 JSON 结果，自行下载。
+    """
+    ok, msg = _verify_api_request(request)
+    if not ok:
+        return JSONResponse({"success": False, "message": msg}, status_code=401)
+
+    links = _extract_single_work_links(body.links)
+    if not links:
+        return JSONResponse(
+            {"success": False, "message": "未识别到抖音或 TikTok 作品链接"},
+            status_code=400,
+        )
+
+    resolve_mode = body.resolve_mode or config.api_config.get("default_resolve_mode", "auto")
+    client = get_single_work_client()
+    ttd_url = f"http://127.0.0.1:{config.ttd_port}"
+    db = get_database()
+    cookies = db.get_enabled_cookies()
+    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+
+    results = []
+    for i, (link, platform) in enumerate(links):
+        cookie = cookie_list[i % len(cookie_list)] if cookie_list else ""
+        try:
+            work = await single_work.fetch_work(
+                client, ttd_url, link, platform, cookie, mode=resolve_mode
+            )
+            results.append({
+                "link": link,
+                "status": "success",
+                "work": work,
+            })
+        except Exception as error:
+            results.append({
+                "link": link,
+                "status": "failed",
+                "message": str(error),
+            })
+
+    return {
+        "success": any(r["status"] == "success" for r in results),
+        "total": len(results),
+        "success_count": sum(1 for r in results if r["status"] == "success"),
+        "failed_count": sum(1 for r in results if r["status"] == "failed"),
+        "results": results,
+    }
+
+
+class ApiV1DownloadRequest(BaseModel):
+    links: str
+    target_dir: str = ""
+    filename_template: str = "{create_time} {author} {title}"
+    include_music: bool = False
+    include_static_cover: bool = False
+    include_dynamic_cover: bool = False
+    resolve_mode: str = "auto"
+
+
+@app.post("/api/v1/works/download")
+async def api_v1_download_works(request: Request, body: ApiV1DownloadRequest):
+    """API 3b：解析 + 本地下载，返回下载结果 JSON
+
+    其他设备传参触发 DoukHub 本地下载。
+    """
+    ok, msg = _verify_api_request(request)
+    if not ok:
+        return JSONResponse({"success": False, "message": msg}, status_code=401)
+
+    links = _extract_single_work_links(body.links)
+    if not links:
+        return JSONResponse(
+            {"success": False, "message": "未识别到抖音或 TikTok 作品链接"},
+            status_code=400,
+        )
+
+    target_str = body.target_dir or str(config.download_path)
+    target = Path(target_str).expanduser()
+    target.mkdir(parents=True, exist_ok=True)
+
+    resolve_mode = body.resolve_mode or config.api_config.get("default_resolve_mode", "auto")
+    db = get_database()
+    client = get_single_work_client()
+    ttd_url = f"http://127.0.0.1:{config.ttd_port}"
+    cookies = db.get_enabled_cookies()
+    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+
+    results = []
+    for i, (link, platform) in enumerate(links):
+        cookie = cookie_list[i % len(cookie_list)] if cookie_list else ""
+        try:
+            work = await single_work.fetch_work(
+                client, ttd_url, link, platform, cookie, mode=resolve_mode
+            )
+            result = await _download_single_work_and_record(
+                db, client, ttd_url, link, platform, target,
+                body.filename_template,
+                include_music=body.include_music,
+                include_static_cover=body.include_static_cover,
+                include_dynamic_cover=body.include_dynamic_cover,
+                work=work,
+            )
+            results.append(result)
+        except Exception as error:
+            results.append({
+                "link": link,
+                "status": "failed",
+                "message": str(error),
+            })
+
+    return {
+        "success": any(r["status"] == "success" for r in results),
+        "total": len(results),
+        "success_count": sum(1 for r in results if r["status"] == "success"),
+        "failed_count": sum(1 for r in results if r["status"] == "failed"),
+        "results": results,
+    }
+
+
+@app.get("/api/v1/api-info")
+async def api_v1_api_info(request: Request):
+    """获取 API 信息（本机调用，用于采集页面展示）"""
+    local_ip = _get_local_ip()
+    return {
+        "enabled": config.api_enabled,
+        "api_key": config.api_key if config.api_enabled else "",
+        "local_ip": local_ip,
+        "port": 2999,
+        "base_url": f"http://{local_ip}:2999",
+        "endpoints": {
+            "resolve": f"http://{local_ip}:2999/api/v1/works/resolve",
+            "download": f"http://{local_ip}:2999/api/v1/works/download",
+            "status": f"http://{local_ip}:2999/api/v1/status",
+        },
+    }
 
 
 # ========== 启动 ==========

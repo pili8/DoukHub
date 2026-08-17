@@ -66,6 +66,11 @@ DEFAULT_CONFIG = {
         "南充": "南充",
     },
     "concurrent_accounts": 3,
+    "api": {
+        "enabled": False,       # 是否启用 API 请求模式
+        "api_key": "",          # 专属 API Key（为空时自动生成）
+        "default_resolve_mode": "auto",  # 默认解析模式: auto/api/ttd
+    },
     "single_work": {
         "download_path": "",
         "recent_dirs": [],
@@ -173,6 +178,18 @@ class Config:
     @property
     def concurrent_accounts(self) -> int:
         return self._data.get("concurrent_accounts", 3)
+
+    @property
+    def api_config(self) -> dict:
+        return self._data.get("api", {})
+
+    @property
+    def api_enabled(self) -> bool:
+        return self.api_config.get("enabled", False)
+
+    @property
+    def api_key(self) -> str:
+        return self.api_config.get("api_key", "")
 
     @property
     def data_dir(self) -> Path:

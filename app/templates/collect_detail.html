@@ -4,7 +4,7 @@
 <div class="page-head">
     <div>
         <h1 class="page-title">单作品采集</h1>
-        <div class="page-sub">解析抖音 / TikTok 作品链接并下载 · 支持批量处理</div>
+        <div class="page-sub">粘贴抖音 / TikTok / 小红书作品链接，解析或一键下载</div>
     </div>
     <div class="page-actions">
         <span class="workflow-status pending" data-ttd-status="true">TTD 服务检查中</span>
@@ -15,102 +15,111 @@
 {{ single_work_preferences | tojson }}
 </script>
 
-{# ====== Main Panel: Link Input + Quick Download + Resolve ====== #}
-<div class="workflow-panel" id="detail-form-card">
-    <form id="detail-form" onsubmit="resolveSingleWorks(event)">
-        <div class="form-group">
-            <label>粘贴作品链接（一行一个，支持抖音 / TikTok）</label>
-            <textarea name="links" id="links-input" rows="4" oninput="invalidateResolvedSingleWorks()" onchange="invalidateResolvedSingleWorks()" placeholder="https://www.douyin.com/video/...&#10;https://www.tiktok.com/@user/video/...&#10;也支持不带 http 的短链接，如 v.douyin.com/xxx"></textarea>
+{# ====== 输入卡：链接 + 模式 + 设置 ====== #}
+<section class="workflow-panel collect-panel">
+    <div class="workflow-header">
+        <div class="workflow-title">
+            <i data-lucide="link"></i><span>作品链接</span>
         </div>
+        <span class="workflow-count" id="link-summary"><i data-lucide="link-2"></i> <span id="link-count-text">0 个链接</span></span>
+    </div>
 
-        {# ====== Action Bar: Resolve (left) + mode select + Quick Download (right) ====== #}
-        <div class="collect-action-bar">
-            <div class="collect-resolve-group">
-                <button type="submit" class="btn btn-secondary" id="detail-resolve">
-                    <i data-lucide="search"></i> 解析
-                </button>
-                <select id="resolve-mode-select" class="collect-mode-select" title="解析模式">
-                    <option value="auto">自动 (API+TTD)</option>
-                    <option value="api">仅 API</option>
-                    <option value="ttd">仅 TTD</option>
-                </select>
+    {# ====== 链接输入：右下角悬浮 快捷粘贴 / 清空 ====== #}
+    <div class="link-area">
+        <textarea id="links-input" rows="5" spellcheck="false"
+            placeholder="粘贴作品链接，每行一个，例如：&#10;https://www.douyin.com/video/7300...&#10;https://www.tiktok.com/@name/video/7300..."
+            oninput="renderLinkLines(); updateLinkCount(); invalidateResolvedSingleWorks()" aria-label="作品链接输入框"></textarea>
+        <div class="link-float-ops">
+            <button type="button" class="icon-btn" title="读取剪贴板并粘贴" onclick="quickPaste()"><i data-lucide="clipboard-paste"></i></button>
+            <button type="button" class="icon-btn" title="清空" onclick="clearLinks()"><i data-lucide="eraser"></i></button>
+        </div>
+    </div>
+    <div id="link-lines" class="link-lines"></div>
+
+    {# ====== 处理方式按钮组 + 下载设置按钮（一行，设置内容在下方展开） ====== #}
+    <div class="mode-ops-row">
+        <div class="mode-group">
+            <button type="button" class="btn btn-primary mode-btn" id="detail-resolve" onclick="onResolve()"><i data-lucide="search"></i><span>解析</span></button>
+            <button type="button" class="btn btn-secondary mode-btn" id="quick-download-btn" onclick="onQuick()"><i data-lucide="zap"></i><span>一键下载</span></button>
+            <button type="button" class="btn mode-btn ghost" id="api-mode-btn" onclick="onApi()"><i data-lucide="webhook"></i><span>API 请求</span></button>
+        </div>
+        <button type="button" class="btn btn-secondary settings-btn" id="settings-btn" onclick="toggleSettings()">
+            <i data-lucide="settings-2"></i><span>下载设置</span>
+        </button>
+    </div>
+
+    {# ====== 下载设置内容：整行，点击「下载设置」按钮展开 ====== #}
+    <div class="settings-block" id="settings-panel" style="display:none;">
+        <div class="settings-body" id="settings-body">
+            {# 段A 通用：保存目录 + 命名模板 #}
+            <div class="settings-sec">
+                <div class="settings-grid">
+                    <div class="form-group">
+                        <label>保存目录</label>
+                        <div class="input-btn">
+                            <input type="text" id="single-target-dir" value="{{ download_path or '' }}" placeholder="选择或输入保存路径" onchange="saveRecentSingleDir(this.value)">
+                            <button type="button" class="btn btn-secondary" onclick="openSingleDirDialog()" title="选择目录"><i data-lucide="folder-open"></i></button>
+                        </div>
+                        <select id="single-recent-dirs" onchange="useRecentSingleDir(this.value)" class="recent-dirs">
+                            <option value="">最近目录...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label><i data-lucide="tag"></i>命名模板<span class="pv" id="single-template-preview"></span></label>
+                        <div class="input-btn">
+                            <select id="single-template-select" onchange="onTemplateSelectChange()" class="template-select"></select>
+                            <input type="hidden" id="single-template-input" name="filename_template" value="{create_time} {author} {title}">
+                            <button type="button" class="btn btn-secondary" onclick="openTemplateModal()" title="管理模板"><i data-lucide="settings-2"></i></button>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="collect-action-divider"></div>
-            <button type="button" class="btn btn-primary collect-quick-btn" id="quick-download-btn" onclick="quickDownload()">
-                <i data-lucide="zap"></i> 一键下载
-            </button>
-        </div>
-
-        {# ====== Inline status ====== #}
-        <div id="resolve-inline-status" class="collect-inline-status" style="display:none;">
-            <i data-lucide="loader-circle" style="width:14px;height:14px;animation:spin 1s linear infinite;flex-shrink:0;"></i>
-            <span id="resolve-inline-text">准备中...</span>
-        </div>
-    </form>
-
-    {# ====== SSE Progress Panel ====== #}
-    <div id="single-progress" style="display:none;margin-top:14px;"></div>
-</div>
-
-{# ====== Settings Panel (shown after resolve, positioned above work list) ====== #}
-<div class="workflow-panel collect-settings-panel" id="settings-panel" style="display:none;">
-    <div class="workflow-header" style="margin-bottom:12px;">
-        <div class="workflow-title"><i data-lucide="sliders-horizontal"></i><span>下载设置</span></div>
-    </div>
-    <div class="collect-form-grid">
-        <div class="form-group">
-            <label>保存目录</label>
-            <div style="display:flex;gap:8px;">
-                <input type="text" name="target_dir" id="single-target-dir" value="{{ download_path or '' }}" style="flex:1;">
-                <button type="button" class="btn btn-secondary" onclick="openSingleDirDialog()" title="选择目录"><i data-lucide="folder-open"></i></button>
+            {# 段B 按模式归属 #}
+            <div class="settings-sec">
+                <div class="belong-row">
+                    <span class="belong-tag res"><i data-lucide="search"></i>解析</span>
+                    <span class="belong-name">解析模式</span>
+                    <select id="resolve-mode-select" class="select-inline">
+                        <option value="auto">自动 (API+TTD)</option>
+                        <option value="api">仅 API</option>
+                        <option value="ttd">仅 TTD</option>
+                    </select>
+                </div>
+                <div class="belong-row">
+                    <span class="belong-tag qk"><i data-lucide="zap"></i>一键</span>
+                    <span class="belong-name">附带下载</span>
+                    <label class="chip"><input type="checkbox" id="opt-music"><i data-lucide="music"></i>音乐</label>
+                    <label class="chip"><input type="checkbox" id="opt-static-cover"><i data-lucide="image"></i>静态封面</label>
+                    <label class="chip"><input type="checkbox" id="opt-dynamic-cover"><i data-lucide="film"></i>动态封面</label>
+                </div>
             </div>
-            <select id="single-recent-dirs" onchange="useRecentSingleDir(this.value)" style="margin-top:6px;">
-                <option value="">最近目录...</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>命名模板</label>
-            <div style="display:flex;gap:8px;align-items:center;">
-                <select id="single-template-select" onchange="onTemplateSelectChange()" style="flex:1;"></select>
-                <input type="hidden" id="single-template-input" name="filename_template" value="{create_time} {author} {title}">
-                <button type="button" class="btn btn-secondary" onclick="openTemplateModal()" title="管理模板"><i data-lucide="settings-2"></i></button>
-            </div>
-            <div id="single-template-preview" class="text-muted" style="margin-top:4px;font-size:13px;"></div>
         </div>
     </div>
-    <div class="workflow-checklist" style="margin-bottom:10px;">
-        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-            <input type="checkbox" id="opt-music" style="cursor:pointer;">
-            <i data-lucide="music" style="width:16px;height:16px;"></i> 下载音乐
-        </label>
-        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-left:12px;">
-            <input type="checkbox" id="opt-static-cover" style="cursor:pointer;">
-            <i data-lucide="image" style="width:16px;height:16px;"></i> 静态封面
-        </label>
-        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-left:12px;">
-            <input type="checkbox" id="opt-dynamic-cover" style="cursor:pointer;">
-            <i data-lucide="film" style="width:16px;height:16px;"></i> 动态封面
-        </label>
-    </div>
-    <div class="collect-dl-mode-bar">
-        <span class="dl-mode-label"><i data-lucide="download"></i> 下载方式</span>
-        <div class="dl-mode-tabs">
-            <button type="button" class="dl-mode-tab active" data-dl-mode="local" onclick="setDownloadMode('local')">
-                <i data-lucide="hard-drive"></i> 本地下载
-            </button>
-            <button type="button" class="dl-mode-tab" data-dl-mode="browser" onclick="setDownloadMode('browser')">
-                <i data-lucide="globe"></i> 浏览器下载
-            </button>
-        </div>
-    </div>
-</div>
+</section>
 
-{# ====== Work list (resolve results, below settings) ====== #}
-<div id="single-work-list" style="margin-top:14px;"></div>
+{# ====== 卡片2：进度（解析进度 / 下载进度） ====== #}
+<section class="workflow-panel collect-panel" id="single-progress" style="display:none;"></section>
 
-{# ====== History Panel (collapsed by default) ====== #}
-<div class="workflow-panel">
-    <div class="workflow-header collect-collapsible-header" onclick="toggleHistoryPanel()" style="cursor:pointer;user-select:none;">
+{# ====== 卡片3：资产结果 ====== #}
+<section class="workflow-panel collect-panel">
+    <div class="workflow-header">
+        <div class="workflow-title">
+            <i data-lucide="package-open"></i><span>资产结果</span>
+        </div>
+        <span class="workflow-count" id="result-count" style="display:none;"></span>
+    </div>
+    <div id="single-work-list">
+        <div class="collect-empty-state">
+            <div class="collect-empty-icon"><i data-lucide="sparkles"></i></div>
+            <div class="collect-empty-title">粘贴链接后选择处理方式</div>
+            <div class="collect-empty-desc">「解析」查看详情后勾选下载；「一键下载」直接保存到本机</div>
+        </div>
+    </div>
+</section>
+
+{# ====== 卡片4：下载历史（可折叠） ====== #}
+<div class="workflow-panel collect-panel">
+    <div class="workflow-header collect-collapsible-header" onclick="toggleHistoryPanel()" style="cursor:pointer;user-select:none;margin-bottom:0;">
         <div class="workflow-title">
             <i data-lucide="history"></i>
             <span>下载历史</span>
@@ -183,17 +192,98 @@
         </div>
     </div>
 </div>
+
+{# ====== API 悬浮提示 ====== #}
+<div id="api-popover" class="pop-overlay" style="display:none;" onclick="if(event.target===this)closePop('api-popover')">
+    <div class="pop-card">
+        <div class="pop-head">
+            <div class="pico"><i data-lucide="webhook"></i></div>
+            <span class="pop-title">API 请求模式</span>
+            <button type="button" class="icon-btn2 close" onclick="closePop('api-popover')"><i data-lucide="x"></i></button>
+        </div>
+        <div id="api-pop-content"><div class="text-muted" style="padding:12px;">正在加载 API 信息...</div></div>
+    </div>
+</div>
+
+{# ====== 下载方式选择浮层 ====== #}
+<div id="dl-choice-overlay" class="pop-overlay" style="display:none;" onclick="if(event.target===this)closePop('dl-choice-overlay')">
+    <div class="pop-card">
+        <div class="pop-head">
+            <div class="pico blue"><i data-lucide="download"></i></div>
+            <span class="pop-title">下载 <span id="dl-choice-count">0</span> 个资产</span>
+            <button type="button" class="icon-btn2 close" onclick="closePop('dl-choice-overlay')"><i data-lucide="x"></i></button>
+        </div>
+        <div class="dl-choice">
+            <button type="button" class="choice active" data-dl="local" onclick="chooseDl('local')">
+                <span class="cico"><i data-lucide="hard-drive"></i></span>
+                <span><span class="ct">本地下载</span><div class="cs" id="dl-local-sub">保存到本机目录</div></span>
+            </button>
+            <button type="button" class="choice" data-dl="browser" onclick="chooseDl('browser')">
+                <span class="cico"><i data-lucide="globe"></i></span>
+                <span><span class="ct">浏览器下载</span><div class="cs">通过浏览器另存为</div></span>
+            </button>
+        </div>
+    </div>
+</div>
+
+{# ====== 浮动操作条（跨卡片批量下载） ====== #}
+<div id="float-bar" class="float-bar">
+    <span class="fb-count"><i data-lucide="check-check"></i><span id="fb-count-text">已选 0 个资产</span></span>
+    <span class="fb-sub" id="fb-sub"></span>
+    <button type="button" class="btn btn-primary" onclick="downloadAllSelected()"><i data-lucide="download"></i>下载选中</button>
+    <button type="button" class="btn btn-secondary" onclick="clearAllSelection()">清除</button>
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/collect_detail.js?v=9"></script>
+<script src="/static/js/collect_detail.js?v=18"></script>
 <script>
 (function init() {
     renderTemplateSelect();
     renderRecentDirs();
     loadSingleWorkHistory();
-    // Show settings panel by default if there are resolved works
+    updateLinkCount();
+    updateSettingsSummary();
     if (singleWorkState.works.length) { el('settings-panel').style.display = 'block'; }
 })();
+
+// ===== 链接计数 / 清空 / 快捷粘贴 =====
+function updateLinkCount() {
+    var text = String(el('links-input').value || '');
+    var lines = text.split(/\r?\n/).map(function(s){ return s.trim(); }).filter(Boolean);
+    var valid = 0;
+    lines.forEach(function(l){ if (detectPlatform(l)) valid++; });
+    var chip = el('link-count-text');
+    if (chip) {
+        chip.textContent = lines.length + ' 个链接' + (valid < lines.length ? ' · ' + valid + ' 有效' : '');
+        el('link-summary').style.color = (lines.length && valid < lines.length) ? 'var(--dh-warning)' : '';
+    }
+}
+
+function clearLinks() {
+    el('links-input').value = '';
+    el('link-lines').innerHTML = '';
+    invalidateResolvedSingleWorks();
+    updateLinkCount();
+    el('links-input').focus();
+}
+
+async function quickPaste() {
+    var ta = el('links-input');
+    var clip = '';
+    try { clip = await navigator.clipboard.readText(); } catch (e) { clip = ''; }
+    if (!clip || !clip.trim()) {
+        showToast('剪贴板为空或无法读取，请用 Ctrl+V 手动粘贴', 'error');
+        ta.focus();
+        return;
+    }
+    var existing = ta.value.trim();
+    ta.value = existing ? existing + '\n' + clip.trim() : clip.trim();
+    invalidateResolvedSingleWorks();
+    renderLinkLines();
+    updateLinkCount();
+    var n = clip.trim().split(/\r?\n/).filter(Boolean).length;
+    showToast('已粘贴 ' + n + ' 个链接', 'success');
+}
 </script>
 {% endblock %}

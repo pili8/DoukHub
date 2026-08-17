@@ -6,7 +6,7 @@
     <title>{% block title %}DoukHub{% endblock %}</title>
     <script src="/static/js/lucide.min.js"></script>
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
-    <link id="theme-css" rel="stylesheet" href="/static/css/style.css?v=7">
+    <link id="theme-css" rel="stylesheet" href="/static/css/style.css?v=25">
     <script>
       // 明暗模式:localStorage 优先,否则跟随系统,首屏设定避免闪烁
       (function() {
@@ -483,22 +483,28 @@
         }
         // innerHTML 替换后浏览器不会执行其中的 <script>,需手动重建标签触发执行
         // 外部脚本(src)仅首次加载,后续 SPA 切换跳过(全局对象已存在,无需重新执行)
+        function isExecutableScript(script) {
+            const type = (script.getAttribute('type') || '').trim().toLowerCase();
+            return !type || [
+                'application/ecmascript',
+                'application/javascript',
+                'module',
+                'text/ecmascript',
+                'text/javascript',
+            ].includes(type);
+        }
+
         async function rebindScripts(container) {
             // 收集所有脚本后一次性处理,减少 DOM 重排次数
-            const scripts = Array.from(container.querySelectorAll('script'));
+            const scripts = Array.from(container.querySelectorAll('script'))
+                .filter(isExecutableScript);
             const inlineScripts = [];
             const externalScripts = [];
             for (const old of scripts) {
                 if (old.src) externalScripts.push(old);
                 else inlineScripts.push(old);
             }
-            // 先批量处理内联脚本:用 DocumentFragment 减少重排
-            for (const old of inlineScripts) {
-                const s = document.createElement('script');
-                s.textContent = old.textContent;
-                old.replaceWith(s);
-            }
-            // 再处理外部脚本(需要 await 加载)
+            // 先处理外部脚本(需要 await 加载),确保内联脚本能引用其定义的函数
             for (const old of externalScripts) {
                 if (old.dataset.reload === 'true') {
                     const s = document.createElement('script');
@@ -522,6 +528,12 @@
                     s.src = old.src;
                     old.replaceWith(s);
                 });
+            }
+            // 再批量处理内联脚本:此时外部脚本已加载完成,内联脚本可以安全引用其中的函数
+            for (const old of inlineScripts) {
+                const s = document.createElement('script');
+                s.textContent = old.textContent;
+                old.replaceWith(s);
             }
         }
         function updateActiveNav(url) {

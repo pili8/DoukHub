@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock
 from pathlib import Path
+from urllib.parse import quote
 import re
 
 import pytest
@@ -259,6 +260,69 @@ def test_download_single_works(single_client, tmp_path, monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["results"][0]["status"] == "success"
+
+
+def test_spa_rebind_scripts_ignores_non_javascript_scripts():
+    source = Path("app/templates/base.html").read_text(encoding="utf-8")
+    assert "function isExecutableScript(" in source
+    assert ".filter(isExecutableScript)" in source
+    assert "'application/json'" not in source.split(
+        "function isExecutableScript("
+    )[1].split("function ")[0]
+
+
+def test_proxy_download_supports_unicode_filenames(single_client, monkeypatch):
+    class FakeUpstream:
+        headers = {"content-type": "video/mp4", "content-length": "4"}
+
+        def raise_for_status(self):
+            pass
+
+    class FakeStreamResponse:
+        headers = FakeUpstream.headers
+
+        def raise_for_status(self):
+            pass
+
+        async def aiter_bytes(self, chunk_size):
+            yield b"data"
+
+    class FakeStreamContext:
+        async def __aenter__(self):
+            return FakeStreamResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        async def get(self, url):
+            return FakeUpstream()
+
+        def stream(self, method, url):
+            return FakeStreamContext()
+
+    monkeypatch.setattr(app_main.httpx, "AsyncClient", FakeAsyncClient)
+    response = single_client.get(
+        "/api/collection/works/proxy-download",
+        params={"url": "https://example.test/video", "filename": "闫梦茹 测试"},
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"data"
+    expected_name = quote("闫梦茹 测试.mp4", safe="")
+    assert response.headers["Content-Disposition"] == (
+        f'attachment; filename="download.mp4"; '
+        f"filename*=UTF-8''{expected_name}"
+    )
 
 
 def test_collect_page_state_is_safe_for_spa_script_reload():

@@ -147,6 +147,42 @@
     </div>
 
     <div class="card">
+        <h3><i data-lucide="webhook"></i> API 请求模式</h3>
+        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">允许其他设备（手机、平板等）通过 HTTP API 调用 DoukHub 进行解析或下载</p>
+        <div class="form-group">
+            <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                <input type="checkbox" name="api.enabled" {{ 'checked' if config.api.enabled }}>
+                启用 API 接口
+            </label>
+        </div>
+        <div class="form-group">
+            <label>API Key</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <input type="text" id="api-key-display" value="{{ config.api.api_key or '' }}" readonly placeholder="点击下方按钮生成" style="flex:1;font-family:var(--font-mono);font-size:13px;">
+                <button type="button" class="btn btn-secondary" onclick="copyApiKey()"><i data-lucide="copy"></i> 复制</button>
+                <button type="button" class="btn btn-secondary" onclick="regenerateApiKey()"><i data-lucide="refresh-cw"></i> 重新生成</button>
+            </div>
+            <small>其他设备调用时需在 Header 中传入: <code style="background:var(--bg-muted);padding:2px 6px;border-radius:3px;">X-API-Key: &lt;密钥&gt;</code></small>
+        </div>
+        <div class="form-group">
+            <label>API 接口列表</label>
+            <div style="font-family:var(--font-mono);font-size:12px;background:var(--bg-muted);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border-default);line-height:1.8;">
+                <strong>POST</strong> /api/v1/works/resolve &nbsp;— 解析链接，返回下载地址 JSON<br>
+                <strong>POST</strong> /api/v1/works/download &nbsp;— 解析 + 本地下载，返回结果 JSON<br>
+                <strong>GET</strong>&nbsp; /api/v1/status &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— 检查服务状态<br>
+                <span style="color:var(--text-muted);">Header: X-API-Key: &lt;密钥&gt; · Content-Type: application/json</span>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>调用示例（curl）</label>
+            <div style="font-family:var(--font-mono);font-size:12px;background:var(--bg-muted);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border-default);line-height:1.6;white-space:pre-wrap;word-break:break-all;">curl -X POST http://&lt;本机IP&gt;:2999/api/v1/works/resolve \
+  -H "X-API-Key: dk_xxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"links": "https://www.douyin.com/video/xxx"}'</div>
+        </div>
+    </div>
+
+    <div class="card">
         <h3><i data-lucide="tag"></i> 标签映射</h3>
         <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">每行一个映射, 格式: 缩写=完整标签。未匹配的缩写会作为新标签保留。</p>
         <div class="form-group">
@@ -260,6 +296,21 @@
         document.getElementById('download_path').value = path;
         closeDirBrowser();
         showToast('已选择: ' + path);
+    }
+    function copyApiKey() {
+        var key = document.getElementById('api-key-display').value;
+        if (!key) { showToast('暂无 API Key，请先生成', 'error'); return; }
+        navigator.clipboard.writeText(key).then(function() { showToast('已复制 API Key', 'success'); });
+    }
+    async function regenerateApiKey() {
+        if (!await confirmDialog('重新生成后旧 Key 立即失效，确定继续？', { title: '确认', confirmText: '重新生成', danger: true })) return;
+        try {
+            var data = await apiCall('/api/v1/api-key', 'POST');
+            if (data.success) {
+                document.getElementById('api-key-display').value = data.api_key;
+                showToast('API Key 已重新生成', 'success');
+            } else { showToast(data.message || '生成失败', 'error'); }
+        } catch(e) { showToast(e.message || '生成失败', 'error'); }
     }
 </script>
 {% endblock %}

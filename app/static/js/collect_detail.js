@@ -192,6 +192,7 @@ async function saveRecentSingleDir(path) {
     singleWorkState.preferences.recent_dirs = dirs;
     try { await apiCall('/api/collection/single-work/preferences', 'PUT', { download_path: singleWorkState.preferences.download_path, recent_dirs: dirs, default_template_id: singleWorkState.preferences.default_template_id, templates: singleWorkState.preferences.templates }); } catch(e) {}
     renderRecentDirs();
+    updateSettingsSummary();
 }
 
 // ====== Inline status ======
@@ -209,28 +210,40 @@ function hideInlineStatus() {
 }
 
 // ====== SSE progress panel ======
-function showProgressPanel(title) {
+// 分段进度条：解析=2 段（解析链接/获取详情）；下载=3 段（解析链接/下载资产/完成）
+function renderSseSegments(container, segCount, active, fail) {
+    if (!container) return;
+    var html = '';
+    for (var i = 0; i < segCount; i++) {
+        var cls = 'segment';
+        if (i < active) cls += ' done';
+        else if (i === active) cls += fail ? ' fail' : ' active';
+        html += '<span class="' + cls + '"></span>';
+    }
+    container.innerHTML = html;
+}
+
+function showProgressPanel(title, segCount) {
+    segCount = segCount || 2;
     var d = document.getElementById('single-progress');
     d.style.display = 'block';
     d.innerHTML =
-        '<div style="border:1px solid var(--dh-border);border-radius:var(--dh-radius);padding:14px;background:var(--dh-surface);">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">' +
             '<div class="workflow-title"><i data-lucide="activity"></i><span>' + title + '</span></div>' +
             '<span class="workflow-status running" id="sse-status">准备中...</span>' +
         '</div>' +
-        '<div style="height:6px;background:var(--dh-surface-muted);border-radius:3px;overflow:hidden;">' +
-            '<div id="sse-bar" style="height:100%;width:0%;background:var(--dh-accent);border-radius:3px;transition:width .3s;"></div>' +
-        '</div>' +
+        '<div class="collect-segments" id="sse-segments"></div>' +
         '<div class="workflow-progress-meta"><span id="sse-text">等待开始...</span><span id="sse-count"></span></div>' +
         '<div class="workflow-metrics" style="margin-top:10px;">' +
             '<div class="workflow-metric" style="border-left-color:var(--dh-accent);"><span class="metric-value" id="sse-total" style="color:var(--dh-accent);">0</span><span class="metric-label">总数</span></div>' +
-            '<div class="workflow-metric" style="border-left-color:var(--md-success);"><span class="metric-value" id="sse-success" style="color:var(--md-success);">0</span><span class="metric-label">成功</span></div>' +
-            '<div class="workflow-metric" style="border-left-color:var(--md-error);"><span class="metric-value" id="sse-failed" style="color:var(--md-error);">0</span><span class="metric-label">失败</span></div>' +
+            '<div class="workflow-metric" style="border-left-color:var(--dh-success);"><span class="metric-value" id="sse-success" style="color:var(--dh-success);">0</span><span class="metric-label">成功</span></div>' +
+            '<div class="workflow-metric" style="border-left-color:var(--dh-danger);"><span class="metric-value" id="sse-failed" style="color:var(--dh-danger);">0</span><span class="metric-label">失败</span></div>' +
         '</div>' +
-        '<div class="workflow-log" id="sse-log" style="margin-top:10px;max-height:200px;"></div>' +
-        '</div>';
+        '<div class="workflow-log" id="sse-log" style="margin-top:10px;max-height:200px;"></div>';
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-    return { status: el('sse-status'), bar: el('sse-bar'), text: el('sse-text'), count: el('sse-count'), total: el('sse-total'), success: el('sse-success'), failed: el('sse-failed'), log: el('sse-log') };
+    renderSseSegments(el('sse-segments'), segCount, 0);
+    d.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return { status: el('sse-status'), text: el('sse-text'), count: el('sse-count'), total: el('sse-total'), success: el('sse-success'), failed: el('sse-failed'), log: el('sse-log'), segments: el('sse-segments'), segCount: segCount };
 }
 
 function el(id) { return document.getElementById(id); }
@@ -260,25 +273,28 @@ async function consumeSse(resp, els, onProgress, onComplete) {
             if (data.type === 'start') {
                 els.status.textContent = '执行中'; els.status.className = 'workflow-status running';
                 els.text.textContent = data.message; els.total.textContent = data.total || 0;
+                renderSseSegments(els.segments, els.segCount, 0);
                 addSseLog(els.log, data.message, 'info');
             } else if (data.type === 'progress') {
                 var pct = data.total > 0 ? Math.round((data.index - 1) / data.total * 100) : 0;
-                els.bar.style.width = pct + '%'; els.text.textContent = data.message; els.count.textContent = pct + '%';
+                els.text.textContent = data.message; els.count.textContent = pct + '%';
                 var phase = data.phase || '';
                 var isFail = phase.indexOf('failed') >= 0, isDone = phase.indexOf('done') >= 0;
                 els.status.className = 'workflow-status ' + (isFail ? 'failed' : (isDone ? 'success' : 'running'));
                 els.status.textContent = isFail ? '失败' : (isDone ? '成功' : '执行中');
+                // 分段进度：解析=2 段，下载=3 段；阶段按 phase 推进
+                if (phase === 'stage') renderSseSegments(els.segments, els.segCount, 0, isFail);
+                else if (phase.indexOf('resolve') >= 0) renderSseSegments(els.segments, els.segCount, 1, isFail);
+                else if (phase.indexOf('download') >= 0) renderSseSegments(els.segments, els.segCount, 2, isFail);
                 addSseLog(els.log, data.message, isFail ? 'error' : (isDone ? 'ok' : 'info'));
-                if (data.total && (phase === 'download_done' || phase === 'done')) els.bar.style.width = Math.round(data.index / data.total * 100) + '%';
                 if (data.success_count !== undefined) els.success.textContent = data.success_count;
                 if (data.failed_count !== undefined) els.failed.textContent = data.failed_count;
-                if (phase === 'stage') showInlineStatus(data.message);
                 if (onProgress) onProgress(data);
             } else if (data.type === 'complete') {
-                els.bar.style.width = '100%'; els.bar.style.background = data.success ? 'var(--md-success)' : 'var(--md-error)';
-                els.status.className = 'workflow-status ' + (data.success ? 'success' : 'failed');
+                                els.status.className = 'workflow-status ' + (data.success ? 'success' : 'failed');
                 els.status.textContent = data.success ? '已完成' : '失败';
                 els.text.textContent = data.message; els.count.textContent = '100%';
+                renderSseSegments(els.segments, els.segCount, els.segCount, !data.success);
                 if (data.success_count !== undefined) els.success.textContent = data.success_count;
                 if (data.failed_count !== undefined) els.failed.textContent = data.failed_count;
                 addSseLog(els.log, data.message, data.success ? 'ok' : 'error');
@@ -340,14 +356,12 @@ function closeLightbox() {
     document.body.style.overflow = '';
 }
 
-// ====== Download mode tabs ======
+// ====== Download mode ======
 function setDownloadMode(mode) {
     currentDownloadMode = mode;
-    document.querySelectorAll('.dl-mode-tab').forEach(function(btn) {
-        btn.classList.toggle('active', btn.dataset.dlMode === mode);
+    document.querySelectorAll('.dl-choice .choice').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.dl === mode);
     });
-    var settingsPanel = el('settings-panel');
-    if (settingsPanel) settingsPanel.style.display = 'block';
 }
 
 function getDownloadMode() { return currentDownloadMode; }
@@ -363,31 +377,32 @@ function proxyDownloadAsset(url, filename) {
 
 // ====== Resolve (SSE streaming) ======
 async function resolveSingleWorks(event) {
-    event.preventDefault();
-    var linksText = String(new FormData(event.target).get('links') || '');
+    if (event && event.preventDefault) event.preventDefault();
+    if (currentCollectMode !== 'resolve') { switchToResolveMode(); }
+    var linksText = String(el('links-input').value || '');
     if (!linksText.trim()) { showToast('请先粘贴作品链接', 'error'); return; }
     var resolveMode = (el('resolve-mode-select') || {}).value || 'auto';
     var btnR = el('detail-resolve'), btnQ = el('quick-download-btn');
     btnR.disabled = true; btnQ.disabled = true;
-    btnR.innerHTML = '<i data-lucide="loader-circle"></i> 解析中...';
+    btnR.innerHTML = '<i data-lucide="loader-circle"></i><span>解析中...</span>';
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-    showInlineStatus('准备中...');
-    var els = showProgressPanel('解析进度');
+    var els = showProgressPanel('解析进度', 2);
     el('single-work-list').innerHTML = ''; singleWorkState.works = [];
+    updateSelection();
     try {
         var resp = await fetch('/api/collection/works/resolve-stream', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({links: linksText, resolve_mode: resolveMode}) });
         await consumeSse(resp, els, function(data) {
             if (data.phase === 'done' && data.work) {
                 singleWorkState.works.push(data.work);
                 appendWorkCard(data.work);
-                el('settings-panel').style.display = 'block';
+                updateSelection();
                 if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
             }
         }, function(data) {
             if (data.works && data.works.length) {
                 resolvedSingleLinks = data.works.map(function(w) { return w.share_url; }).filter(Boolean);
                 singleWorkState.works = data.works; renderSingleWorks(data.works);
-                el('settings-panel').style.display = 'block';
+                updateSelection();
             }
         });
     } catch (e) {
@@ -395,30 +410,31 @@ async function resolveSingleWorks(event) {
         addSseLog(els.log, '请求失败: ' + e.message, 'error'); showToast(e.message || '解析失败', 'error');
     } finally {
         btnR.disabled = false; btnQ.disabled = false;
-        btnR.innerHTML = '<i data-lucide="search"></i> 解析';
+        btnR.innerHTML = '<i data-lucide="search"></i><span>解析</span>';
         if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     }
 }
 
 // ====== Quick Download (fast, no mode selection, local only) ======
 async function quickDownload() {
+    if (currentCollectMode !== 'quick') { switchToQuickMode(); }
     var linksText = String(el('links-input').value || '');
     if (!linksText.trim()) { showToast('请先粘贴作品链接', 'error'); return; }
     var targetDir = el('single-target-dir').value || '';
-    if (!targetDir) { showToast('请先设置保存目录', 'error'); el('settings-panel').style.display = 'block'; return; }
+    if (!targetDir) { showToast('请先设置保存目录', 'error'); ensureSettingsOpen(); return; }
     var template = el('single-template-input').value || '{create_time} {author} {title}';
     var incMusic = el('opt-music').checked, incSC = el('opt-static-cover').checked, incDC = el('opt-dynamic-cover').checked;
     var btnR = el('detail-resolve'), btnQ = el('quick-download-btn');
     btnR.disabled = true; btnQ.disabled = true;
-    btnQ.innerHTML = '<i data-lucide="loader-circle"></i> 下载中...';
+    btnQ.innerHTML = '<i data-lucide="loader-circle"></i><span>下载中...</span>';
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-    showInlineStatus('快速下载中...');
-    var els = showProgressPanel('下载进度');
+    var els = showProgressPanel('下载进度', 3);
     el('single-work-list').innerHTML = ''; singleWorkState.works = [];
+    updateSelection();
     try {
         var resp = await fetch('/api/collection/works/download-stream', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ links: linksText, target_dir: targetDir, filename_template: template, include_music: incMusic, include_static_cover: incSC, include_dynamic_cover: incDC }) });
         await consumeSse(resp, els, function(data) {
-            if (data.phase === 'resolve_done' && data.work) { singleWorkState.works.push(data.work); appendWorkCard(data.work); el('settings-panel').style.display = 'block'; }
+            if (data.phase === 'resolve_done' && data.work) { singleWorkState.works.push(data.work); appendWorkCard(data.work); }
             if (data.phase === 'download_done') markWorkDownloaded(data.title, data.files);
             if (data.phase === 'download_failed') markWorkFailed(data.message);
         }, async function(data) { await saveRecentSingleDir(targetDir); await loadSingleWorkHistory(); });
@@ -427,7 +443,7 @@ async function quickDownload() {
         addSseLog(els.log, '请求失败: ' + e.message, 'error'); showToast(e.message || '下载失败', 'error');
     } finally {
         btnR.disabled = false; btnQ.disabled = false;
-        btnQ.innerHTML = '<i data-lucide="zap"></i> 一键下载';
+        btnQ.innerHTML = '<i data-lucide="zap"></i><span>一键下载</span>';
         if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     }
 }
@@ -440,8 +456,39 @@ function findWorkByShareUrl(shareUrl) {
     return singleWorkState.works.find(function(w) { return w.share_url === shareUrl; });
 }
 
+// ====== 下载进度辅助（解析结果下载时展示，复用进度面板） ======
+var batchEls = null; // downloadAllSelected 跨作品共享面板
+
+function startDownloadProgress(n, total) {
+    var els = showProgressPanel('下载进度', 3);
+    els.total.textContent = total !== undefined ? total : n;
+    els.text.textContent = '正在下载 ' + n + ' 个资产...';
+    renderSseSegments(els.segments, 3, 1);
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    return els;
+}
+
+function updateDownloadProgress(els, ok, msg) {
+    if (!els) return;
+    if (ok) {
+        els.status.className = 'workflow-status success'; els.status.textContent = '成功';
+        els.success.textContent = (parseInt(els.success.textContent) || 0) + 1;
+        renderSseSegments(els.segments, 3, 3, false);
+    } else {
+        els.status.className = 'workflow-status failed'; els.status.textContent = '失败';
+        els.failed.textContent = (parseInt(els.failed.textContent) || 0) + 1;
+        renderSseSegments(els.segments, 3, 1, true);
+    }
+    els.text.textContent = msg || (ok ? '下载完成' : '下载失败');
+    addSseLog(els.log, msg || (ok ? '下载完成' : '下载失败'), ok ? 'ok' : 'error');
+}
+
 // ====== Single asset download ======
 async function downloadSingleAsset(link, assetIndex) {
+    openDlChoice(function() { doDownloadSingleAsset(link, assetIndex); }, 1);
+}
+
+async function doDownloadSingleAsset(link, assetIndex, els) {
     var dlMode = getDownloadMode();
     var work = findWorkByShareUrl(link);
     var asset = work ? (work.assets || []).find(function(a) { return a.index === assetIndex; }) : null;
@@ -450,23 +497,26 @@ async function downloadSingleAsset(link, assetIndex) {
         var fname = asset.kind;
         try { fname = (work.author || '') + ' ' + (work.title || asset.kind); } catch(e) {}
         proxyDownloadAsset(asset.url, fname);
-        showToast('已开始浏览器下载: ' + assetKindLabel(asset.kind), 'success');
+        showToast('已触发浏览器下载: ' + assetKindLabel(asset.kind) + '，进度见浏览器下载栏', 'success');
         return;
     }
+    var els2 = els || startDownloadProgress(1, 1);
     var targetDir = el('single-target-dir').value || '';
-    if (!targetDir) { showToast('请先选择保存目录', 'error'); el('settings-panel').style.display = 'block'; return; }
+    if (!targetDir) { showToast('请先选择保存目录', 'error'); ensureSettingsOpen(); return; }
     var template = el('single-template-input').value || '{create_time} {author} {title}';
     try {
         var data = await apiCall('/api/collection/works/download', 'POST', { links: link, target_dir: targetDir, filename_template: template, asset_indexes: [assetIndex], work: work });
-        showToast(data.success ? '下载成功' : '下载失败', data.success ? 'success' : 'error');
+        if (data.success) { updateDownloadProgress(els2, true, '下载成功: ' + assetKindLabel(asset.kind)); showToast('下载成功', 'success'); }
+        else { updateDownloadProgress(els2, false, data.message || '下载失败'); showToast('下载失败', 'error'); }
         await loadSingleWorkHistory();
-    } catch (error) { showToast(error.message || '下载失败', 'error'); }
+    } catch (error) { updateDownloadProgress(els2, false, error.message || '下载失败'); showToast(error.message || '下载失败', 'error'); }
 }
 
 // ====== Asset selection & batch download ======
 function onAssetCheckboxChange(workId, assetIndex, checked) {
     var row = document.querySelector('.work-assets[data-work-id="' + workId + '"] .work-asset-row[data-asset-index="' + assetIndex + '"]');
     if (row) row.classList.toggle('selected', checked);
+    updateSelection();
 }
 
 function toggleAllAssets(btn, workId) {
@@ -479,6 +529,7 @@ function toggleAllAssets(btn, workId) {
         var row = b.closest('.work-asset-row');
         if (row) row.classList.toggle('selected', b.checked);
     });
+    updateSelection();
 }
 
 function selectAssetsByKind(workId, kind) {
@@ -491,6 +542,7 @@ function selectAssetsByKind(workId, kind) {
         var row = b.closest('.work-asset-row');
         if (row) row.classList.toggle('selected', b.checked);
     });
+    updateSelection();
 }
 
 function getSelectedAssetIndexes(workId) {
@@ -506,6 +558,10 @@ function getSelectedAssetIndexes(workId) {
 async function downloadSelectedAssets(workId, shareUrl) {
     var indexes = getSelectedAssetIndexes(workId);
     if (!indexes.length) { showToast('请先勾选要下载的资产', 'error'); return; }
+    openDlChoice(function() { doDownloadSelectedAssets(workId, shareUrl, indexes); }, indexes.length);
+}
+
+async function doDownloadSelectedAssets(workId, shareUrl, indexes, els) {
     var dlMode = getDownloadMode();
     var work = findWorkById(workId);
     if (dlMode === 'browser') {
@@ -519,19 +575,21 @@ async function downloadSelectedAssets(workId, shareUrl) {
                 delay += 800;
             }
         });
-        showToast('已开始浏览器下载 ' + indexes.length + ' 个资产', 'success');
+        showToast('已触发浏览器下载 ' + indexes.length + ' 个资产，进度见浏览器下载栏', 'success');
         return;
     }
+    var els2 = els || startDownloadProgress(indexes.length, indexes.length);
     var targetDir = el('single-target-dir').value || '';
-    if (!targetDir) { showToast('请先选择保存目录', 'error'); el('settings-panel').style.display = 'block'; return; }
+    if (!targetDir) { showToast('请先选择保存目录', 'error'); ensureSettingsOpen(); return; }
     var template = el('single-template-input').value || '{create_time} {author} {title}';
     try {
         var data = await apiCall('/api/collection/works/download', 'POST', {
             links: shareUrl, target_dir: targetDir, filename_template: template, asset_indexes: indexes, work: work
         });
-        showToast(data.success ? '下载 ' + indexes.length + ' 个资产成功' : '下载失败', data.success ? 'success' : 'error');
+        if (data.success) { updateDownloadProgress(els2, true, '下载 ' + indexes.length + ' 个资产成功'); showToast('下载 ' + indexes.length + ' 个资产成功', 'success'); }
+        else { updateDownloadProgress(els2, false, data.message || '下载失败'); showToast('下载失败', 'error'); }
         await loadSingleWorkHistory();
-    } catch (error) { showToast(error.message || '下载失败', 'error'); }
+    } catch (error) { updateDownloadProgress(els2, false, error.message || '下载失败'); showToast(error.message || '下载失败', 'error'); }
 }
 
 // ====== Work card rendering ======
@@ -566,22 +624,32 @@ function buildWorkCardHtml(work) {
     // Right: info
     html += '<div class="work-info">';
 
+    // Author row (top)
+    var authorName = work.author || authorInfo.nickname || '未知';
+    var authorInitial = (authorName || '未').trim().charAt(0);
+    html += '<div class="work-author-row">';
+    html += '<div class="work-author-avatar">' + escapeHtml(authorInitial) + '</div>';
+    html += '<div class="work-author-main">';
+    html += '<span class="work-author-name">' + escapeHtml(authorName) + '</span>';
+    if (work.create_time) html += '<span class="work-author-sub"><i data-lucide="calendar"></i> ' + escapeHtml(work.create_time) + '</span>';
+    html += '</div>';
+    html += '<div class="work-author-tags">' + platformBadge(work.platform) + typeBadge(workType) + '</div>';
+    html += '</div>';
+
     // Description
     var desc = work.desc || work.title || '';
     if (desc && desc !== work.id) {
         html += '<div class="work-desc">' + escapeHtml(desc) + '</div>';
     }
 
-    // Badges
-    html += '<div class="work-badges">';
-    if (!cover) html += typeBadge(workType);
-    html += platformBadge(work.platform);
-    if (primaryAssets.length > 1) html += '<span class="workflow-status pending">' + primaryAssets.length + ' 个' + (workType === '视频' ? '视频' : '图片') + '</span>';
+    // Badges（媒体信息 + 多资产计数；平台/类型已上移至作者行）
+    var badgeItems = [];
+    if (primaryAssets.length > 1) badgeItems.push('<span class="workflow-status pending">' + primaryAssets.length + ' 个' + (workType === '视频' ? '视频' : '图片') + '</span>');
     var mediaParts = [];
     if (media.duration && media.duration !== '00:00:00') mediaParts.push('<i data-lucide="clock" style="width:13px;height:13px;"></i> ' + escapeHtml(media.duration));
     if (media.width > 0 && media.height > 0) mediaParts.push('<i data-lucide="ratio" style="width:13px;height:13px;"></i> ' + media.width + '\u00d7' + media.height);
-    if (mediaParts.length) html += '<span class="workflow-status pending">' + mediaParts.join(' \u00b7 ') + '</span>';
-    html += '</div>';
+    if (mediaParts.length) badgeItems.push('<span class="workflow-status pending">' + mediaParts.join(' \u00b7 ') + '</span>');
+    if (badgeItems.length) html += '<div class="work-badges">' + badgeItems.join('') + '</div>';
 
     // Stats
     html += '<div class="work-stats">';
@@ -591,16 +659,14 @@ function buildWorkCardHtml(work) {
     html += '<span class="work-stat"><i data-lucide="share-2"></i><span class="stat-num">' + formatCount(stats.share_count) + '</span> 转</span>';
     html += '</div>';
 
-    // Meta
-    html += '<div class="work-meta">';
-    html += '<span class="work-meta-item"><i data-lucide="user"></i> ' + escapeHtml(work.author || authorInfo.nickname || '未知') + '</span>';
-    if (work.create_time) html += '<span class="work-meta-item"><i data-lucide="calendar"></i> ' + escapeHtml(work.create_time) + '</span>';
+    // Meta (音乐等附属信息；作者/时间已上移至头部)
     if (music.title) {
+        html += '<div class="work-meta">';
         html += '<span class="work-meta-item"><i data-lucide="music"></i> ' + escapeHtml(music.title);
         if (music.author) html += ' - ' + escapeHtml(music.author);
         html += '</span>';
+        html += '</div>';
     }
-    html += '</div>';
 
     // Tags
     var tags = (work.hashtags || []).concat(work.video_tags || []);
@@ -629,14 +695,22 @@ function buildWorkCardHtml(work) {
                 html += '<button type="button" class="toolbar-btn" onclick="selectAssetsByKind(\'' + work.id + '\',\'' + k + '\')"><i data-lucide="' + assetKindIcon(k) + '"></i> ' + escapeHtml(assetKindLabel(k)) + '(' + kindGroups[k].length + ')</button>';
             }
         });
-        html += '<button type="button" class="toolbar-btn primary" onclick="downloadSelectedAssets(\'' + work.id + '\',\'' + work.share_url.replace(/'/g, "\\'") + '\')"><i data-lucide="download"></i> 下载选中</button>';
+        html += '<button type="button" class="toolbar-btn primary" onclick="downloadSelectedAssets(\'' + work.id + '\',\'' + work.share_url.replace(/'/g, "\\'") + '\')"><i data-lucide="download"></i> 下载选中<span class="toolbar-count-selected" data-work-id="' + escapeHtml(work.id) + '"></span></button>';
         html += '</div>';
 
         // Asset rows with thumbnails (clickable to enlarge)
+        // 排序：主资产（视频/图片/实况）在前，低频附属（音乐/封面）在后并弱化区分
+        var AUX_KINDS = ['music', 'static_cover', 'dynamic_cover'];
+        var orderedAssets = assets.slice().sort(function(x, y) {
+            var xAux = AUX_KINDS.indexOf(x.kind) >= 0 ? 1 : 0;
+            var yAux = AUX_KINDS.indexOf(y.kind) >= 0 ? 1 : 0;
+            return xAux - yAux || (x.index || 0) - (y.index || 0);
+        });
         html += '<div class="work-assets" data-work-id="' + escapeHtml(work.id) + '">';
-        assets.forEach(function(a) {
+        orderedAssets.forEach(function(a) {
+            var isAux = AUX_KINDS.indexOf(a.kind) >= 0;
             var thumb = a.cover_url || (a.kind === 'static_cover' || a.kind === 'dynamic_cover' ? a.url : '');
-            html += '<div class="work-asset-row" data-asset-index="' + a.index + '">';
+            html += '<div class="work-asset-row' + (isAux ? ' aux' : '') + '" data-asset-index="' + a.index + '">';
             html += '<input type="checkbox" class="asset-checkbox" data-work-id="' + escapeHtml(work.id) + '" data-asset-index="' + a.index + '" data-asset-kind="' + escapeHtml(a.kind) + '" onchange="onAssetCheckboxChange(\'' + work.id + '\',' + a.index + ', this.checked)">';
             // Thumbnail (clickable for lightbox)
             if (thumb) {
@@ -785,3 +859,285 @@ function chooseSingleDir() { if (singleDirCurrent) el('single-target-dir').value
 function formatDateTime(v) { return v ? String(v).replace('T',' ').slice(0,19).replace(/ (\d\d)-(\d\d)-(\d\d)$/, ' $1:$2:$3') : '-'; }
 
 function escapeHtml(v) { return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
+
+// ====== Mode switching (解析 / 一键下载 / API请求) ======
+var currentCollectMode = 'resolve'; // 'resolve' | 'quick' | 'api'
+
+function switchToApiMode() {
+    currentCollectMode = 'api';
+    closePop('api-popover');
+    applyModeSettings('api');
+    showPop('api-popover');
+    loadApiInfo();
+}
+
+function switchToResolveMode() {
+    currentCollectMode = 'resolve';
+    closePop('api-popover');
+    applyModeSettings('resolve');
+}
+
+function switchToQuickMode() {
+    currentCollectMode = 'quick';
+    closePop('api-popover');
+    applyModeSettings('quick');
+}
+
+// ====== 按模式启用/禁用设置项 ======
+function applyModeSettings(mode) {
+    var resolveSelect = el('resolve-mode-select');
+    var optMusic = el('opt-music');
+    var optStaticCover = el('opt-static-cover');
+    var optDynamicCover = el('opt-dynamic-cover');
+    var chips = [optMusic, optStaticCover, optDynamicCover];
+
+    function setChips(disabled) {
+        chips.forEach(function(cb) {
+            if (!cb) return;
+            cb.disabled = disabled;
+            var chip = cb.closest('.chip');
+            if (chip) chip.classList.toggle('disabled', disabled);
+        });
+    }
+
+    if (mode === 'resolve') {
+        // 解析：解析模式选择器可选，附带下载禁用（解析后手动勾选）
+        if (resolveSelect) resolveSelect.disabled = false;
+        setChips(true);
+    } else if (mode === 'quick') {
+        // 一键下载：解析模式禁用（默认auto），附带下载可选
+        if (resolveSelect) resolveSelect.disabled = true;
+        setChips(false);
+    } else if (mode === 'api') {
+        // API：解析模式可选，附带下载禁用（通过API参数传）
+        if (resolveSelect) resolveSelect.disabled = false;
+        setChips(true);
+    }
+}
+
+// ====== API 信息（渲染到悬浮提示浮层） ======
+async function loadApiInfo() {
+    var contentEl = el('api-pop-content');
+    if (!contentEl) return;
+    try {
+        var data = await apiCall('/api/v1/api-info', 'GET');
+        if (!data.enabled) {
+            contentEl.innerHTML =
+                '<div class="collect-empty-state" style="padding:20px;">' +
+                '<div class="collect-empty-icon"><i data-lucide="webhook"></i></div>' +
+                '<div class="collect-empty-title">API 模式未启用</div>' +
+                '<div class="collect-empty-desc">请在 <a href="/settings" style="color:var(--dh-accent);">设置</a> 中开启 API 请求模式并生成 API Key</div>' +
+                '</div>';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+            return;
+        }
+        var baseUrl = data.base_url || 'http://localhost:2999';
+        var apiKey = data.api_key || '';
+        var endpoints = data.endpoints || {};
+        contentEl.innerHTML =
+            '<div style="padding:2px 4px;">' +
+            '<div class="form-group">' +
+                '<label><i data-lucide="link"></i> API 地址</label>' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                    '<input type="text" readonly value="' + escapeHtml(baseUrl) + '" style="flex:1;font-family:var(--font-mono);font-size:13px;">' +
+                    '<button type="button" class="btn btn-secondary" onclick="copyText(\'' + escapeHtml(baseUrl) + '\')"><i data-lucide="copy"></i> 复制</button>' +
+                '</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label><i data-lucide="key"></i> API Key</label>' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                    '<input type="text" readonly value="' + escapeHtml(apiKey) + '" style="flex:1;font-family:var(--font-mono);font-size:13px;">' +
+                    '<button type="button" class="btn btn-secondary" onclick="copyText(\'' + escapeHtml(apiKey) + '\')"><i data-lucide="copy"></i> 复制</button>' +
+                '</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label><i data-lucide="terminal"></i> 接口列表</label>' +
+                '<div style="font-family:var(--font-mono);font-size:12px;background:var(--dh-surface-muted);padding:12px;border-radius:var(--dh-radius-sm);border:1px solid var(--dh-border);line-height:1.8;">' +
+                    '<strong>POST</strong> ' + escapeHtml(endpoints.resolve || '') + ' — 解析链接，返回下载地址<br>' +
+                    '<strong>POST</strong> ' + escapeHtml(endpoints.download || '') + ' — 解析+本地下载<br>' +
+                    '<strong>GET</strong>&nbsp; ' + escapeHtml(endpoints.status || '') + ' — 检查服务状态<br>' +
+                    '<span style="color:var(--dh-text-muted);">Header: X-API-Key: ' + escapeHtml(apiKey) + '</span>' +
+                '</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label><i data-lucide="code"></i> 调用示例</label>' +
+                '<div style="font-family:var(--font-mono);font-size:12px;background:var(--dh-surface-muted);padding:12px;border-radius:var(--dh-radius-sm);border:1px solid var(--dh-border);line-height:1.6;white-space:pre-wrap;word-break:break-all;">' +
+                    '<strong># 解析链接（返回下载地址）</strong>\n' +
+                    'curl -X POST ' + escapeHtml(endpoints.resolve || '') + ' \\\n' +
+                    '  -H "X-API-Key: ' + escapeHtml(apiKey) + '" \\\n' +
+                    '  -H "Content-Type: application/json" \\\n' +
+                    '  -d \'{"links": "https://www.douyin.com/video/xxx"}\'\n\n' +
+                    '<strong># 解析+本地下载</strong>\n' +
+                    'curl -X POST ' + escapeHtml(endpoints.download || '') + ' \\\n' +
+                    '  -H "X-API-Key: ' + escapeHtml(apiKey) + '" \\\n' +
+                    '  -H "Content-Type: application/json" \\\n' +
+                    '  -d \'{"links": "https://www.douyin.com/video/xxx", "target_dir": "D:\\\\Downloads"}\'' +
+                '</div>' +
+            '</div>' +
+            '<div style="padding:10px;background:var(--dh-surface-muted);border-radius:var(--dh-radius-sm);border-left:3px solid var(--dh-accent);font-size:13px;color:var(--dh-text-muted);">' +
+                '<i data-lucide="info" style="width:14px;height:14px;vertical-align:middle;margin-right:4px;"></i> ' +
+                '供外部设备或脚本调用，网页端无需使用。' +
+            '</div>' +
+            '</div>';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    } catch (e) {
+        contentEl.innerHTML = '<div class="text-muted" style="padding:12px;">加载 API 信息失败: ' + escapeHtml(e.message || '') + '</div>';
+    }
+}
+
+function copyText(text) {
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(function() { showToast('已复制', 'success'); });
+    }
+}
+
+// ============================================================
+// ====== 三模式动作（解析 / 一键下载 / API） ======
+// ============================================================
+function onResolve() { resolveSingleWorks(); }
+function onQuick() { quickDownload(); }
+function onApi() { switchToApiMode(); }
+
+// ============================================================
+// ====== 链接平台识别（前端预检，最终以后端解析为准） ======
+// ============================================================
+function detectPlatform(url) {
+    var u = String(url || '').trim().toLowerCase();
+    if (/(douyin\.com|iesdouyin\.com)/.test(u)) return { p: 'douyin', name: '抖音', cls: 'dy' };
+    if (/tiktok\.com/.test(u)) return { p: 'tiktok', name: 'TikTok', cls: 'tt' };
+    if (/(xiaohongshu\.com|xhslink\.com)/.test(u)) return { p: 'xhs', name: '小红书', cls: 'xhs' };
+    return null;
+}
+
+function renderLinkLines() {
+    var lines = String(el('links-input').value || '').split(/\r?\n/).map(function(s) { return s.trim(); }).filter(Boolean);
+    var html = lines.map(function(l) {
+        var d = detectPlatform(l);
+        var safe = escapeHtml(l);
+        if (d) {
+            return '<div class="link-lines-row ok"><span class="ll-url">' + safe + '</span><span class="plat-pill ' + d.cls + '"><i data-lucide="check"></i>' + d.name + '</span></div>';
+        }
+        return '<div class="link-lines-row bad"><span class="ll-url">' + safe + '</span><span class="plat-pill bad-pill"><i data-lucide="x"></i>无法识别</span></div>';
+    }).join('');
+    var container = el('link-lines');
+    if (container) { container.innerHTML = html; }
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+}
+
+// ============================================================
+// ====== 下载设置折叠 ======
+// ============================================================
+function toggleSettings() {
+    var block = el('settings-panel');
+    if (!block) return;
+    var open = block.style.display !== 'none';
+    block.style.display = open ? 'none' : 'block';
+    block.classList.toggle('open', !open);
+    var btn = el('settings-btn');
+    if (btn) btn.classList.toggle('active', !open);
+}
+
+function ensureSettingsOpen() {
+    var block = el('settings-panel');
+    if (block) { block.style.display = 'block'; block.classList.add('open'); }
+    var btn = el('settings-btn');
+    if (btn) btn.classList.add('active');
+}
+
+function updateSettingsSummary() {
+    var summary = el('settings-summary');
+    if (summary) summary.textContent = el('single-target-dir').value || '未设置目录';
+}
+
+// ============================================================
+// ====== 跨卡片选中聚合 + 浮动操作条 ======
+// ============================================================
+function updateSelection() {
+    var checks = document.querySelectorAll('.asset-checkbox:checked');
+    var count = checks.length;
+    el('fb-count-text').textContent = '已选 ' + count + ' 个资产';
+    var per = {};
+    checks.forEach(function(c) { var w = c.dataset.workId; per[w] = (per[w] || 0) + 1; });
+    var keys = Object.keys(per);
+    el('fb-sub').textContent = keys.length ? ('来自 ' + keys.length + ' 个作品') : '';
+    var fb = el('float-bar');
+    if (fb) fb.classList.toggle('show', count > 0);
+    // 每卡片工具栏选中计数
+    document.querySelectorAll('.toolbar-count-selected').forEach(function(span) {
+        var n = checks.length ? Array.from(checks).filter(function(c) { return c.dataset.workId === span.dataset.workId; }).length : 0;
+        span.textContent = n ? ' · 已选 ' + n : '';
+    });
+}
+
+function clearAllSelection() {
+    document.querySelectorAll('.asset-checkbox').forEach(function(b) {
+        b.checked = false;
+        var row = b.closest('.work-asset-row');
+        if (row) row.classList.remove('selected');
+    });
+    updateSelection();
+}
+
+function downloadAllSelected() {
+    var per = {};
+    document.querySelectorAll('.asset-checkbox:checked').forEach(function(b) {
+        var w = b.dataset.workId;
+        if (!per[w]) per[w] = [];
+        per[w].push(parseInt(b.dataset.assetIndex));
+    });
+    var keys = Object.keys(per);
+    if (!keys.length) { showToast('请先勾选要下载的资产', 'error'); return; }
+    var total = keys.reduce(function(n, k) { return n + per[k].length; }, 0);
+    openDlChoice(function() {
+        var els = startDownloadProgress(total, total);
+        batchEls = els;
+        (async function() {
+            var doneWorks = 0;
+            for (var i = 0; i < keys.length; i++) {
+                var work = findWorkById(keys[i]);
+                if (work) {
+                    await doDownloadSelectedAssets(keys[i], work.share_url, per[keys[i]], els);
+                }
+                doneWorks++;
+                els.text.textContent = '正在下载 (' + doneWorks + '/' + keys.length + ' 个作品)';
+            }
+            // 收尾：全部完成
+            var failed = parseInt(els.failed.textContent) || 0;
+            var ok = failed === 0;
+            els.status.className = 'workflow-status ' + (ok ? 'success' : 'failed');
+            els.status.textContent = ok ? '已完成' : '部分失败';
+            renderSseSegments(els.segments, 3, 3, !ok);
+            batchEls = null;
+            clearAllSelection();
+        })();
+    }, total);
+}
+
+// ============================================================
+// ====== 浮层（API 提示 / 下载方式选择） ======
+// ============================================================
+var pendingDlAction = null;
+
+function showPop(id) { var node = document.getElementById(id); if (node) node.style.display = 'flex'; }
+function closePop(id) { var node = document.getElementById(id); if (node) node.style.display = 'none'; }
+
+function openDlChoice(onConfirm, count) {
+    var n = count !== undefined ? count : document.querySelectorAll('.asset-checkbox:checked').length;
+    if (!n && !onConfirm) { showToast('请先勾选要下载的资产', 'error'); return; }
+    pendingDlAction = onConfirm || null;
+    if (el('dl-choice-count')) el('dl-choice-count').textContent = n;
+    var dir = el('single-target-dir').value;
+    if (el('dl-local-sub')) el('dl-local-sub').textContent = '保存到本机目录' + (dir ? ': ' + dir : '');
+    document.querySelectorAll('.dl-choice .choice').forEach(function(c) {
+        c.classList.toggle('active', c.dataset.dl === currentDownloadMode);
+    });
+    showPop('dl-choice-overlay');
+}
+
+function chooseDl(mode) {
+    setDownloadMode(mode);
+    closePop('dl-choice-overlay');
+    var fn = pendingDlAction;
+    pendingDlAction = null;
+    if (fn) fn();
+}
