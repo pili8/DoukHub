@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}导入采集表 - DoukHub{% endblock %}
+{% block title %}导入分享表 - DoukHub{% endblock %}
 {% block content %}
 {% from "sync/_workflow.html" import workflow_history, workflow_metrics, workflow_notice, workflow_progress %}
 <style>
@@ -9,7 +9,7 @@
 
 <div class="page-head">
     <div>
-        <h1 class="page-title">导入采集表</h1>
+        <h1 class="page-title">导入分享表</h1>
         <div class="page-sub">粘贴或拖入分享数据，预览后写入本地库</div>
     </div>
     <div class="page-actions">
@@ -19,7 +19,7 @@
     </div>
 </div>
 
-{{ workflow_notice('info', '粘贴采集表内容并写入本地数据库；此步骤无需 TTD 服务和 Cookie。') }}
+{{ workflow_notice('info', '粘贴分享表内容并写入本地数据库；此步骤无需 TTD 服务和 Cookie。') }}
 
 <div class="workflow-panel">
     <div class="workflow-header">

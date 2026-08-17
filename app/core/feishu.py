@@ -256,7 +256,7 @@ class FeishuClient:
         common_lww_field = ("最后更新时间", 1001, None)
 
         if table_type == "collection":
-            # 采集表：原始数据源
+            # 分享表：原始数据源
             return [
                 ("分享码", 1, None),             # 文本，抖音分享码（如 iMLuCKjq）
                 ("平台", 3, {"options": [{"name": "抖音"}, {"name": "TikTok"}, {"name": "小红书"}]}),

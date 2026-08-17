@@ -5,7 +5,7 @@
 1. 字段命名：业务字段中文与飞书 100% 一致，系统字段英文（record_id/is_deleted/synced/local_updated_at 等）
 2. 冲突解决（LWW）：人工字段（等级/标签/备注/启用/采集类型/状态）两端都能改，比较最后修改时间，谁新谁赢
    API 字段（账号名称/粉丝数/作品数/签名/头像/sec_user_id/链接）仍为本地赢（DoukHub 是权威源）
-3. 业务唯一键去重：采集表=share_code，账号表=sec_user_id，Cookie表=Cookie
+3. 业务唯一键去重：分享表=share_code，账号表=sec_user_id，Cookie表=Cookie
 4. 删除同步：
    - 飞书端直接删，本地通过差集反推感知（依赖 synced=1 标记）
    - 本地端软删除（is_deleted=1），推送墓碑到飞书，飞书删除后清本地墓碑
@@ -32,14 +32,14 @@ class FeishuSyncer:
 
     # 业务唯一键（跨端去重用）
     BUSINESS_KEYS = {
-        "collection_cache": "share_code",
+        "share_cache": "share_code",
         "account_cache": "sec_user_id",
         "cookie_cache": "Cookie",
     }
 
     # 飞书表中的业务键名（与本地不同时用此映射）
     FEISHU_BUSINESS_KEYS = {
-        "collection_cache": "分享码",
+        "share_cache": "分享码",
     }
 
     # 业务字段（与飞书同步的字段，排除系统字段）
@@ -52,7 +52,7 @@ class FeishuSyncer:
     # 方案 B 取消了「feishu_wins」类型，原 feishu_wins 字段全部改为 lww。
     # Cookie 表的「状态」字段从 local_wins 改为 lww（两端都可能修改）。
     FIELD_OWNERSHIP = {
-        "collection_cache": {
+        "share_cache": {
             # LWW 字段：两端都能改，比较时间戳谁新谁赢
             "lww": ["等级", "标签", "备注", "账号名称", "粉丝数", "作品数"],
             # 本地赢字段：DoukHub 是权威源
@@ -78,9 +78,9 @@ class FeishuSyncer:
 
     # 三张同步表的配置（表名 → 飞书 table_id 字段名 + 业务键 + 转换函数）
     TABLE_CONFIG = {
-        "collection_cache": {
+        "share_cache": {
             "table_id_key": "collection_table_id",
-            "label": "采集表",
+            "label": "分享表",
             "build_fields": "_build_collection_fields",
             "from_feishu": "_feishu_record_to_local_collection",
             "get_all_local": "get_all_collections",
@@ -292,7 +292,7 @@ class FeishuSyncer:
     # ========== 字段构建：本地 → 飞书 ==========
 
     def _build_collection_fields(self, record: dict) -> dict:
-        """本地采集记录 → 飞书字段"""
+        """本地分享记录 → 飞书字段"""
         fields = {
             "分享码": record.get("share_code", ""),
             "平台": record.get("平台", ""),
@@ -383,7 +383,7 @@ class FeishuSyncer:
     # ========== 飞书记录 → 本地数据 ==========
 
     def _feishu_record_to_local_collection(self, record):
-        """飞书采集记录 → 本地数据"""
+        """飞书分享记录 → 本地数据"""
         fields = record.get("fields", {})
         share = self._parse_text_value(fields.get("分享码", ""))
         if not share.strip():
@@ -985,8 +985,8 @@ class FeishuSyncer:
     # ========== 公开入口：单表单方向同步（供 SSE 进度展示用）==========
 
     def sync_collection_to_feishu(self) -> dict:
-        """本地 → 云端：采集表"""
-        return self._sync_to_feishu("collection_cache")
+        """本地 → 云端：分享表"""
+        return self._sync_to_feishu("share_cache")
 
     def sync_account_to_feishu(self) -> dict:
         """本地 → 云端：账号表"""
@@ -997,8 +997,8 @@ class FeishuSyncer:
         return self._sync_to_feishu("cookie_cache")
 
     def sync_collection_from_feishu(self) -> dict:
-        """云端 → 本地：采集表"""
-        return self._sync_from_feishu("collection_cache")
+        """云端 → 本地：分享表"""
+        return self._sync_from_feishu("share_cache")
 
     def sync_account_from_feishu(self) -> dict:
         """云端 → 本地：账号表"""
@@ -1018,7 +1018,7 @@ class FeishuSyncer:
         """
         all_results = {}
         # 本地 → 飞书（3 表）
-        for db_table in ("collection_cache", "account_cache", "cookie_cache"):
+        for db_table in ("share_cache", "account_cache", "cookie_cache"):
             cfg = self.TABLE_CONFIG[db_table]
             label = f"本地 → 云端：{cfg['label']}"
             try:
@@ -1026,7 +1026,7 @@ class FeishuSyncer:
             except Exception as e:
                 all_results[label] = {"failed": 1, "errors": [str(e)]}
         # 飞书 → 本地（3 表）
-        for db_table in ("collection_cache", "account_cache", "cookie_cache"):
+        for db_table in ("share_cache", "account_cache", "cookie_cache"):
             cfg = self.TABLE_CONFIG[db_table]
             label = f"云端 → 本地：{cfg['label']}"
             try:
@@ -1041,10 +1041,10 @@ class FeishuSyncer:
         返回 [(label, callable), ...]
         """
         return [
-            ("本地 → 云端：采集表", self.sync_collection_to_feishu),
+            ("本地 → 云端：分享表", self.sync_collection_to_feishu),
             ("本地 → 云端：账号表", self.sync_account_to_feishu),
             ("本地 → 云端：Cookie表", self.sync_cookie_to_feishu),
-            ("云端 → 本地：采集表", self.sync_collection_from_feishu),
+            ("云端 → 本地：分享表", self.sync_collection_from_feishu),
             ("云端 → 本地：账号表", self.sync_account_from_feishu),
             ("云端 → 本地：Cookie表", self.sync_cookie_from_feishu),
         ]
@@ -1056,13 +1056,13 @@ class FeishuSyncer:
         """
         if direction == "to-feishu":
             return [
-                ("覆盖云端：采集表", lambda: self._full_to_feishu_single("collection_cache")),
+                ("覆盖云端：分享表", lambda: self._full_to_feishu_single("share_cache")),
                 ("覆盖云端：账号表", lambda: self._full_to_feishu_single("account_cache")),
                 ("覆盖云端：Cookie表", lambda: self._full_to_feishu_single("cookie_cache")),
             ]
         else:
             return [
-                ("覆盖本地：采集表", lambda: self._full_from_feishu_single("collection_cache")),
+                ("覆盖本地：分享表", lambda: self._full_from_feishu_single("share_cache")),
                 ("覆盖本地：账号表", lambda: self._full_from_feishu_single("account_cache")),
                 ("覆盖本地：Cookie表", lambda: self._full_from_feishu_single("cookie_cache")),
             ]
@@ -1075,7 +1075,7 @@ class FeishuSyncer:
         ⚠️ 危险操作：会清空飞书表所有数据，二次确认后才能调用
         """
         all_results = {}
-        for db_table in ("collection_cache", "account_cache", "cookie_cache"):
+        for db_table in ("share_cache", "account_cache", "cookie_cache"):
             cfg = self.TABLE_CONFIG[db_table]
             label = f"覆盖云端：{cfg['label']}"
             try:
@@ -1090,7 +1090,7 @@ class FeishuSyncer:
         ⚠️ 危险操作：会清空本地表所有数据（含墓碑），二次确认后才能调用
         """
         all_results = {}
-        for db_table in ("collection_cache", "account_cache", "cookie_cache"):
+        for db_table in ("share_cache", "account_cache", "cookie_cache"):
             cfg = self.TABLE_CONFIG[db_table]
             label = f"覆盖本地：{cfg['label']}"
             try:

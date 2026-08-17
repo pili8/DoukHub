@@ -28,3 +28,6 @@ XHS-Downloader/
 *_launcher.py
 *.log
 .worktrees/
+
+# 采集下载的本地数据
+downloads/

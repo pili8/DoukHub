@@ -38,7 +38,7 @@
             <input type="text" name="feishu.app_token" value="{{ config.feishu.app_token or '' }}" placeholder="从表格 URL 中获取">
         </div>
         <div class="form-group">
-            <label>采集表 Table ID</label>
+            <label>分享表 Table ID</label>
             <input type="text" name="feishu.collection_table_id" value="{{ config.feishu.collection_table_id or '' }}" placeholder="原始数据源表">
         </div>
         <div class="form-group">
@@ -52,7 +52,7 @@
         <div class="btn-group" style="align-items:center;">
             <button type="button" class="btn btn-secondary" onclick="testFeishu()"><i data-lucide="plug-zap"></i> 测试连接</button>
             <button type="button" class="btn btn-secondary" onclick="ensureFields('all')"><i data-lucide="wrench"></i> 一键创建所有表字段</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('collection')">采集表</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('collection')">分享表</button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('account')">账号表</button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('cookie')">Cookie表</button>
             <span id="feishu-status"></span>
@@ -113,6 +113,12 @@
             <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
                 <input type="checkbox" name="downloader.auto_start_services" {{ 'checked' if config.downloader.auto_start_services != false }}>
                 启动 DoukHub 时自动启动 Downloader 服务
+            </label>
+        </div>
+        <div class="form-group">
+            <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                <input type="checkbox" name="downloader.keep_services_alive" {{ 'checked' if config.downloader.keep_services_alive != false }}>
+                持续保持 TTD / 小红书在线（心跳检查 + 自动重启）
             </label>
         </div>
     </div>

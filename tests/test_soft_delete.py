@@ -23,7 +23,7 @@ def db():
 
 def test_sync_tables_have_is_deleted(db):
     """三张同步表都应有 is_deleted 字段"""
-    for table in ("collection_cache", "account_cache", "cookie_cache"):
+    for table in ("share_cache", "account_cache", "cookie_cache"):
         schema = db.get_table_schema(table)
         names = [c["name"] for c in schema]
         assert "is_deleted" in names, f"{table} 缺 is_deleted"
@@ -34,7 +34,7 @@ def test_sync_tables_have_is_deleted(db):
 
 def test_v2_system_fields_exist(db):
     """三张同步表都应有 record_id / created_at 系统字段"""
-    for table in ("collection_cache", "account_cache", "cookie_cache"):
+    for table in ("share_cache", "account_cache", "cookie_cache"):
         schema = db.get_table_schema(table)
         names = [c["name"] for c in schema]
         assert "record_id" in names, f"{table} 缺 record_id"
@@ -46,7 +46,7 @@ def test_v2_system_fields_exist(db):
 
 def test_v2_no_legacy_update_time(db):
     """新库不应自动添加「最后更新时间」字段（v2 已废弃）"""
-    for table in ("collection_cache", "account_cache", "cookie_cache"):
+    for table in ("share_cache", "account_cache", "cookie_cache"):
         schema = db.get_table_schema(table)
         names = [c["name"] for c in schema]
         # 新建库不应有「最后更新时间」
@@ -92,7 +92,7 @@ def test_get_deleted_ids(db):
     db.delete_collection("c1")
     db.delete_collection("c3")
 
-    deleted = db.get_deleted_ids("collection_cache")
+    deleted = db.get_deleted_ids("share_cache")
     assert set(deleted) == {"c1", "c3"}
 
 
@@ -101,7 +101,7 @@ def test_get_active_ids(db):
     db.insert_collection({"record_id": "c2", "share_code": "bbb", "等级": 3})
     db.delete_collection("c1")
 
-    active = db.get_active_ids("collection_cache")
+    active = db.get_active_ids("share_cache")
     assert active == ["c2"]
 
 
@@ -117,7 +117,7 @@ def test_get_active_ids_invalid_table(db):
 
 def test_hard_delete(db):
     db.insert_collection({"record_id": "c1", "share_code": "aaa", "等级": 3})
-    db.hard_delete("collection_cache", "c1")
+    db.hard_delete("share_cache", "c1")
     assert db.get_collection_by_id("c1") is None
 
 
@@ -133,17 +133,17 @@ def test_purge_tombstone(db):
 
     # 墓碑还在
     assert db.get_collection_by_id("c1") is not None
-    assert "c1" in db.get_deleted_ids("collection_cache")
+    assert "c1" in db.get_deleted_ids("share_cache")
 
-    db.purge_tombstone("collection_cache", "c1")
+    db.purge_tombstone("share_cache", "c1")
     assert db.get_collection_by_id("c1") is None
-    assert "c1" not in db.get_deleted_ids("collection_cache")
+    assert "c1" not in db.get_deleted_ids("share_cache")
 
 
 def test_purge_tombstone_only_deletes_marked(db):
     """purge_tombstone 不应删除未标记删除的记录"""
     db.insert_collection({"record_id": "c1", "share_code": "aaa", "等级": 3})
-    db.purge_tombstone("collection_cache", "c1")
+    db.purge_tombstone("share_cache", "c1")
     # 正常记录不受影响
     assert db.get_collection_by_id("c1") is not None
 
@@ -172,7 +172,7 @@ def test_full_soft_delete_lifecycle(db):
 
 def test_synced_field_exists(db):
     """三张同步表都应有 synced 字段"""
-    for table in ("collection_cache", "account_cache", "cookie_cache"):
+    for table in ("share_cache", "account_cache", "cookie_cache"):
         schema = db.get_table_schema(table)
         names = [c["name"] for c in schema]
         assert "synced" in names, f"{table} 缺 synced"
@@ -181,14 +181,14 @@ def test_synced_field_exists(db):
 def test_new_record_not_synced_by_default(db):
     """本地新建的记录默认 synced=0"""
     db.insert_collection({"record_id": "local_rec1", "share_code": "aaa", "等级": 3})
-    synced_ids = db.get_synced_active_ids("collection_cache")
+    synced_ids = db.get_synced_active_ids("share_cache")
     assert "local_rec1" not in synced_ids
 
 
 def test_synced_record_appears_in_synced_ids(db):
     """标记为 synced=1 的记录出现在 get_synced_active_ids 中"""
     db.insert_collection({"record_id": "rec1", "share_code": "aaa", "等级": 3, "synced": True})
-    synced_ids = db.get_synced_active_ids("collection_cache")
+    synced_ids = db.get_synced_active_ids("share_cache")
     assert "rec1" in synced_ids
 
 
@@ -196,7 +196,7 @@ def test_unsynced_record_not_in_synced_ids(db):
     """synced=0 的记录不出现在 get_synced_active_ids 中"""
     db.insert_collection({"record_id": "rec1", "share_code": "aaa", "等级": 3})
     db.insert_collection({"record_id": "rec2", "share_code": "bbb", "等级": 3, "synced": True})
-    synced_ids = db.get_synced_active_ids("collection_cache")
+    synced_ids = db.get_synced_active_ids("share_cache")
     assert "rec1" not in synced_ids
     assert "rec2" in synced_ids
 
@@ -205,7 +205,7 @@ def test_deleted_record_not_in_synced_ids(db):
     """已删除的记录不出现在 get_synced_active_ids 中"""
     db.insert_collection({"record_id": "rec1", "share_code": "aaa", "等级": 3, "synced": True})
     db.delete_collection("rec1")
-    synced_ids = db.get_synced_active_ids("collection_cache")
+    synced_ids = db.get_synced_active_ids("share_cache")
     assert "rec1" not in synced_ids
 
 
@@ -260,7 +260,7 @@ def test_migration_v2_rename_legacy_columns():
     d = Database(db_path=p)
 
     # 应自动 rename
-    schema = d.get_table_schema("collection_cache")
+    schema = d.get_table_schema("share_cache")
     names = [c["name"] for c in schema]
     assert "record_id" in names, "应自动 rename 记录ID → record_id"
     assert "created_at" in names, "应自动 rename 创建时间 → created_at"
@@ -294,5 +294,5 @@ def test_migration_marks_existing_synced():
         """)
 
     d = Database(db_path=p)
-    synced_ids = d.get_synced_active_ids("collection_cache")
+    synced_ids = d.get_synced_active_ids("share_cache")
     assert "rec1" in synced_ids, "旧记录应在迁移时被标记为 synced=1"

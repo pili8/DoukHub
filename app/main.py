@@ -188,15 +188,16 @@ async def lifespan(app: FastAPI):
     sched = get_scheduler()
     sched.start()
 
-    # TTD/XHS 心跳监控：30秒检查一次，连续2次失败自动重启
+    # TTD/XHS 心跳监控：30秒检查一次，连续2次失败自动重启（可通过 keep_services_alive 开关关闭）
     def _health_loop():
         import time as _t
         _t.sleep(15)
         while True:
             try:
-                _svc = get_services()
-                for _s in _svc.services:
-                    _s.health_check()
+                if config.keep_services_alive:
+                    _svc = get_services()
+                    for _s in _svc.services:
+                        _s.health_check()
             except Exception:
                 pass
             _t.sleep(30)
@@ -219,6 +220,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # 关闭
+    global single_work_client
     await get_collection_batch_manager().shutdown()
     sched.shutdown()
     svc.close()
@@ -278,29 +280,38 @@ def _is_unsafe_filename_template(template: str) -> bool:
 
 
 def _sync_workflow_stats(db: Database) -> dict[str, int]:
-    collections = db.get_all_collections()
-    accounts = db.get_all_accounts()
-    account_ids = {
-        str(item.get("sec_user_id") or "") for item in accounts if item.get("sec_user_id")
-    }
+    """用 SQL COUNT 替代全量加载到内存,避免阻塞 async 事件循环"""
+    with db._connect() as conn:
+        collections_total = conn.execute(
+            "SELECT COUNT(*) FROM share_cache WHERE is_deleted = 0"
+        ).fetchone()[0]
+        pending_resolve = conn.execute(
+            "SELECT COUNT(*) FROM share_cache WHERE is_deleted = 0 AND (sec_user_id IS NULL OR sec_user_id = '') AND share_code IS NOT NULL AND TRIM(share_code) != ''"
+        ).fetchone()[0]
+        ready_accounts = conn.execute(
+            "SELECT COUNT(*) FROM share_cache WHERE is_deleted = 0 AND sec_user_id IS NOT NULL AND sec_user_id != ''"
+        ).fetchone()[0]
+        accounts_total = conn.execute(
+            "SELECT COUNT(*) FROM account_cache WHERE is_deleted = 0"
+        ).fetchone()[0]
+        pending_refresh = conn.execute(
+            "SELECT COUNT(*) FROM account_cache WHERE is_deleted = 0 AND sec_user_id IS NOT NULL AND sec_user_id != '' AND COALESCE(已获取信息, 0) = 0"
+        ).fetchone()[0]
+        cookies = conn.execute(
+            "SELECT COUNT(*) FROM cookie_cache WHERE 启用 = 1 AND 状态 = '正常'"
+        ).fetchone()[0]
+        # ready_to_sync: 有 sec_user_id 但不在 account_cache 中
+        ready_to_sync = conn.execute(
+            "SELECT COUNT(*) FROM share_cache s WHERE s.is_deleted = 0 AND s.sec_user_id IS NOT NULL AND s.sec_user_id != '' AND NOT EXISTS (SELECT 1 FROM account_cache a WHERE a.sec_user_id = s.sec_user_id AND a.is_deleted = 0)"
+        ).fetchone()[0]
     return {
-        "collections_total": len(collections),
-        "pending_resolve": sum(
-            1
-            for item in collections
-            if not item.get("sec_user_id") and str(item.get("share_code", "")).strip()
-        ),
-        "ready_accounts": sum(1 for item in collections if item.get("sec_user_id")),
-        "ready_to_sync": sum(
-            1
-            for item in collections
-            if item.get("sec_user_id") and str(item["sec_user_id"]) not in account_ids
-        ),
-        "accounts_total": len(accounts),
-        "pending_refresh": sum(
-            1 for item in accounts if item.get("sec_user_id") and not item.get("已获取信息")
-        ),
-        "cookies": len(db.get_enabled_cookies()),
+        "collections_total": collections_total,
+        "pending_resolve": pending_resolve,
+        "ready_accounts": ready_accounts,
+        "ready_to_sync": ready_to_sync,
+        "accounts_total": accounts_total,
+        "pending_refresh": pending_refresh,
+        "cookies": cookies,
     }
 
 
@@ -1442,6 +1453,7 @@ class CollectionRetryRequest(BaseModel):
 
 class SingleWorkResolveRequest(BaseModel):
     links: str
+    resolve_mode: str = "auto"
 
 
 class SingleWorkDownloadRequest(SingleWorkResolveRequest):
@@ -1452,6 +1464,7 @@ class SingleWorkDownloadRequest(SingleWorkResolveRequest):
     include_music: bool = False
     include_static_cover: bool = False
     include_dynamic_cover: bool = False
+    work: dict | None = None  # 前端可传入已解析的 work 数据，跳过二次解析
 
 
 class SingleWorkRetryRequest(BaseModel):
@@ -2553,18 +2566,95 @@ async def api_resolve_single_works(request: SingleWorkResolveRequest):
             {"success": False, "message": "未识别到抖音或 TikTok 作品链接"},
             status_code=400,
         )
+    resolve_mode = getattr(request, "resolve_mode", "auto") or "auto"
     client = get_single_work_client()
     ttd_url = f"http://127.0.0.1:{config.ttd_port}"
+    db = get_database()
+    cookies = db.get_enabled_cookies()
+    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
     works = []
     errors = []
-    for link, platform in links:
+    for i, (link, platform) in enumerate(links):
         try:
+            cookie = cookie_list[i % len(cookie_list)] if cookie_list else ""
             works.append(
-                await single_work.fetch_work(client, ttd_url, link, platform)
+                await single_work.fetch_work(client, ttd_url, link, platform, cookie, mode=resolve_mode)
             )
         except Exception as error:
             errors.append({"link": link, "message": str(error)})
     return {"success": bool(works), "works": works, "errors": errors}
+
+
+@app.post("/api/collection/works/resolve-stream")
+async def api_resolve_single_works_stream(request: SingleWorkResolveRequest):
+    """SSE 流式解析，逐个推送解析进度"""
+    links = _extract_single_work_links(request.links)
+    if not links:
+        return JSONResponse(
+            {"success": False, "message": "未识别到抖音或 TikTok 作品链接"},
+            status_code=400,
+        )
+    resolve_mode = getattr(request, "resolve_mode", "auto") or "auto"
+    client = get_single_work_client()
+    ttd_url = f"http://127.0.0.1:{config.ttd_port}"
+    total = len(links)
+    # 从数据库获取 Cookie
+    db = get_database()
+    cookies = db.get_enabled_cookies()
+    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+
+    async def resolve_stream():
+        import asyncio as _aio
+        try:
+            mode_label = {"auto": "自动 (API+TTD)", "api": "仅 API", "ttd": "仅 TTD"}.get(resolve_mode, resolve_mode)
+            yield f"data: {json.dumps({'type': 'start', 'total': total, 'mode': resolve_mode, 'message': f'开始解析 {total} 个链接 · 模式: {mode_label}' + ('' if cookie_list else '（警告：无可用 Cookie，可能解析失败）')})}\n\n"
+            works = []
+            success_count = 0
+            failed_count = 0
+            for i, (link, platform) in enumerate(links):
+                idx = i + 1
+                yield f"data: {json.dumps({'type': 'progress', 'phase': 'start', 'index': idx, 'total': total, 'message': f'[{idx}/{total}] 正在解析: {link[:60]}'})}\n\n"
+
+                stage_queue: _aio.Queue = _aio.Queue()
+
+                async def _stage_callback(stage: str, message: str):
+                    await stage_queue.put(("stage", stage, message))
+
+                cookie = cookie_list[i % len(cookie_list)] if cookie_list else ""
+                fetch_task = _aio.create_task(
+                    single_work.fetch_work(client, ttd_url, link, platform, cookie, mode=resolve_mode, on_stage=_stage_callback)
+                )
+
+                # Consume stage events while fetch_work is running
+                done = False
+                while not done:
+                    try:
+                        item = await _aio.wait_for(stage_queue.get(), timeout=0.05)
+                        _, stage, message = item
+                        yield f"data: {json.dumps({'type': 'progress', 'phase': 'stage', 'stage': stage, 'index': idx, 'total': total, 'message': f'[{idx}/{total}] {message}'})}\n\n"
+                    except _aio.TimeoutError:
+                        if fetch_task.done():
+                            done = True
+                            # Drain remaining items
+                            while not stage_queue.empty():
+                                item = stage_queue.get_nowait()
+                                _, stage, message = item
+                                yield f"data: {json.dumps({'type': 'progress', 'phase': 'stage', 'stage': stage, 'index': idx, 'total': total, 'message': f'[{idx}/{total}] {message}'})}\n\n"
+
+                try:
+                    work = await fetch_task
+                    works.append(work)
+                    success_count += 1
+                    work_title = work.get('title', '')
+                    yield f"data: {json.dumps({'type': 'progress', 'phase': 'done', 'index': idx, 'total': total, 'success_count': success_count, 'failed_count': failed_count, 'work': work, 'message': f'[{idx}/{total}] 解析成功: {work_title[:40]}'})}\n\n"
+                except Exception as error:
+                    failed_count += 1
+                    yield f"data: {json.dumps({'type': 'progress', 'phase': 'failed', 'index': idx, 'total': total, 'success_count': success_count, 'failed_count': failed_count, 'link': link, 'message': f'[{idx}/{total}] 解析失败: {str(error)[:120]}'})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'success': success_count > 0, 'total': total, 'success_count': success_count, 'failed_count': failed_count, 'works': works, 'message': f'解析完成: {success_count} 成功, {failed_count} 失败'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'异常: {str(e)}'})}\n\n"
+
+    return StreamingResponse(resolve_stream(), media_type="text/event-stream")
 
 
 @app.post("/api/collection/works/download")
@@ -2597,20 +2687,24 @@ async def api_download_single_works(request: SingleWorkDownloadRequest):
     db = get_database()
     client = get_single_work_client()
     ttd_url = f"http://127.0.0.1:{config.ttd_port}"
+    cookies = db.get_enabled_cookies()
+    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
     results = []
-    for link, platform in links:
-        work = None
-        try:
-            work = await single_work.fetch_work(client, ttd_url, link, platform)
-        except Exception as error:
-            result = await _download_single_work_and_record(
-                db, client, ttd_url, link, platform, target,
-                request.filename_template,
-                work=work,
-            )
-            result["message"] = str(error)
-            results.append(result)
-            continue
+    for i, (link, platform) in enumerate(links):
+        work = request.work  # 如果前端传入了已解析的 work，直接使用
+        if work is None:
+            try:
+                cookie = cookie_list[i % len(cookie_list)] if cookie_list else ""
+                work = await single_work.fetch_work(client, ttd_url, link, platform, cookie)
+            except Exception as error:
+                result = await _download_single_work_and_record(
+                    db, client, ttd_url, link, platform, target,
+                    request.filename_template,
+                    work=work,
+                )
+                result["message"] = str(error)
+                results.append(result)
+                continue
         override = request.filename_overrides.get(work.get("id", ""), "")
         results.append(
             await _download_single_work_and_record(
@@ -2628,6 +2722,170 @@ async def api_download_single_works(request: SingleWorkDownloadRequest):
         "success": any(item["status"] == "success" for item in results),
         "results": results,
     }
+
+
+@app.post("/api/collection/works/download-stream")
+async def api_download_single_works_stream(request: SingleWorkDownloadRequest):
+    """一键解析+下载 SSE 流式接口，实时推送解析和下载进度"""
+    try:
+        unsafe_template = _is_unsafe_filename_template(request.filename_template)
+    except (AttributeError, KeyError, IndexError, ValueError):
+        return JSONResponse(
+            {"success": False, "message": "命名模板格式无效"},
+            status_code=400,
+        )
+    if unsafe_template:
+        return JSONResponse(
+            {"success": False, "message": "命名模板不能包含路径分隔符或绝对路径"},
+            status_code=400,
+        )
+    links = _extract_single_work_links(request.links)
+    if not links:
+        return JSONResponse(
+            {"success": False, "message": "未识别到抖音或 TikTok 作品链接"},
+            status_code=400,
+        )
+    target = Path(request.target_dir).expanduser()
+    if not target.exists() or not target.is_dir():
+        return JSONResponse(
+            {"success": False, "message": "保存目录不存在"},
+            status_code=400,
+        )
+
+    db = get_database()
+    client = get_single_work_client()
+    ttd_url = f"http://127.0.0.1:{config.ttd_port}"
+    total = len(links)
+    # 从数据库获取 Cookie
+    cookies = db.get_enabled_cookies()
+    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+
+    async def download_stream():
+        try:
+            yield f"data: {json.dumps({'type': 'start', 'total': total, 'message': f'开始处理 {total} 个作品' + ('' if cookie_list else '（警告：无可用 Cookie，可能解析失败）')})}\n\n"
+
+            success_count = 0
+            failed_count = 0
+            results = []
+
+            for i, (link, platform) in enumerate(links):
+                idx = i + 1
+                # 阶段1：解析
+                yield f"data: {json.dumps({'type': 'progress', 'phase': 'resolve', 'index': idx, 'total': total, 'message': f'[{idx}/{total}] 正在解析: {link[:60]}'})}\n\n"
+                work = None
+                try:
+                    cookie = cookie_list[i % len(cookie_list)] if cookie_list else ""
+                    work = await single_work.fetch_work(client, ttd_url, link, platform, cookie)
+                    work_title = work.get('title', '')
+                    work_author = work.get('author', '')
+                    yield f"data: {json.dumps({'type': 'progress', 'phase': 'resolve_done', 'index': idx, 'total': total, 'success_count': success_count, 'failed_count': failed_count, 'title': work_title, 'author': work_author, 'work': work, 'message': f'[{idx}/{total}] 解析成功: {work_title[:40]}'})}\n\n"
+                except Exception as error:
+                    failed_count += 1
+                    results.append({"link": link, "status": "failed", "message": str(error)})
+                    yield f"data: {json.dumps({'type': 'progress', 'phase': 'resolve_failed', 'index': idx, 'total': total, 'success_count': success_count, 'failed_count': failed_count, 'message': f'[{idx}/{total}] 解析失败: {str(error)[:120]}'})}\n\n"
+                    continue
+
+                # 阶段2：下载
+                yield f"data: {json.dumps({'type': 'progress', 'phase': 'download', 'index': idx, 'total': total, 'message': f'[{idx}/{total}] 正在下载: {work_title[:40]}'})}\n\n"
+                override = request.filename_overrides.get(work.get("id", ""), "")
+                result = await _download_single_work_and_record(
+                    db, client, ttd_url, link, platform, target,
+                    request.filename_template,
+                    filename_override=override,
+                    asset_indexes=request.asset_indexes,
+                    include_music=request.include_music,
+                    include_static_cover=request.include_static_cover,
+                    include_dynamic_cover=request.include_dynamic_cover,
+                    work=work,
+                )
+                results.append(result)
+                if result["status"] == "success":
+                    success_count += 1
+                    files = result.get("files", [])
+                    yield f"data: {json.dumps({'type': 'progress', 'phase': 'download_done', 'index': idx, 'total': total, 'success_count': success_count, 'failed_count': failed_count, 'title': result.get('title', ''), 'files': files, 'message': f'[{idx}/{total}] 下载完成: {len(files)} 个文件'})}\n\n"
+                else:
+                    failed_count += 1
+                    result_msg = result.get('message', '')
+                    yield f"data: {json.dumps({'type': 'progress', 'phase': 'download_failed', 'index': idx, 'total': total, 'success_count': success_count, 'failed_count': failed_count, 'message': f'[{idx}/{total}] 下载失败: {result_msg[:120]}'})}\n\n"
+
+            # 完成
+            yield f"data: {json.dumps({'type': 'complete', 'success': success_count > 0, 'total': total, 'success_count': success_count, 'failed_count': failed_count, 'message': f'完成: {success_count} 成功, {failed_count} 失败'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'异常: {str(e)}'})}\n\n"
+
+    return StreamingResponse(download_stream(), media_type="text/event-stream")
+
+
+@app.get("/api/collection/works/proxy-download")
+async def api_proxy_download(url: str, filename: str = "download"):
+    """Proxy-download: fetch from Douyin CDN and stream to browser.
+
+    The browser triggers a file download via Content-Disposition header.
+    """
+    if not url or not url.startswith("http"):
+        return JSONResponse({"success": False, "message": "无效的 URL"}, status_code=400)
+
+    # Guess extension from URL or default to .mp4 for video, .jpg for image
+    ext = ""
+    for candidate in (".mp4", ".mp3", ".jpg", ".jpeg", ".png", ".webp"):
+        if candidate in url.lower():
+            ext = candidate
+            break
+    if not ext:
+        ext = ".mp4"  # fallback
+
+    # Sanitize filename
+    safe_name = "".join(c for c in filename if c not in '<>:"/\\|?*\x00-\x1f').strip()[:160] or "download"
+    download_filename = f"{safe_name}{ext}"
+
+    # Use a standalone client to avoid cookie jar / header pollution
+    try:
+        async with httpx.AsyncClient(
+            timeout=120,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+                "Referer": "https://www.douyin.com/",
+                "Accept": "*/*",
+                "Accept-Encoding": "identity",
+            },
+        ) as proxy_client:
+            upstream = await proxy_client.get(url)
+            upstream.raise_for_status()
+    except httpx.HTTPError as e:
+        return JSONResponse({"success": False, "message": f"获取文件失败: {e}"}, status_code=502)
+
+    from starlette.responses import StreamingResponse as StarletteStreaming
+
+    content_type = upstream.headers.get("content-type", "application/octet-stream")
+    total_size = int(upstream.headers.get("content-length", 0))
+
+    async def stream_upstream():
+        # Re-fetch in streaming mode for large files
+        async with httpx.AsyncClient(
+            timeout=120,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+                "Referer": "https://www.douyin.com/",
+                "Accept": "*/*",
+                "Accept-Encoding": "identity",
+            },
+        ) as stream_client:
+            async with stream_client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes(65536):
+                    yield chunk
+
+    headers_out = {"Content-Disposition": f'attachment; filename="{download_filename}"'}
+    if total_size:
+        headers_out["Content-Length"] = str(total_size)
+
+    return StarletteStreaming(
+        stream_upstream(),
+        media_type=content_type,
+        headers=headers_out,
+    )
 
 
 @app.get("/api/collection/works/history")

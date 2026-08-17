@@ -247,7 +247,7 @@ def test_global_shell_uses_lucide_icons(app_env):
     response = client.get("/status")
     assert response.status_code == 200
     assert 'data-lucide="gauge"' in response.text
-    assert 'data-lucide="refresh-cw"' in response.text
+    assert 'data-lucide="users"' in response.text
     assert 'data-lucide="download"' in response.text
     assert 'data-lucide="database"' in response.text
     assert 'data-lucide="settings"' in response.text
@@ -352,10 +352,10 @@ def test_legacy_geometry_aliases_use_doukhub_scale():
 @pytest.mark.parametrize(
     "path,title",
     [
-        ("/sync/overview", "同步概览"),
-        ("/sync/import", "导入采集表"),
-        ("/sync/resolve", "解析采集表"),
-        ("/sync/account", "同步账号表"),
+        ("/sync/overview", "账号状态"),
+        ("/sync/import", "导入分享表"),
+        ("/sync/resolve", "解析分享表"),
+        ("/sync/account", "生成账号表"),
         ("/sync/refresh", "更新账号表"),
     ],
 )
@@ -408,18 +408,20 @@ def test_collection_console_uses_page_head_and_lucide(app_env):
 def test_collection_page_preserves_workflow_contracts(app_env):
     client, *_ = app_env
     response = client.get("/collect")
+    detail_response = client.get("/collect/detail")
     for element_id in (
         "collection-preview-status",
         "collection-status",
         "preview-total",
         "batch-progress-bar",
         "batch-detail-actions",
-        "detail-submit",
     ):
         assert f'id="{element_id}"' in response.text
     assert "previewCollectionScope" in response.text
     assert "selectBatchDetail" in response.text
-    assert "invalidateResolvedSingleWorks" in response.text
+
+    assert 'id="detail-submit"' in detail_response.text
+    assert "invalidateResolvedSingleWorks" in detail_response.text
 
 
 @pytest.mark.parametrize(

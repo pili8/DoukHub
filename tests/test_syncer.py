@@ -77,10 +77,10 @@ class TestSyncerParsing:
         assert _parse_enabled(0) is False
         assert _parse_enabled(1.0) is True
 
-    # --- 采集表记录解析 ---
+    # --- 分享表记录解析 ---
 
     def test_parse_collection_record_basic(self):
-        """采集表基本记录解析"""
+        """分享表基本记录解析"""
         record = {
             "record_id": "rec001",
             "fields": {

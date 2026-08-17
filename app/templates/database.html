@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}数据管理 - DoukHub{% endblock %}
+{% block title %}数据概览 - DoukHub{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>数据管理</h2>
+    <h2>数据概览</h2>
     <div class="page-header-actions">
         <button class="btn btn-secondary" onclick="refreshStats()"><i class="ph ph-arrow-clockwise"></i> 刷新</button>
     </div>
@@ -88,9 +88,9 @@
             const s = data.data || {};
             const container = document.getElementById('stats-container');
             let html = '';
-            const coll = s.collection_cache || {};
+            const coll = s.share_cache || {};
             html += `<div class="stats-card coll">
-                <div class="stats-title"><i class="ph ph-clipboard-text"></i> 采集表</div>
+                <div class="stats-title"><i class="ph ph-clipboard-text"></i> 分享表</div>
                 <div class="stats-num" style="color:var(--accent);">${coll.total || 0}</div>
                 <div class="stats-sub">
 <span class="ok">已解析 ${coll.resolved || 0}</span>
@@ -134,7 +134,7 @@ ${coll.has_error ? `<span class="err">有错误 ${coll.has_error}</span>` : ''}
             try {
                 const data = await apiCall('/api/database/stats', 'GET');
                 document.getElementById('stats-container').innerHTML = `
-                    <div class="stats-card coll"><div class="stats-title">采集表</div><div class="stats-num" style="color:var(--accent);">${data.collection_cache || 0}</div></div>
+                    <div class="stats-card coll"><div class="stats-title">分享表</div><div class="stats-num" style="color:var(--accent);">${data.share_cache || 0}</div></div>
                     <div class="stats-card acc"><div class="stats-title">账号表</div><div class="stats-num" style="color:var(--success);">${data.account_cache || 0}</div></div>
                     <div class="stats-card ck"><div class="stats-title">Cookie表</div><div class="stats-num" style="color:var(--warning);">${data.cookie_cache || 0}</div></div>
                     <div class="stats-card hist"><div class="stats-title">采集历史</div><div class="stats-num" style="color:var(--info);">${data.collection_history || 0}</div></div>

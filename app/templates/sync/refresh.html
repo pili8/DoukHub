@@ -8,10 +8,6 @@
         <h1 class="page-title">更新账号表</h1>
         <div class="page-sub">补齐未获取详情的账号资料</div>
     </div>
-    <div class="page-actions">
-        <button class="btn btn-warning" onclick="execStep()" id="exec-btn"><i data-lucide="play"></i> 执行</button>
-        <button class="btn btn-danger" onclick="cancelStep()" id="cancel-btn" style="display:none;"><i data-lucide="square"></i> 取消</button>
-    </div>
 </div>
 
 {{ workflow_notice('info', '获取账号表中未获取信息的账号资料。需要 TTD 服务和 Cookie。') }}
@@ -19,6 +15,15 @@
 <div class="workflow-panel">
     <div class="workflow-header">
         <div class="workflow-title"><i data-lucide="rotate-cw"></i><span>执行</span></div>
+        <div class="workflow-actions">
+            <span class="workflow-status {{ 'warning' if stats.pending_refresh else 'success' }}" id="workflow-ready-status">待补齐 {{ stats.pending_refresh }} 个账号</span>
+            <button class="btn btn-warning workflow-primary" data-idle-text="更新账号资料" onclick="execStep()" id="exec-btn"><i data-lucide="play"></i> 更新账号资料</button>
+            <button class="btn btn-danger" onclick="cancelStep()" id="cancel-btn" style="display:none;"><i data-lucide="square"></i> 取消</button>
+        </div>
+    </div>
+    <div class="workflow-checklist">
+        <span class="workflow-status {{ 'success' if stats.cookies else 'failed' }}">可用 Cookie {{ stats.cookies }} 个</span>
+        <span class="workflow-status pending" data-ttd-status="true">TTD 服务检查中</span>
     </div>
     <div id="exec-progress" style="display:none;">
         {{ workflow_progress() }}
@@ -102,10 +107,13 @@ function addLog(html) {
 async function execStep() {
     var btn = document.getElementById('exec-btn');
     var cancelBtn = document.getElementById('cancel-btn');
+    var readyStatus = document.getElementById('workflow-ready-status');
     btn.disabled = true;
     btn.innerHTML = '<i data-lucide="loader-circle"></i> 执行中...';
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     cancelBtn.style.display = 'inline-flex';
+    readyStatus.className = 'workflow-status running';
+    readyStatus.textContent = '执行中';
     document.getElementById('exec-progress').style.display = 'block';
     document.getElementById('exec-log').innerHTML = '';
     _lastLogCount = 0;
@@ -141,7 +149,7 @@ function resetButtons() {
     var btn = document.getElementById('exec-btn');
     var cancelBtn = document.getElementById('cancel-btn');
     btn.disabled = false;
-    btn.innerHTML = '<i data-lucide="play"></i> 执行';
+    btn.innerHTML = '<i data-lucide="play"></i> ' + (btn.dataset.idleText || '执行');
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     cancelBtn.style.display = 'none';
 }
@@ -160,6 +168,9 @@ var _stepTaskHandler = function(tasks) {
             currentTaskId = t.task_id;
             var btn = document.getElementById('exec-btn');
             var cancelBtn = document.getElementById('cancel-btn');
+            var readyStatus = document.getElementById('workflow-ready-status');
+            readyStatus.className = 'workflow-status running';
+            readyStatus.textContent = '执行中';
             if (btn) {
                 btn.disabled = true;
                 btn.innerHTML = '<i data-lucide="loader-circle"></i> 执行中...';
@@ -183,7 +194,7 @@ var _stepTaskHandler = function(tasks) {
         document.getElementById('progress-count').textContent = pct + '%';
     }
     var typeLabel = STEP_TASK_TYPE === 'update_collection' ? '解析' :
-                    STEP_TASK_TYPE === 'sync_account' ? '同步' :
+                    STEP_TASK_TYPE === 'sync_account' ? '生成' :
                     STEP_TASK_TYPE === 'refresh_accounts' ? '刷新' : '任务';
     document.getElementById('progress-text').textContent = typeLabel + ': ' + (t.success||0) + '/' + (t.total||0);
 
@@ -199,6 +210,9 @@ var _stepTaskHandler = function(tasks) {
 
     if (['done','failed','cancelled'].includes(t.status)) {
         var bar = document.getElementById('progress-bar');
+        var readyStatus = document.getElementById('workflow-ready-status');
+        readyStatus.className = 'workflow-status ' + (t.status === 'done' ? 'done' : (t.status === 'failed' ? 'failed' : 'cancelled'));
+        readyStatus.textContent = t.status === 'done' ? '已完成' : (t.status === 'failed' ? '失败' : '已取消');
         var summary = '完成: 成功 ' + (t.success||0) + ' 失败 ' + (t.failed||0) + (t.skipped ? ' 跳过 ' + t.skipped : '');
         if (t.status === 'done' && t.failed === 0 && (t.success > 0 || t.total === 0)) {
             bar.style.width = '100%'; bar.style.background = 'var(--success)';

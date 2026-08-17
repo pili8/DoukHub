@@ -49,6 +49,61 @@ def test_future_version_is_not_downgraded(db_path, monkeypatch):
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
 
 
+def test_share_table_replaces_collection_cache_schema_name(db_path):
+    database = Database(db_path=db_path)
+
+    with database._connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+
+    assert "share_cache" in tables
+    assert "collection_cache" not in tables
+    assert database.VALID_TABLES == {
+        "share_cache",
+        "account_cache",
+        "cookie_cache",
+        "collection_history",
+        "scheduled_tasks",
+        "sync_history",
+    }
+
+
+def test_legacy_collection_cache_is_migrated_to_share_cache(db_path):
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE collection_cache (
+                record_id TEXT PRIMARY KEY,
+                share_code TEXT UNIQUE NOT NULL,
+                sec_user_id TEXT,
+                等级 INTEGER
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO collection_cache(record_id, share_code, sec_user_id, 等级) "
+            "VALUES ('r1', 'abc', 'sec1', 4)"
+        )
+        conn.commit()
+
+    database = Database(db_path=db_path)
+
+    with database._connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        row = conn.execute(
+            "SELECT record_id, share_code, sec_user_id FROM share_cache"
+        ).fetchone()
+
+    assert "share_cache" in tables
+    assert "collection_cache" not in tables
+    assert tuple(row) == ("r1", "abc", "sec1")
+
+
 def test_history_connections_use_standard_sqlite_foundations(tmp_path):
     history = history_module.HistoryDB(tmp_path)
     with history._connect() as conn:

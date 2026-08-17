@@ -198,7 +198,7 @@ def test_compute_field_updates_local_wins(syncer, db):
 
 
 def test_compute_field_updates_collection_account_name_feishu_wins(syncer, db):
-    """采集表的「账号名称」是人工字段（飞书赢）
+    """分享表的「账号名称」是人工字段（飞书赢）
 
     用户在飞书改账号名称 → 应该同步到本地（不会被本地覆盖）
     """
@@ -208,7 +208,7 @@ def test_compute_field_updates_collection_account_name_feishu_wins(syncer, db):
         "record_id": "r1",
         "fields": {"分享码": "abc", "账号名称": "new_name_from_feishu"},
     }
-    to_feishu, to_local = syncer._compute_field_updates("collection_cache", local, feishu_record)
+    to_feishu, to_local = syncer._compute_field_updates("share_cache", local, feishu_record)
     # 账号名称是飞书赢，应该更新本地
     assert "账号名称" in to_local
     assert to_local["账号名称"] == "new_name_from_feishu"
@@ -239,7 +239,7 @@ def test_compute_field_updates_feishu_wins(syncer, db):
         "record_id": "r1",
         "fields": {"分享码": "abc", "等级": 4, "备注": "new remark"},
     }
-    to_feishu, to_local = syncer._compute_field_updates("collection_cache", local, feishu_record)
+    to_feishu, to_local = syncer._compute_field_updates("share_cache", local, feishu_record)
     # 人工字段（等级、备注）应该用飞书的值更新本地
     assert "等级" in to_local
     assert to_local["等级"] == 4
@@ -255,7 +255,7 @@ def test_compute_field_updates_no_diff(syncer, db):
         "record_id": "r1",
         "fields": {"分享码": "abc", "等级": 3, "备注": "x"},
     }
-    to_feishu, to_local = syncer._compute_field_updates("collection_cache", local, feishu_record)
+    to_feishu, to_local = syncer._compute_field_updates("share_cache", local, feishu_record)
     assert to_feishu == {}
     assert to_local == {}
 
@@ -302,17 +302,17 @@ def test_compute_field_updates_account_feishu_wins(syncer, db):
 
 def test_business_keys_defined():
     """三张表都应有业务唯一键定义"""
-    assert "collection_cache" in FeishuSyncer.BUSINESS_KEYS
+    assert "share_cache" in FeishuSyncer.BUSINESS_KEYS
     assert "account_cache" in FeishuSyncer.BUSINESS_KEYS
     assert "cookie_cache" in FeishuSyncer.BUSINESS_KEYS
-    assert FeishuSyncer.BUSINESS_KEYS["collection_cache"] == "share_code"
+    assert FeishuSyncer.BUSINESS_KEYS["share_cache"] == "share_code"
     assert FeishuSyncer.BUSINESS_KEYS["account_cache"] == "sec_user_id"
     assert FeishuSyncer.BUSINESS_KEYS["cookie_cache"] == "Cookie"
 
 
 def test_field_ownership_covers_all_tables():
     """三张表都应有字段归属定义"""
-    for table in ("collection_cache", "account_cache", "cookie_cache"):
+    for table in ("share_cache", "account_cache", "cookie_cache"):
         assert table in FeishuSyncer.FIELD_OWNERSHIP
         ownership = FeishuSyncer.FIELD_OWNERSHIP[table]
         assert "lww" in ownership
@@ -331,7 +331,7 @@ def test_field_ownership_disjoint():
 # ========== 字段构建函数 ==========
 
 def test_build_collection_fields(syncer, db):
-    """采集表字段构建应包含所有必要字段"""
+    """分享表字段构建应包含所有必要字段"""
     db.insert_collection({
         "record_id": "r1", "share_code": "abc", "平台": "抖音", "等级": 3,
         "标签": '["个"]', "sec_user_id": "sec1", "账号名称": "name",
@@ -443,7 +443,7 @@ def test_feishu_record_to_local_cookie_empty(syncer):
 # ========== table_id 解析 ==========
 
 def test_get_table_id_collection(syncer):
-    assert syncer._get_table_id("collection_cache") == "tblA"
+    assert syncer._get_table_id("share_cache") == "tblA"
 
 
 def test_get_table_id_account(syncer):
@@ -485,8 +485,8 @@ def test_delete_safety_ratio_value():
 
 
 def test_field_ownership_collection_account_name_is_feishu_wins():
-    """采集表的「账号名称」应归 LWW（两端都能改）"""
-    ownership = FeishuSyncer.FIELD_OWNERSHIP["collection_cache"]
+    """分享表的「账号名称」应归 LWW（两端都能改）"""
+    ownership = FeishuSyncer.FIELD_OWNERSHIP["share_cache"]
     assert "账号名称" in ownership["lww"]
     assert "账号名称" not in ownership["local_wins"]
 
@@ -507,7 +507,7 @@ def test_get_incremental_steps_returns_6_steps(syncer):
     assert any("本地 → 云端" in l for l in labels)
     assert any("云端 → 本地" in l for l in labels)
     # 验证包含所有表
-    for tbl in ["采集表", "账号表", "Cookie表"]:
+    for tbl in ["分享表", "账号表", "Cookie表"]:
         assert any(tbl in l for l in labels), f"缺少 {tbl} 步骤"
     # 验证每个 callable 可调用
     for label, fn in steps:
@@ -570,11 +570,11 @@ def test_field_ownership_cookie_status_is_local_wins():
 
 
 def test_field_ownership_collection_synced_is_local_wins():
-    """采集表「已同步」字段应归本地赢（步骤3 写入的状态字段）
+    """分享表「已同步」字段应归本地赢（步骤3 写入的状态字段）
 
     修正原因：之前归 feishu_wins（现 lww）会导致步骤3 写入后被飞书覆盖
     """
-    ownership = FeishuSyncer.FIELD_OWNERSHIP["collection_cache"]
+    ownership = FeishuSyncer.FIELD_OWNERSHIP["share_cache"]
     assert "已解析" in ownership["local_wins"]
     assert "已解析" not in ownership["lww"]
 
@@ -613,8 +613,8 @@ def test_sync_incremental_creates_local_to_feishu(syncer, db, monkeypatch):
     syncer.feishu.batch_delete_records.return_value = {"code": 0}
 
     results = syncer.sync_incremental()
-    # 找到「本地 → 云端：采集表」
-    coll_to_feishu = results["本地 → 云端：采集表"]
+    # 找到「本地 → 云端：分享表」
+    coll_to_feishu = results["本地 → 云端：分享表"]
     assert coll_to_feishu["created"] >= 1
 
 
@@ -743,7 +743,7 @@ def test_sync_to_feishu_merges_by_business_key_when_record_id_differs(syncer, db
     syncer.feishu.batch_update_records.return_value = {"code": 0}
     syncer.feishu.batch_delete_records.return_value = {"code": 0}
 
-    result = syncer._sync_to_feishu("collection_cache")
+    result = syncer._sync_to_feishu("share_cache")
 
     # 不应该创建新飞书记录
     assert result["created"] == 0
@@ -947,8 +947,8 @@ def test_sync_full_to_feishu_clears_and_pushes(syncer, db, monkeypatch):
     }
 
     results = syncer.sync_full_to_feishu()
-    assert "覆盖云端：采集表" in results
-    r = results["覆盖云端：采集表"]
+    assert "覆盖云端：分享表" in results
+    r = results["覆盖云端：分享表"]
     assert r["deleted"] >= 1  # 清空了旧的
     assert r["created"] == 2  # 创建了 2 条新的
 
@@ -967,8 +967,8 @@ def test_sync_full_from_feishu_clears_and_inserts(syncer, db, monkeypatch):
     results = syncer.sync_full_from_feishu()
 
     # 本地应该被清空并重建
-    assert "覆盖本地：采集表" in results
-    # collection_cache 之前有 local1，现在应该没有，只有 fs1
+    assert "覆盖本地：分享表" in results
+    # share_cache 之前有 local1，现在应该没有，只有 fs1
     collections = db.get_all_collections()
     assert len(collections) == 1
     assert collections[0]["record_id"] == "fs1"
@@ -1077,7 +1077,7 @@ def test_lww_local_wins_field_still_pushed(syncer, db):
             "最后更新时间": int(datetime(2026, 7, 17, 10, 0, 0).timestamp() * 1000),
         },
     }
-    to_feishu, to_local = syncer._compute_field_updates("collection_cache", local, feishu_record)
+    to_feishu, to_local = syncer._compute_field_updates("share_cache", local, feishu_record)
     assert "等级" in to_feishu
     assert to_feishu["等级"] == 5
 

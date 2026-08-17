@@ -128,7 +128,7 @@ def test_table_counts_exclude_soft_deleted_rows(db):
     db.insert_collection({"record_id": "c2", "share_code": "b"})
     db.delete_collection("c2")
 
-    assert db.get_table_counts()["collection_cache"] == 1
+    assert db.get_table_counts()["share_cache"] == 1
 
 
 def test_collection_resolved_is_independent_action_feedback(db):

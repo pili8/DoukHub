@@ -26,6 +26,7 @@ DEFAULT_CONFIG = {
         "ttd_port": 5555,
         "xhs_port": 5556,
         "auto_start_services": True,
+        "keep_services_alive": True,
     },
     "local": {
         "download_path": "",  # 空字符串表示使用默认路径（运行时根据平台决定）
@@ -212,6 +213,11 @@ class Config:
     @property
     def ttd_port(self) -> int:
         return self.downloader.get("ttd_port", 5555)
+
+    @property
+    def keep_services_alive(self) -> bool:
+        """是否持续保持 TTD/XHS 在线（心跳检查 + 自动重启）"""
+        return self.downloader.get("keep_services_alive", True)
 
     @property
     def xhs_port(self) -> int:

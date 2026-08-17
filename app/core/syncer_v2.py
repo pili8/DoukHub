@@ -134,10 +134,10 @@ class Syncer:
         """账号表同步只看 sec_user_id；已解析只是步骤2的动作反馈。"""
         return bool(str(collection.get("sec_user_id") or "").strip())
 
-    # ========== 步骤1：导入采集表 ==========
+    # ========== 步骤1：导入分享表 ==========
 
     def import_to_collection(self, text: str) -> SyncResult:
-        """导入文本到采集表，支持多种格式"""
+        """导入文本到分享表，支持多种格式"""
         result = SyncResult()
 
         def skip(reason: str):
@@ -329,10 +329,10 @@ class Syncer:
 
         return result
 
-    # ========== 步骤2：更新采集表（获取 sec_user_id）==========
+    # ========== 步骤2：更新分享表（获取 sec_user_id）==========
 
     async def update_collection(self) -> SyncResult:
-        """更新采集表，获取 sec_user_id"""
+        """更新分享表，获取 sec_user_id"""
         result = SyncResult()
 
         # 获取所有未获取 sec_user_id 的记录
@@ -399,7 +399,7 @@ class Syncer:
             return match.group(1)
         return None
 
-    # ========== 步骤3：同步账号表 ==========
+    # ========== 步骤3：生成账号表 ==========
 
     async def sync_to_account(self) -> SyncResult:
         """同步到账号表"""
@@ -491,10 +491,10 @@ class Syncer:
 
         return result
 
-    # ========== 一键同步 ==========
+    # ========== 处理账号数据 ==========
 
     async def sync_all(self, text: Optional[str] = None) -> dict:
-        """一键同步所有步骤"""
+        """处理账号数据所有步骤"""
         results = {}
 
         # 步骤1：导入
@@ -503,10 +503,10 @@ class Syncer:
         else:
             results["step1"] = {"total": 0, "success": 0, "failed": 0, "skipped": 0, "errors": []}
 
-        # 步骤2：更新采集表
+        # 步骤2：更新分享表
         results["step2"] = (await self.update_collection()).to_dict()
 
-        # 步骤3：同步账号表
+        # 步骤3：生成账号表
         results["step3"] = (await self.sync_to_account()).to_dict()
 
         return results

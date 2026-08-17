@@ -1,4 +1,4 @@
-"""飞书同步引擎 — 读取采集表 → 解析短链接 → 获取账号信息 → 写入账号表"""
+"""飞书同步引擎 — 读取分享表 → 解析短链接 → 获取账号信息 → 写入账号表"""
 import asyncio
 import logging
 from datetime import datetime
@@ -34,7 +34,7 @@ ACCOUNT_FIELD_MAP = {
     "已获取信息": "info_fetched",
 }
 
-# 采集表字段名（只读取必要信息，不反写）
+# 分享表字段名（只读取必要信息，不反写）
 COLLECTION_FIELDS = {
     "地址": "link",           # 必填：短链接
     "等级": "rating",         # 必填：评级
@@ -42,11 +42,11 @@ COLLECTION_FIELDS = {
     "账号名称": "name",       # 可选：账号名称
     "平台": "platform",       # 可选：平台（可自动识别）
     "备注": "note",           # 可选：备注
-    # 以下字段如果采集表有则读取，没有则忽略
+    # 以下字段如果分享表有则读取，没有则忽略
     "sec_user_id": "sec_user_id",
     "粉丝数": "follower_count",
     "作品数": "aweme_count",
-    "同步状态": "sync_status",
+    "账号状态": "sync_status",
     "同步时间": "synced_at",
 }
 
@@ -95,7 +95,7 @@ def _parse_enabled(value: Any) -> bool:
 
 
 def _parse_collection_record(record: dict) -> dict:
-    """解析采集表记录为 dict"""
+    """解析分享表记录为 dict"""
     fields = record.get("fields", {})
     data = {"record_id": record.get("record_id", "")}
 
@@ -193,15 +193,15 @@ class Syncer:
         self.cookies_file = data_dir / "cookies.xlsx" if data_dir else None
 
     async def sync(self) -> SyncResult:
-        """执行同步：采集表 → 解析短链接 → 写入账号表（第一阶段：快速同步）"""
+        """执行同步：分享表 → 解析短链接 → 写入账号表（第一阶段：快速同步）"""
         result = SyncResult()
 
         try:
-            # 1. 读取采集表全部记录
+            # 1. 读取分享表全部记录
             logger.info("正在连接飞书...")
             records = self.feishu.get_all_records(self.app_token, self.collection_table_id)
             result.total = len(records)
-            logger.info(f"读取采集表完成: {result.total} 条记录")
+            logger.info(f"读取分享表完成: {result.total} 条记录")
 
             # 2. 解析记录
             entries = [_parse_collection_record(r) for r in records]
@@ -223,7 +223,7 @@ class Syncer:
                 link = entry["link"]
                 rating = entry.get("rating", 3)
                 record_id = entry["record_id"]
-                # 检查采集表是否已有 sec_user_id
+                # 检查分享表是否已有 sec_user_id
                 existing_sec_user_id = entry.get("sec_user_id", "")
 
                 logger.info(f"处理 [{i+1}/{len(entries)}]: {link}")
@@ -236,11 +236,11 @@ class Syncer:
                     # 平台识别（纯正则）
                     platform = entry.get("platform", "") or detect_platform(link)
 
-                    # 如果采集表已有 sec_user_id，跳过短链接解析
+                    # 如果分享表已有 sec_user_id，跳过短链接解析
                     if existing_sec_user_id:
                         sec_user_id = existing_sec_user_id
                         resolved_url = link
-                        logger.info(f"  使用采集表已有 sec_user_id: {sec_user_id}（跳过 API 调用）")
+                        logger.info(f"  使用分享表已有 sec_user_id: {sec_user_id}（跳过 API 调用）")
                     else:
                         # 通过 TTD API 解析短链接 → 获取完整 URL
                         cookie = active_cookies[0] if active_cookies else ""
@@ -287,7 +287,7 @@ class Syncer:
                         existing_accounts[sec_user_id] = account
                         logger.info(f"  新增账号: {account.name or sec_user_id}")
 
-                    # 更新采集表状态（包含 sec_user_id）
+                    # 更新分享表状态（包含 sec_user_id）
                     self._update_collection_status(record_id, "已解析", "", sec_user_id)
 
                 except Exception as e:
@@ -391,11 +391,11 @@ class Syncer:
         return result
 
     def _update_collection_status(self, record_id: str, status: str, error: str = "", sec_user_id: str = "") -> None:
-        """更新采集表中的同步状态"""
+        """更新分享表中的账号状态"""
         if not record_id:
             return
         fields = {
-            "同步状态": status,
+            "账号状态": status,
             "同步时间": int(datetime.now().timestamp() * 1000),  # 飞书日期字段需要毫秒时间戳
         }
         if sec_user_id:

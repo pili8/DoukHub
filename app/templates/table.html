@@ -752,21 +752,21 @@ input[type="checkbox"]:disabled {
     // 常量定义
     // =========================================================================
     var TABLE_NAMES = {
-        'collection_cache': '采集表',
+        'share_cache': '分享表',
         'account_cache': '账号表',
         'cookie_cache': 'Cookie表',
         'collection_history': '采集历史',
         'scheduled_tasks': '定时任务'
     };
     var TABLE_ICONS = {
-        'collection_cache': 'ph-clipboard-text',
+        'share_cache': 'ph-clipboard-text',
         'account_cache': 'ph-user',
         'cookie_cache': 'ph-cookie',
         'collection_history': 'ph-clock-counter-clockwise',
         'scheduled_tasks': 'ph-calendar-clock'
     };
     var TABLE_COLORS = {
-        'collection_cache': 'coll',
+        'share_cache': 'coll',
         'account_cache': 'acc',
         'cookie_cache': 'ck',
         'collection_history': 'hist',
@@ -785,7 +785,7 @@ input[type="checkbox"]:disabled {
     };
 
     var TABLE_MODAL_READONLY_ON_EDIT = {
-        'collection_cache': ['sec_user_id'],
+        'share_cache': ['sec_user_id'],
         'account_cache': ['sec_user_id'],
     };
 
@@ -812,7 +812,7 @@ input[type="checkbox"]:disabled {
 
     var TABLE_EDITABLE_FIELDS = {
         'account_cache': ['平台', '等级', '标签', '备注', '已获取信息', '获取错误', '采集类型', 'collect_window_days', '启用'],
-        'collection_cache': ['share_code', '平台', '等级', '标签', '备注', '已解析', '账号名称', '粉丝数', '作品数'],
+        'share_cache': ['share_code', '平台', '等级', '标签', '备注', '已解析', '账号名称', '粉丝数', '作品数'],
         'cookie_cache': ['状态', '启用', '备注', '平台'],
         'collection_history': [],
         'scheduled_tasks': ['任务名称', 'Cron表达式', '等级筛选', '启用'],
@@ -820,7 +820,7 @@ input[type="checkbox"]:disabled {
 
     var TABLE_HAS_ACTIONS = {
         'account_cache': true,
-        'collection_cache': true,
+        'share_cache': true,
         'cookie_cache': true,
         'collection_history': false,
         'scheduled_tasks': false,
@@ -848,7 +848,7 @@ input[type="checkbox"]:disabled {
             '账号名称', '粉丝数', '作品数', '签名', '链接', '头像',
             '获取错误', 'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
         ],
-        'collection_cache': [
+        'share_cache': [
             'share_code',
             '平台', '等级', '标签', '备注',
             '已解析', 'sec_user_id',
@@ -867,7 +867,7 @@ input[type="checkbox"]:disabled {
             'record_id': 'system', '同步时间': 'system', 'created_at': 'system',
             'synced': 'system', 'local_updated_at': 'system', 'is_deleted': 'system', 'deleted_at': 'system',
         },
-        'collection_cache': {
+        'share_cache': {
             'share_code': 'original',
             '平台': 'edit', '等级': 'edit', '标签': 'edit', '备注': 'edit',
             '已解析': 'control', 'sec_user_id': 'control',
@@ -1582,7 +1582,7 @@ input[type="checkbox"]:disabled {
     // =========================================================================
     // SPA 友好:直接调用(脚本在 body 末尾,DOM 已就绪;SPA 二次进入由 rebindScripts 重执行)
     renderTableTabs();
-    showTable('collection_cache');
+    showTable('share_cache');
 
     function renderTableTabs() {
         const container = document.getElementById('table-tabs');
@@ -1963,7 +1963,7 @@ input[type="checkbox"]:disabled {
             }
             let html = '<div style="margin-bottom:12px;padding:12px;background:var(--warning-light);border-radius:var(--radius);font-size:13px;color:var(--warning-text);border:1px solid var(--warning);">';
             html += '发现 <b>' + dups.length + '</b> 组重复, 共 <b>' + dups.reduce((s, d) => s + d.count, 0) + '</b> 条。建议保留最新的一条。</div>';
-            const bkl = { collection_cache: 'share_code', account_cache: 'sec_user_id', cookie_cache: 'Cookie' }[currentTable] || '业务键';
+            const bkl = { share_cache: 'share_code', account_cache: 'sec_user_id', cookie_cache: 'Cookie' }[currentTable] || '业务键';
             dups.forEach((dup, idx) => {
                 html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-muted);border-radius:var(--radius);border-left:4px solid var(--warning);border:1px solid var(--border-default);">';
                 html += '<div style="font-weight:600;margin-bottom:8px;font-size:13px;font-family:var(--font-mono);">#' + (idx + 1) + ' ' + bkl + ': ' + dup.business_key + ' (' + dup.count + ' 条)</div>';

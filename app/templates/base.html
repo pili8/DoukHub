@@ -6,7 +6,7 @@
     <title>{% block title %}DoukHub{% endblock %}</title>
     <script src="/static/js/lucide.min.js"></script>
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
-    <link id="theme-css" rel="stylesheet" href="/static/css/style.css?v=5">
+    <link id="theme-css" rel="stylesheet" href="/static/css/style.css?v=7">
     <script>
       // 明暗模式:localStorage 优先,否则跟随系统,首屏设定避免闪烁
       (function() {
@@ -31,24 +31,21 @@
                     <i data-lucide="gauge"></i><span>状态</span>
                 </a>
 
-                <!-- 同步父级:手风琴式展开/收起子项 -->
+                <!-- 账号父级:点击进入状态页,箭头展开/收起子项 -->
                 <div class="nav-group{% if page in ('sync_overview','sync_import','sync_resolve','sync_account','sync_refresh') %} expanded{% endif %}">
-                    <a href="/sync/overview" title="同步" class="nav-group-toggle" onclick="toggleNavGroup(event, this)">
-                        <i data-lucide="refresh-cw"></i><span>同步</span>
-                        <i data-lucide="chevron-right" class="nav-arrow"></i>
+                    <a href="/sync/overview" title="账号" class="nav-group-toggle{% if page == 'sync_overview' %} active{% endif %}">
+                        <i data-lucide="users"></i><span>账号</span>
+                        <i data-lucide="chevron-right" class="nav-arrow" onclick="toggleNavGroup(event, this)" title="展开/收起"></i>
                     </a>
                     <div class="nav-submenu">
-                        <a href="/sync/overview" title="概览" class="{% if page == 'sync_overview' %}active{% endif %}">
-                            <i data-lucide="house"></i><span>概览</span>
+                        <a href="/sync/import" title="导入分享表" class="{% if page == 'sync_import' %}active{% endif %}">
+                            <i data-lucide="download"></i><span>导入分享表</span>
                         </a>
-                        <a href="/sync/import" title="导入采集表" class="{% if page == 'sync_import' %}active{% endif %}">
-                            <i data-lucide="download"></i><span>导入采集表</span>
+                        <a href="/sync/resolve" title="解析分享表" class="{% if page == 'sync_resolve' %}active{% endif %}">
+                            <i data-lucide="key-round"></i><span>解析分享表</span>
                         </a>
-                        <a href="/sync/resolve" title="解析采集表" class="{% if page == 'sync_resolve' %}active{% endif %}">
-                            <i data-lucide="key-round"></i><span>解析采集表</span>
-                        </a>
-                        <a href="/sync/account" title="同步账号表" class="{% if page == 'sync_account' %}active{% endif %}">
-                            <i data-lucide="users"></i><span>同步账号表</span>
+                        <a href="/sync/account" title="生成账号表" class="{% if page == 'sync_account' %}active{% endif %}">
+                            <i data-lucide="users"></i><span>生成账号表</span>
                         </a>
                         <a href="/sync/refresh" title="更新账号表" class="{% if page == 'sync_refresh' %}active{% endif %}">
                             <i data-lucide="rotate-cw"></i><span>更新账号表</span>
@@ -56,23 +53,29 @@
                     </div>
                 </div>
 
-                <a href="/collect" title="采集" class="{% if page == 'collect' %}active{% endif %}">
-                    <i data-lucide="download"></i><span>采集</span>
-                </a>
+                <!-- 采集父级:手风琴式展开/收起子项 -->
+                <div class="nav-group{% if page in ('collect_overview','collect_account','collect_detail') %} expanded{% endif %}">
+                    <a href="/collect/overview" title="采集" class="nav-group-toggle{% if page == 'collect_overview' %} active{% endif %}">
+                        <i data-lucide="download"></i><span>采集</span>
+                        <i data-lucide="chevron-right" class="nav-arrow" onclick="toggleNavGroup(event, this)" title="展开/收起"></i>
+                    </a>
+                    <div class="nav-submenu">
+                        <a href="/collect/detail" title="单作品采集" class="{% if page == 'collect_detail' %}active{% endif %}">
+                            <i data-lucide="link"></i><span>单作品采集</span>
+                        </a>
+                        <a href="/collect" title="日常增量采集" class="{% if page == 'collect_account' %}active{% endif %}">
+                            <i data-lucide="download"></i><span>日常增量采集</span>
+                        </a>
+                    </div>
+                </div>
 
                 <!-- 数据父级:手风琴式展开/收起子项 -->
                 <div class="nav-group{% if page in ('database','table','sync_cloud') %} expanded{% endif %}">
-                    <a href="/database" title="数据" class="nav-group-toggle" onclick="toggleNavGroup(event, this)">
+                    <a href="/database" title="数据" class="nav-group-toggle{% if page == 'database' %} active{% endif %}">
                         <i data-lucide="database"></i><span>数据</span>
-                        <i data-lucide="chevron-right" class="nav-arrow"></i>
+                        <i data-lucide="chevron-right" class="nav-arrow" onclick="toggleNavGroup(event, this)" title="展开/收起"></i>
                     </a>
                     <div class="nav-submenu">
-                        <a href="/database" title="数据概览" class="{% if page == 'database' %}active{% endif %}">
-                            <i data-lucide="layout-grid"></i><span>数据概览</span>
-                        </a>
-                        <a href="/sync/cloud" title="云端同步" class="{% if page == 'sync_cloud' %}active{% endif %}">
-                            <i data-lucide="cloud-upload"></i><span>云端同步</span>
-                        </a>
                         <a href="/table" title="表浏览" class="{% if page == 'table' %}active{% endif %}">
                             <i data-lucide="table-2"></i><span>表浏览</span>
                         </a>
@@ -282,7 +285,7 @@
     .nav-group .nav-arrow {
         margin-left: auto; font-size: 14px; transition: transform 0.2s ease;
         opacity: 0.6;
-        width: 14px; height: 14px;
+        width: 14px; height: 14px; padding: 5px; cursor: pointer;
     }
     .nav-group.expanded .nav-arrow { transform: rotate(90deg); }
     .nav-group .nav-group-toggle:hover { background: var(--bg-hover); color: var(--text-primary); }
@@ -414,14 +417,6 @@
             e.stopPropagation();
             var group = el.closest('.nav-group');
             if (group) group.classList.toggle('expanded');
-            // 折叠态下不拦截(让 SPA 路由正常跳转)
-            var sb = document.querySelector('.sidebar');
-            if (sb && sb.classList.contains('sb-collapsed')) return;
-            // 展开态下点击切换,不跳转(除非已经是展开的)
-            if (group && group.classList.contains('expanded')) {
-                // 已展开,允许跳转到概览页
-                loadPage('/sync/overview');
-            }
         }
 
         async function restartSystem() {
@@ -439,39 +434,49 @@
             }, 1500);
         }
 
-        // ===== SPA Router: 局部刷新,避免整页重载 =====
+                // ===== SPA Router: 局部刷新,避免整页重载 =====
         // 思路:fetch 整页 → DOMParser 抽取 #main-content + #page-scripts → 局部替换 → 重执行脚本
         // 已加载的外部脚本(src)不会重复执行,避免库重复初始化导致事件监听器累积
         var _loadedScripts = new Set();
+        var _spaLoadGen = 0; // 竞态保护:丢弃过期的 SPA 请求
         async function loadPage(url, pushState = true) {
+            const gen = ++_spaLoadGen;
             try {
                 // 导航前清理:在 DOM 被替换前销毁当前页面的资源(Grid实例、事件监听等)
                 if (typeof window._spaCleanup === 'function') {
                     try { window._spaCleanup(); } catch(e) { console.warn('SPA cleanup failed', e); }
                     window._spaCleanup = null;
                 }
+                // 立即更新导航高亮,给用户即时反馈
+                updateActiveNav(url);
                 const resp = await fetch(url);
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                if (gen !== _spaLoadGen) return; // 已被更新的请求取代
                 const html = await resp.text();
+                if (gen !== _spaLoadGen) return;
                 const doc = new DOMParser().parseFromString(html, 'text/html');
                 const newMain = doc.getElementById('main-content');
                 if (!newMain) { window.location.href = url; return; } // 非 SPA 友好响应,回退整页
                 const main = document.getElementById('main-content');
+                // 先提取脚本再设置 innerHTML,避免 querySelectorAll 在大 DOM 上重复扫描
+                const newScripts = doc.getElementById('page-scripts');
                 main.innerHTML = newMain.innerHTML;
+                // 仅对新插入的 main-content 区域重执行脚本
                 await rebindScripts(main);
                 // 替换页面脚本块并重执行
-                const newScripts = doc.getElementById('page-scripts');
                 const ps = document.getElementById('page-scripts');
                 if (newScripts && ps) {
                     ps.innerHTML = newScripts.innerHTML;
                     await rebindScripts(ps);
                 }
-                if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+                // 仅扫描新插入的 main-content 子树,不扫描整个 document
+                if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(main);
+                if (window._doukhubRefreshTTDStatus) window._doukhubRefreshTTDStatus();
                 document.title = doc.title;
                 if (pushState) history.pushState({ url }, '', url);
-                updateActiveNav(url);
                 window.scrollTo(0, 0);
             } catch (e) {
+                if (gen !== _spaLoadGen) return; // 静默丢弃过期的错误
                 console.error('SPA loadPage 失败,回退整页:', e);
                 window.location.href = url;
             }
@@ -479,57 +484,64 @@
         // innerHTML 替换后浏览器不会执行其中的 <script>,需手动重建标签触发执行
         // 外部脚本(src)仅首次加载,后续 SPA 切换跳过(全局对象已存在,无需重新执行)
         async function rebindScripts(container) {
+            // 收集所有脚本后一次性处理,减少 DOM 重排次数
             const scripts = Array.from(container.querySelectorAll('script'));
+            const inlineScripts = [];
+            const externalScripts = [];
             for (const old of scripts) {
+                if (old.src) externalScripts.push(old);
+                else inlineScripts.push(old);
+            }
+            // 先批量处理内联脚本:用 DocumentFragment 减少重排
+            for (const old of inlineScripts) {
                 const s = document.createElement('script');
-                if (old.src) {
-                    if (old.dataset.reload === 'true') {
-                        s.src = old.src;
-                        old.replaceWith(s);
-                        await new Promise(resolve => {
-                            s.onload = resolve;
-                            s.onerror = resolve;
-                        });
-                        continue;
-                    }
-                    if (_loadedScripts.has(old.src)) {
-                        old.remove();
-                        continue;
-                    }
-                    _loadedScripts.add(old.src);
-                    await new Promise(resolve => {
-                       s.onload = resolve;
-                        s.onerror = resolve;
-                        s.src = old.src;
-                        old.replaceWith(s);
-                    });
-                } else {
-                    s.textContent = old.textContent;
+                s.textContent = old.textContent;
+                old.replaceWith(s);
+            }
+            // 再处理外部脚本(需要 await 加载)
+            for (const old of externalScripts) {
+                if (old.dataset.reload === 'true') {
+                    const s = document.createElement('script');
+                    s.src = old.src;
                     old.replaceWith(s);
+                    await new Promise(resolve => {
+                        s.onload = resolve;
+                        s.onerror = resolve;
+                    });
+                    continue;
                 }
+                if (_loadedScripts.has(old.src)) {
+                    old.remove();
+                    continue;
+                }
+                _loadedScripts.add(old.src);
+                const s = document.createElement('script');
+                await new Promise(resolve => {
+                    s.onload = resolve;
+                    s.onerror = resolve;
+                    s.src = old.src;
+                    old.replaceWith(s);
+                });
             }
         }
         function updateActiveNav(url) {
             document.querySelectorAll('.sidebar-nav a').forEach(a => {
-                // nav-group-toggle(父级)不参与 active 匹配,避免和同 href 子项同时高亮
+                const href = a.getAttribute('href');
                 if (a.classList.contains('nav-group-toggle')) {
-                    a.classList.remove('active');
+                    a.classList.toggle('active', href === url);
                     return;
                 }
-                a.classList.toggle('active', a.getAttribute('href') === url);
+                a.classList.toggle('active', href === url);
             });
-            // 同步父级:任意子页面都展开
-            var syncPages = ['/sync/overview','/sync/import','/sync/resolve','/sync/account','/sync/refresh'];
-            if (syncPages.indexOf(url) >= 0) {
-                var groups = document.querySelectorAll('.nav-group');
-                if (groups[0]) groups[0].classList.add('expanded');
-            }
-            // 数据父级:任意子页面都展开
-            var dataPages = ['/database','/sync/cloud','/table'];
-            if (dataPages.indexOf(url) >= 0) {
-                var groups = document.querySelectorAll('.nav-group');
-                if (groups[1]) groups[1].classList.add('expanded');
-            }
+            document.querySelectorAll('.nav-group').forEach(group => {
+                const parent = group.querySelector('.nav-group-toggle');
+                const child = Array.from(group.querySelectorAll('.nav-submenu a'));
+                group.classList.toggle(
+                    'expanded',
+                    parent?.getAttribute('href') === url ||
+                        child.some(a => a.getAttribute('href') === url)
+                );
+            });
         }
         // 拦截内部链接:仅同源 GET 跳转,排除修饰键/外链/锚点/新窗口
         document.addEventListener('click', e => {
@@ -549,7 +561,7 @@
         var _taskPanelOpen = false;
         var _taskPollTimer = null;
         var _lastTasks = [];
-        var TASK_TYPE_LABEL = {update_collection: '解析账号标识', sync_account: '同步账号表', refresh_accounts: '刷新账号资料', cloud_sync: '云端同步', cloud_sync_full: '全盘同步'};
+        var TASK_TYPE_LABEL = {update_collection: '解析账号标识', sync_account: '生成账号表', refresh_accounts: '刷新账号资料', cloud_sync: '云端同步', cloud_sync_full: '全盘同步'};
         var TASK_STATUS_LABEL = {pending: '排队', running: '运行', done: '完成', failed: '失败', cancelled: '已取消'};
 
         async function pollTasks() {
@@ -616,11 +628,41 @@
             await apiCall('/api/tasks/' + taskId + '/cancel', 'POST');
             pollTasks();
         }
+
+        async function refreshTTDStatus() {
+            const badges = document.querySelectorAll('[data-ttd-status="true"]');
+            if (!badges.length) return;
+            try {
+                const data = await apiCall('/api/services/status', 'GET');
+                const ttd = (data.services || []).find(s => s.name === 'TikTokDownloader');
+                const running = Boolean(ttd && ttd.running);
+                badges.forEach(badge => {
+                    badge.className = 'workflow-status ' + (running ? 'success' : 'failed');
+                    badge.textContent = 'TTD 服务' + (running ? '运行中' : '未运行');
+                });
+            } catch (e) {
+                badges.forEach(badge => {
+                    badge.className = 'workflow-status failed';
+                    badge.textContent = 'TTD 服务状态未知';
+                });
+            }
+        }
+        window._doukhubRefreshTTDStatus = refreshTTDStatus;
+        document.addEventListener('DOMContentLoaded', refreshTTDStatus);
+
         // 启动轮询(2.5s 一次,本地接口开销极小)
+        // 页面不可见时暂停轮询,减少与 SPA 切换的资源竞争
         if (!_taskPollTimer) {
-            _taskPollTimer = setInterval(pollTasks, 2500);
+            _taskPollTimer = setInterval(() => {
+                if (document.hidden) return; // 标签页不可见时跳过
+                pollTasks();
+            }, 2500);
             pollTasks();
         }
+        // 页面恢复可见时立即轮询一次
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) pollTasks();
+        });
     </script>
     <div id="page-scripts" style="display:none">{% block scripts %}{% endblock %}</div>
     <script>
@@ -630,10 +672,14 @@
         });
     </script>
     <script>
-        function refreshIcons() {
-            if (window.lucide?.createIcons) window.lucide.createIcons();
+        function refreshIcons(container) {
+            if (window.lucide?.createIcons) {
+                // 如果指定了容器,仅扫描该子树;否则扫描整个 document
+                if (container) window.lucide.createIcons({ root: container, nameAttr: 'data-lucide' });
+                else window.lucide.createIcons();
+            }
         }
-        document.addEventListener('DOMContentLoaded', refreshIcons);
+        document.addEventListener('DOMContentLoaded', () => refreshIcons());
         window._doukhubRefreshIcons = refreshIcons;
     </script>
 </body>

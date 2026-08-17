@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}采集概览 - DoukHub{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1 class="page-title">采集概览</h1>
+        <div class="page-sub">账号档案 {{ accounts_total }} 个 · 最近批次 {{ latest_batch.started_at if latest_batch else '-' }}</div>
+    </div>
+    <div class="page-actions">
+        <a href="/collect/detail" class="btn btn-secondary"><i data-lucide="link"></i> 单作品采集</a>
+        <a href="/collect" class="btn btn-primary workflow-primary"><i data-lucide="download"></i> 日常增量采集</a>
+    </div>
+</div>
+
+<div class="workflow-panel">
+    <div class="workflow-header">
+        <div class="workflow-title"><i data-lucide="activity"></i><span>当前批次</span></div>
+        {% if latest_batch %}
+        <div class="workflow-actions"><span class="workflow-status {{ latest_batch.status }}">{{ latest_batch.status }}</span></div>
+        {% endif %}
+    </div>
+    <div class="workflow-checklist">
+        <span class="workflow-status {{ 'success' if cookies else 'failed' }}">可用 Cookie {{ cookies }} 个</span>
+        <span class="workflow-status pending" data-ttd-status="true">TTD 服务检查中</span>
+    </div>
+    {% if latest_batch %}
+    <div class="workflow-metrics">
+        <div class="workflow-metric"><span class="metric-value">{{ latest_batch.total_accounts or 0 }}</span><span class="metric-label">账号</span></div>
+        <div class="workflow-metric"><span class="metric-value">{{ latest_batch.success_accounts or 0 }}</span><span class="metric-label">成功</span></div>
+        <div class="workflow-metric"><span class="metric-value">{{ latest_batch.failed_accounts or 0 }}</span><span class="metric-label">失败</span></div>
+        <div class="workflow-metric"><span class="metric-value">{{ latest_batch.skipped_accounts or 0 }}</span><span class="metric-label">跳过</span></div>
+    </div>
+    {% else %}
+    <div class="empty-state"><i data-lucide="inbox"></i>暂无采集批次</div>
+    {% endif %}
+</div>
+
+<div class="workflow-panel">
+    <div class="workflow-header">
+        <div class="workflow-title"><i data-lucide="history"></i><span>最近批次</span><span class="workflow-count">（{{ batches|length }} 条）</span></div>
+    </div>
+    {% if batches %}
+    <div class="table-scroll">
+        <table>
+            <thead><tr><th>批次</th><th>平台</th><th>状态</th><th>账号</th><th>成功</th><th>失败</th><th>开始时间</th></tr></thead>
+            <tbody>
+                {% for batch in batches %}
+                <tr>
+                    <td title="{{ batch.id }}">{{ batch.id[:17] }}</td>
+                    <td>{{ batch.platform }}</td>
+                    <td><span class="workflow-status {{ batch.status }}">{{ batch.status }}</span></td>
+                    <td>{{ batch.total_accounts or 0 }}</td>
+                    <td>{{ batch.success_accounts or 0 }}</td>
+                    <td>{{ batch.failed_accounts or 0 }}</td>
+                    <td>{{ batch.started_at or '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><i data-lucide="history"></i>暂无批次记录</div>
+    {% endif %}
+</div>
+{% endblock %}
