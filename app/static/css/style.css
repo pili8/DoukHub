@@ -1339,6 +1339,20 @@ tbody tr:hover {
 
   th, td { padding: 10px 12px; font-size: 12px; }
 
+  /* 采集页:方案选择区纵向堆叠,开始按钮铺满宽 */
+  .preset-action-row { flex-direction: column; align-items: stretch; gap: 10px; }
+  .preset-select-wrap { width: 100%; }
+  .preset-select-wrap select { width: 100%; }
+  .preset-action-row #start-btn { width: 100%; }
+  /* 采集页:运行日志适配小屏 */
+  .workflow-log { max-height: 240px; font-size: 11px; -webkit-overflow-scrolling: touch; }
+
+  /* 单作品采集:处理方式按钮移动端网格铺满 */
+  .mode-ops-row { flex-direction: column; align-items: stretch; gap: 10px; }
+  .mode-ops-row .mode-group { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .mode-ops-row .mode-group .mode-btn { justify-content: center; }
+  .mode-ops-row .settings-btn { width: 100%; justify-content: center; }
+
   .toast { bottom: 16px; left: 16px; right: 16px; transform: none; max-width: none; min-width: 0; }
   .toast { animation-name: snackbar-in-mobile; }
 }

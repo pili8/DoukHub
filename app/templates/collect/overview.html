@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 {% block title %}采集概览 - DoukHub{% endblock %}
 {% block content %}
+<style>
+/* 采集概览:移动端精简批次表(隐藏次要列)+操作按钮换行 */
+@media (max-width: 768px) {
+  .page-head { flex-wrap: wrap; }
+  .page-head .page-actions { display: flex; gap: 8px; width: 100%; }
+  .page-head .page-actions .btn { flex: 1; justify-content: center; }
+  .recent-batch-table th:nth-child(2),
+  .recent-batch-table td:nth-child(2),
+  .recent-batch-table th:nth-child(4),
+  .recent-batch-table td:nth-child(4) { display: none; }
+}
+</style>
 <div class="page-head">
     <div>
         <h1 class="page-title">采集概览</h1>
@@ -41,7 +53,7 @@
     </div>
     {% if batches %}
     <div class="table-scroll">
-        <table>
+        <table class="recent-batch-table">
             <thead><tr><th>批次</th><th>平台</th><th>状态</th><th>账号</th><th>成功</th><th>失败</th><th>开始时间</th></tr></thead>
             <tbody>
                 {% for batch in batches %}
