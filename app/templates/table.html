@@ -52,6 +52,7 @@
                     <span id="batch-value-container"><input type="text" id="batch-value-input" class="tbl-batch-input" placeholder="值…"></span>
                     <button class="btn btn-primary btn-sm" onclick="batchUpdate()"><i class="ph ph-pencil-simple"></i> 应用</button>
                 </div>
+                <button class="btn btn-secondary btn-sm" onclick="saveSelectionAsPreset()" id="btn-save-preset" style="display:none;"><i class="ph ph-floppy-disk"></i> 存为方案</button>
                 <button class="btn btn-secondary btn-sm tbl-batch-close" onclick="clearSelection()"><i class="ph ph-x"></i></button>
             </div>
         </div>
@@ -385,6 +386,16 @@
     box-shadow: inset 3px 0 0 var(--accent);
 }
 
+/* 跳转高亮：临时闪烁背景 */
+.ag-theme-quartz .ag-row.jump-highlight {
+    background: var(--accent-bg, rgba(59, 130, 246, 0.15)) !important;
+    animation: jump-flash 0.5s ease-out 3;
+}
+@keyframes jump-flash {
+    0%, 100% { background: transparent; }
+    50% { background: var(--accent-bg, rgba(59, 130, 246, 0.25)); }
+}
+
 /* AG Grid 复选框 */
 .ag-theme-quartz .ag-checkbox-input-wrapper {
     --ag-checkbox-checked-color: var(--accent);
@@ -484,6 +495,10 @@
     opacity: 0.7;
 }
 .ag-row:hover .tbl-action-btn { opacity: 1; }
+/* 触摸设备无 hover:操作按钮常显,避免不可见 */
+@media (hover: none) {
+    .ag-row .tbl-action-btn { opacity: 1; }
+}
 .tbl-action-btn i { font-size: 13px; }
 .tbl-action-edit {
     background: var(--menu-hover);
@@ -777,8 +792,8 @@ input[type="checkbox"]:disabled {
     var HIDDEN_COLS = [];
 
     var SYSTEM_FIELDS = ['record_id', 'ID', '创建时间', 'updated_at', 'deleted_at',
-        '获取错误', 'is_deleted', 'local_updated_at', 'local_created_at', 'feishu_record_id',
-        '同步时间', '同步错误', 'synced'];
+        'is_deleted', 'local_updated_at', 'local_created_at', 'feishu_record_id',
+        '同步时间', 'synced', 'collect_window_days', 'last_collected_at'];
 
     var TABLE_MODAL_ALWAYS_READONLY = {
         'account_cache': ['链接', '账号名称', '粉丝数', '作品数', '签名', '头像'],
@@ -790,12 +805,14 @@ input[type="checkbox"]:disabled {
     };
 
     var TAGS_MAPPING = {{ tags_mapping_json | safe }};
-    var FIELD_EDITORS = {
-        '等级': { editor: 'agSelectCellEditor', params: { values: [1, 2, 3, 4, 5] } },
-        '采集类型': { editor: 'agSelectCellEditor', params: { values: ['发布', '喜欢'] } },
-        '状态': { editor: 'agSelectCellEditor', params: { values: ['正常', '失效'] } },
-        '平台': { editor: 'agSelectCellEditor', params: { values: ['抖音', 'TikTok', '小红书'] } },
-        '备注': { editor: 'agTextCellEditor' },
+var FIELD_EDITORS = {
+'等级': { editor: 'agSelectCellEditor', params: { values: [1, 2, 3, 4, 5] } },
+'采集类型': { editor: 'agSelectCellEditor', params: { values: ['发布', '喜欢'] } },
+'状态': { editor: 'agSelectCellEditor', params: { values: ['正常', '失效'] } },
+'平台': { editor: 'agSelectCellEditor', params: { values: ['抖音', 'TikTok', '小红书'] } },
+'解析状态': { editor: 'agSelectCellEditor', params: { values: ['待解析', '已就绪', '已生成', '已删除', '解析失败'] } },
+'获取状态': { editor: 'agSelectCellEditor', params: { values: ['待获取', '已获取', '获取失败'] } },
+'备注': { editor: 'agTextCellEditor' },
         '任务名称': { editor: 'agTextCellEditor' },
         'Cron表达式': { editor: 'agTextCellEditor' },
         '等级筛选': { editor: 'agTextCellEditor' },
@@ -811,8 +828,8 @@ input[type="checkbox"]:disabled {
     };
 
     var TABLE_EDITABLE_FIELDS = {
-        'account_cache': ['平台', '等级', '标签', '备注', '已获取信息', '获取错误', '采集类型', 'collect_window_days', '启用'],
-        'share_cache': ['share_code', '平台', '等级', '标签', '备注', '已解析', '账号名称', '粉丝数', '作品数'],
+        'account_cache': ['平台', '等级', '标签', '备注', '获取状态', '采集类型', 'collect_window_days', '启用'],
+        'share_cache': ['share_code', '平台', '等级', '标签', '备注', '解析状态', '账号名称', '粉丝数', '作品数'],
         'cookie_cache': ['状态', '启用', '备注', '平台'],
         'collection_history': [],
         'scheduled_tasks': ['任务名称', 'Cron表达式', '等级筛选', '启用'],
@@ -831,10 +848,10 @@ input[type="checkbox"]:disabled {
         '备注': 150, 'Cookie': 200, '链接': 200, '头像': 60, '标签': 150,
         '签名': 200, 'sec_user_id': 200, 'record_id': 200, '同步时间': 140,
         'created_at': 140, '粉丝数': 90, '作品数': 90, '账号名称': 120,
-        '已获取信息': 90, '获取错误': 200, '已解析': 80, 'synced': 70,
+        '获取状态': 90, '解析状态': 90, 'synced': 70,
         'last_collected_at': 140, 'collect_window_days': 110,
         'local_updated_at': 140, 'is_deleted': 80, 'deleted_at': 140,
-        '同步错误': 150, 'share_code': 120, '验证时间': 140, '任务名称': 150,
+        'share_code': 120, '验证时间': 140, '任务名称': 150,
         'Cron表达式': 130, '等级筛选': 100, '上次运行': 140, '下次运行': 140,
         'ID': 70, '耗时秒数': 90, '开始时间': 140, '结束时间': 140,
         '错误信息': 150,
@@ -844,16 +861,17 @@ input[type="checkbox"]:disabled {
         'account_cache': [
             'sec_user_id',
             '平台', '等级', '标签', '备注',
-            '已获取信息', '采集类型', 'collect_window_days', 'last_collected_at', '启用',
+            '获取状态', '采集类型', '启用',
             '账号名称', '粉丝数', '作品数', '签名', '链接', '头像',
-            '获取错误', 'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
+            'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
+            'collect_window_days', 'last_collected_at',
         ],
         'share_cache': [
             'share_code',
             '平台', '等级', '标签', '备注',
-            '已解析', 'sec_user_id',
+            '解析状态', 'sec_user_id',
             '账号名称', '粉丝数', '作品数',
-            '同步错误', 'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
+            'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
         ],
     };
 
@@ -861,18 +879,18 @@ input[type="checkbox"]:disabled {
         'account_cache': {
             'sec_user_id': 'original',
             '平台': 'edit', '等级': 'edit', '标签': 'edit', '备注': 'edit',
-            '已获取信息': 'control', '获取错误': 'system', '采集类型': 'control',
-            'collect_window_days': 'control', 'last_collected_at': 'system', '启用': 'control',
+            '获取状态': 'control', '采集类型': 'control', '启用': 'control',
             '链接': 'fetched', '账号名称': 'fetched', '粉丝数': 'fetched', '作品数': 'fetched', '签名': 'fetched', '头像': 'fetched',
             'record_id': 'system', '同步时间': 'system', 'created_at': 'system',
             'synced': 'system', 'local_updated_at': 'system', 'is_deleted': 'system', 'deleted_at': 'system',
+            'collect_window_days': 'system', 'last_collected_at': 'system',
         },
         'share_cache': {
             'share_code': 'original',
             '平台': 'edit', '等级': 'edit', '标签': 'edit', '备注': 'edit',
-            '已解析': 'control', 'sec_user_id': 'control',
+            '解析状态': 'control', 'sec_user_id': 'control',
             '账号名称': 'fetched', '粉丝数': 'fetched', '作品数': 'fetched',
-            'created_at': 'system', 'record_id': 'system', '同步错误': 'system', '同步时间': 'system',
+            'created_at': 'system', 'record_id': 'system', '同步时间': 'system',
             'synced': 'system', 'local_updated_at': 'system', 'is_deleted': 'system', 'deleted_at': 'system',
         },
     };
@@ -962,27 +980,49 @@ input[type="checkbox"]:disabled {
         return checkbox;
     }
 
-    // 状态灯渲染器(用于"已获取信息/已解析"):点击可切换状态,
-    // 代表"是否已获取过信息"这种反馈型标记,与"启用"开关视觉上区分。
-    function statusLightRenderer(params) {
-        const on = params.value === true || params.value === 1;
-        const el = document.createElement('span');
-        el.style.cssText = 'display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:2px 8px;border-radius:var(--radius-full);font-size:11px;font-weight:600;user-select:none;transition:all var(--transition-fast);border:1px solid transparent;';
-        const dot = document.createElement('i');
-        dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + (on ? 'var(--success)' : 'var(--text-muted)') + ';box-shadow:' + (on ? '0 0 6px var(--success)' : 'none') + ';';
-        const label = document.createElement('span');
-        var _onText = params.colDef.field === '已解析' ? '已解析' : '已获取';
-        var _offText = params.colDef.field === '已解析' ? '未解析' : '未获取';
-        label.textContent = on ? _onText : _offText;
-        label.style.color = on ? 'var(--success)' : 'var(--text-muted)';
+// 获取状态渲染器（枚举：待获取/已获取/获取失败）
+function fetchStatusRenderer(params) {
+var val = params.value || '待获取';
+var dotColors = {
+'待获取':   'var(--text-muted)',
+'已获取':   'var(--success)',
+'获取失败': 'var(--danger)',
+};
+var c = dotColors[val] || dotColors['待获取'];
+var el = document.createElement('span');
+el.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:var(--radius-full);font-size:11px;font-weight:600;user-select:none;';
+var dot = document.createElement('i');
+var glow = (c === 'var(--text-muted)') ? 'none' : '0 0 6px ' + c;
+dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + c + ';box-shadow:' + glow + ';';
+var label = document.createElement('span');
+label.textContent = val;
+label.style.color = c;
+el.appendChild(dot);
+el.appendChild(label);
+return el;
+}
+
+    // 解析状态渲染器：状态灯风格（圆点+文字）
+    function parseStatusRenderer(params) {
+        var val = params.value || '待解析';
+        var dotColors = {
+            '待解析':   'var(--text-muted)',
+            '已就绪':   '#3b82f6',
+            '已生成':   'var(--success)',
+            '已删除':   'var(--warning)',
+            '解析失败': 'var(--danger)',
+        };
+        var c = dotColors[val] || dotColors['待解析'];
+        var el = document.createElement('span');
+        el.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:var(--radius-full);font-size:11px;font-weight:600;user-select:none;';
+        var dot = document.createElement('i');
+        var glow = (c === 'var(--text-muted)') ? 'none' : '0 0 6px ' + c;
+        dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + c + ';box-shadow:' + glow + ';';
+        var label = document.createElement('span');
+        label.textContent = val;
+        label.style.color = c;
         el.appendChild(dot);
         el.appendChild(label);
-        el.title = '点击切换状态(未获取将在下次同步时重新获取)';
-        el.addEventListener('click', () => {
-            const field = params.colDef.field;
-            const newValue = on ? 0 : 1;
-            params.node.setDataValue(field, newValue);
-        });
         return el;
     }
 
@@ -1054,15 +1094,24 @@ input[type="checkbox"]:disabled {
         return html;
     }
 
-    var FIELD_RENDERERS = {
-        '等级': ratingRenderer,
-        '链接': linkRenderer,
-        '头像': avatarRenderer,
-        '标签': tagsRenderer,
-        'Cookie': cookieRenderer,
-        '同步错误': errorRenderer,
-        '状态': statusBadgeRenderer,
-    };
+// sec_user_id 链接渲染器：仅在分享表中使用，点击跳转到账号表并高亮对应行
+function secUserIdLinkRenderer(params) {
+    var val = params.value;
+    if (!val) return '<span style="color: var(--text-muted);">-</span>';
+    var display = val.length > 20 ? val.substring(0, 20) + '…' : val;
+    return '<a href="javascript:void(0)" onclick="jumpToAccount(\'' + val.replace(/'/g, "\\'") + '\')" style="color: var(--accent); text-decoration: none; font-weight: 500; cursor: pointer;">' + display + '</a>';
+}
+
+var FIELD_RENDERERS = {
+'等级': ratingRenderer,
+'链接': linkRenderer,
+'头像': avatarRenderer,
+'标签': tagsRenderer,
+'Cookie': cookieRenderer,
+'状态': statusBadgeRenderer,
+'解析状态': parseStatusRenderer,
+'获取状态': fetchStatusRenderer,
+};
 
     // =========================================================================
     // 自定义表头组件（点表头不排序，竖点按钮弹自写菜单）
@@ -1410,12 +1459,13 @@ input[type="checkbox"]:disabled {
             let colDef = {
                 field: field.name,
                 headerName: FIELD_DISPLAY_NAMES[field.name] || field.name,
-                sortable: false,
+                sortable: true,
+                filter: true,
+                floatingFilter: true,
                 resizable: true,
                 editable: isEditable,
                 width: _getSavedWidth(tableName, field.name, FIELD_WIDTHS[field.name] || 120),
                 suppressMovable: true,
-                filter: false,
                 headerComponent: DoukHeaderComponent,
                 headerClass: (() => { const c = getFieldCategory(tableName, field.name); return c ? 'col-cat-' + c : null; })(),
             };
@@ -1430,13 +1480,9 @@ input[type="checkbox"]:disabled {
                 }
             }
 
-            if (isEditable && isBool) {
-                // "已获取信息/已解析"用状态灯(反馈型标记),"启用"等用开关
-                if (field.name === '已获取信息' || field.name === '已解析') {
-                    colDef.cellRenderer = statusLightRenderer;
-                } else {
-                    colDef.cellRenderer = editableCheckboxRenderer;
-                }
+            // 解析状态/获取状态是 TEXT 枚举，不走 boolean 分支
+            if (isEditable && isBool && field.name !== '解析状态' && field.name !== '获取状态') {
+                colDef.cellRenderer = editableCheckboxRenderer;
                 colDef.editable = false;
             } else if (isEditable && editorCfg) {
                 const renderer = FIELD_RENDERERS[field.name];
@@ -1452,6 +1498,11 @@ input[type="checkbox"]:disabled {
 
             if (field.name === 'record_id') {
                 colDef.pinned = null;
+            }
+
+            // 分享表的 sec_user_id 用链接渲染器，点击跳转到账号表
+            if (tableName === 'share_cache' && field.name === 'sec_user_id') {
+                colDef.cellRenderer = secUserIdLinkRenderer;
             }
 
             colDefs.push(colDef);
@@ -1475,6 +1526,7 @@ input[type="checkbox"]:disabled {
                 cellRenderer: actionsRenderer,
                 sortable: false,
                 filter: false,
+                floatingFilter: false,
                 pinned: 'right',
                 width: 90,
                 editable: false,
@@ -1504,12 +1556,12 @@ input[type="checkbox"]:disabled {
                 animateRows: true,
                 stopEditingWhenCellsLoseFocus: true,
                 undoRedoCellEditing: true,
-                defaultColDef: {
-                    sortable: false,
-                    resizable: true,
-                    minWidth: 50,
-                    floatingFilter: false,
-                },
+            defaultColDef: {
+                sortable: true,
+                resizable: true,
+                minWidth: 50,
+                floatingFilter: true,
+            },
                 rowHeight: 40,
                 headerHeight: 40,
                 overlayLoadingTemplate: '<div style="padding: 20px;"><i class="ph ph-circle-notch" style="font-size: 24px; animation: spin 0.8s linear infinite; display: inline-block; color: var(--accent);"></i> <span style="color:var(--text-muted);font-size:13px;">加载中…</span></div>',
@@ -1601,6 +1653,29 @@ input[type="checkbox"]:disabled {
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
         const activeBtn = document.getElementById('tab-' + currentTable);
         if (activeBtn) activeBtn.classList.add('active');
+    }
+
+    // 从分享表跳转到账号表，高亮对应 sec_user_id 的行
+    async function jumpToAccount(secUserId) {
+        await showTable('account_cache');
+        // 等数据加载完后查找并高亮
+        setTimeout(function() {
+            if (!gridApi) return;
+            var found = false;
+            gridApi.forEachNode(function(node) {
+                if (node.data && node.data.sec_user_id === secUserId) {
+                    gridApi.ensureNodeVisible(node);
+                    // 用 CSS 临时高亮行，不选中
+                    var rowEl = document.querySelector('.ag-root-wrapper [row-id="' + CSS.escape(node.id) + '"]');
+                    if (rowEl) {
+                        rowEl.classList.add('jump-highlight');
+                        setTimeout(function() { rowEl.classList.remove('jump-highlight'); }, 3000);
+                    }
+                    found = true;
+                }
+            });
+            if (!found) showToast('未在账号表中找到 sec_user_id: ' + secUserId, 'warning');
+        }, 300);
     }
 
     async function showTable(tableName, page = 1, keyword = '') {
@@ -1746,6 +1821,47 @@ input[type="checkbox"]:disabled {
     // =========================================================================
     function clearSelection() { if (gridApi) gridApi.deselectAll(); updateBatchToolbar(); }
 
+    /**
+     * 将选中的账号行保存为采集方案。
+     * 提取每行的 sec_user_id，拼接后作为 account_names 字段存入方案。
+     */
+    async function saveSelectionAsPreset() {
+        if (!gridApi) return;
+        const rows = gridApi.getSelectedRows();
+        if (!rows.length) return;
+        const secUserIds = rows
+            .map(r => r.sec_user_id)
+            .filter(v => v && String(v).trim());
+        if (!secUserIds.length) {
+            showToast('选中的行缺少 sec_user_id，无法保存', 'error');
+            return;
+        }
+        const name = '从表浏览选择-' + new Date().toLocaleDateString('zh-CN');
+        try {
+            const resp = await fetch('/api/collection/presets', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: name,
+                    rating_min: 1,
+                    tags: '',
+                    account_names: secUserIds.join(','),
+                    platform: 'douyin',
+                    mode: 'incremental',
+                    is_default: false,
+                }),
+            });
+            const data = await resp.json();
+            if (data.success) {
+                showToast('已保存方案"' + name + '"（' + secUserIds.length + '个账号）', 'success');
+            } else {
+                showToast('保存失败: ' + (data.message || ''), 'error');
+            }
+        } catch (e) {
+            showToast('网络错误: ' + e.message, 'error');
+        }
+    }
+
     function updateBatchToolbar() {
         const toolbar = document.getElementById('batch-toolbar');
         const normal = document.getElementById('action-normal');
@@ -1756,6 +1872,9 @@ input[type="checkbox"]:disabled {
             if (normal) normal.style.display = 'none';
             countSpan.innerHTML = '<i class="ph ph-check-square"></i> 已选 ' + count + ' 条';
             updateBatchFieldSelect();
+            // 账号表才显示"存为方案"按钮
+            const btnPreset = document.getElementById('btn-save-preset');
+            if (btnPreset) btnPreset.style.display = (currentTable === 'account_cache') ? '' : 'none';
         } else {
             toolbar.style.display = 'none';
             if (normal) normal.style.display = 'flex';
@@ -1783,11 +1902,11 @@ input[type="checkbox"]:disabled {
             opts.forEach(function(v) { html += '<option value="' + v + '">' + v + '</option>'; });
             html += '</select>';
             container.innerHTML = html;
-        } else if (field === '已获取信息' || field === '启用' || field === '已解析') {
-            container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><option value="">选择…</option><option value="1">是</option><option value="0">否</option></select>';
-        } else if (field === '获取错误') {
-            container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><option value="">选择…</option><option value="">清空</option><option value="_keep">手动输入…</option></select>';
-        } else {
+} else if (field === '解析状态') {
+container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><option value="">选择…</option><option value="待解析">待解析</option><option value="已就绪">已就绪</option><option value="已生成">已生成</option><option value="已删除">已删除</option><option value="解析失败">解析失败</option></select>';
+} else if (field === '获取状态') {
+container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><option value="">选择…</option><option value="待获取">待获取</option><option value="已获取">已获取</option><option value="获取失败">获取失败</option></select>';
+} else {
             container.innerHTML = '<span id="batch-value-container"><input type="text" id="batch-value-input" class="tbl-batch-input" placeholder="值…"></span>';
         }
     }
@@ -1815,7 +1934,8 @@ input[type="checkbox"]:disabled {
         const field = document.getElementById('batch-field-select').value;
         var value = document.getElementById('batch-value-input').value;
         var field2 = field;
-        if (field === '已获取信息' || field === '启用' || field === '已解析') { value = parseInt(value); }
+        if (field === '启用') { value = parseInt(value); }
+        if (field === '解析状态' || field === '获取状态') { value = value; } // 文本枚举,不需转换
         if (!field) { showToast('请选择字段', 'error'); return; }
         const ok = await confirmDialog('将 ' + ids.length + ' 条记录的「' + field + '」改为「' + value + '」，此操作不可撤销。', { title: '更新确认', confirmText: '更新', danger: false });
         if (!ok) return;
@@ -1855,7 +1975,7 @@ input[type="checkbox"]:disabled {
             html += '<div class="tbl-form-row"><label class="tbl-form-label"' + labelCls + '>' + f.name + labelIcon + '</label>';
             if (f.name === '标签') {
                 html += '<input type="text" id="add-field-' + f.name + '" class="tbl-form-input" placeholder="用逗号分隔，如: 街拍,户外"' + disabledAttr + '>';
-            } else if (isBool) {
+            } else if (isBool && f.name !== '解析状态' && f.name !== '获取状态') {
                 html += '<input type="checkbox" id="add-field-' + f.name + '" style="flex-shrink:0;width:18px;height:18px;"' + disabledAttr + '>';
             } else if (editor && editor.editor === 'agSelectCellEditor') {
                 html += '<select id="add-field-' + f.name + '" class="tbl-form-input"' + disabledAttr + '><option value="">请选择…</option>';
@@ -1891,7 +2011,7 @@ input[type="checkbox"]:disabled {
                     const el = document.getElementById('add-field-' + f.name);
                     if (!el) return;
                     const type = (f.type || '').toUpperCase();
-                if (type === 'BOOLEAN') el.checked = record[f.name] === true || record[f.name] === 1;
+                if (type === 'BOOLEAN' && f.name !== '解析状态' && f.name !== '获取状态') el.checked = record[f.name] === true || record[f.name] === 1;
                 else if (f.name === '标签') {
                     let tags = record[f.name];
                     if (tags) {
@@ -1919,7 +2039,7 @@ input[type="checkbox"]:disabled {
             if (editId && editReadonly.includes(f.name)) return;
             const type = (f.type || '').toUpperCase();
             const editor = FIELD_EDITORS[f.name];
-            if (type === 'BOOLEAN') {
+            if (type === 'BOOLEAN' && f.name !== '解析状态' && f.name !== '获取状态') {
                 data[f.name] = el.checked ? 1 : 0;
             } else if (f.name === '标签') {
                 const tags = el.value.split(',').map(t => t.trim()).filter(Boolean);
