@@ -155,11 +155,11 @@ def test_values_equal_int_fields(syncer):
     assert syncer._values_equal("等级", 3, 4) is False
 
 
-def test_values_equal_bool_fields(syncer):
-    assert syncer._values_equal("已解析", True, True) is True
-    assert syncer._values_equal("已解析", True, "true") is True
-    assert syncer._values_equal("已解析", False, 0) is True
-    assert syncer._values_equal("已解析", True, False) is False
+def test_values_equal_ready_status(syncer):
+    assert syncer._values_equal("解析状态", "已就绪", "已就绪") is True
+    assert syncer._values_equal("解析状态", "待解析", "待解析") is True
+    assert syncer._values_equal("解析状态", "已就绪", "待解析") is False
+    assert syncer._values_equal("解析状态", "已生成", "已删除") is False
 
 
 def test_values_equal_tags_field(syncer):
@@ -253,7 +253,7 @@ def test_compute_field_updates_no_diff(syncer, db):
     local = db.get_collection_by_id("r1")
     feishu_record = {
         "record_id": "r1",
-        "fields": {"分享码": "abc", "等级": 3, "备注": "x"},
+        "fields": {"分享码": "abc", "等级": 3, "备注": "x", "解析状态": "待解析"},
     }
     to_feishu, to_local = syncer._compute_field_updates("share_cache", local, feishu_record)
     assert to_feishu == {}
@@ -358,7 +358,7 @@ def test_build_account_fields(syncer, db):
     assert fields["账号名称"] == "name"
     assert fields["平台"] == "抖音"
     assert fields["等级"] == 4
-    assert fields["已获取信息"] is False
+    assert fields["获取状态"] == "待获取"
 
 
 # ========== 飞书记录 → 本地转换 ==========
@@ -570,13 +570,13 @@ def test_field_ownership_cookie_status_is_local_wins():
 
 
 def test_field_ownership_collection_synced_is_local_wins():
-    """分享表「已同步」字段应归本地赢（步骤3 写入的状态字段）
+    """分享表「解析状态」字段应归本地赢（步骤3 写入的状态字段）
 
     修正原因：之前归 feishu_wins（现 lww）会导致步骤3 写入后被飞书覆盖
     """
     ownership = FeishuSyncer.FIELD_OWNERSHIP["share_cache"]
-    assert "已解析" in ownership["local_wins"]
-    assert "已解析" not in ownership["lww"]
+    assert "解析状态" in ownership["local_wins"]
+    assert "解析状态" not in ownership["lww"]
 
 
 # ========== sync_incremental 入口（mock 网络） ==========

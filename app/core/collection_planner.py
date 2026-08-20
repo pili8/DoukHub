@@ -82,12 +82,15 @@ def plan_collection(
     platform: str = "douyin",
     mode: str = "incremental",
     today: date | None = None,
+    created_after: date | None = None,
+    skip_recent_days: int = 0,
 ) -> list[PlannedAccount]:
     wanted_tags = set(tags or [])
-    names = {
-        name.strip()
-        for name in re.split(r"[,，\n]+", account_names or "")
-        if name.strip()
+    # account_names 字段现在存的是 sec_user_id 列表（逗号分隔）
+    sec_user_ids = {
+        uid.strip()
+        for uid in re.split(r"[,，\n]+", account_names or "")
+        if uid.strip()
     }
     ids = set(record_ids or [])
     expected_platform = "抖音" if platform == "douyin" else "TikTok"
@@ -100,8 +103,8 @@ def plan_collection(
         and row.get("启用")
         and str(row.get("sec_user_id") or "").strip()
     ]
-    if names:
-        candidates = [row for row in candidates if row.get("账号名称") in names]
+    if sec_user_ids:
+        candidates = [row for row in candidates if row.get("sec_user_id") in sec_user_ids]
     if ids:
         candidates = [row for row in candidates if row.get("record_id") in ids]
     if wanted_tags:
@@ -109,6 +112,21 @@ def plan_collection(
     candidates = [
         row for row in candidates if int(row.get("等级") or 0) >= rating_min
     ]
+    # 账号创建时间筛选：只保留录入日期 >= created_after 的
+    if created_after:
+        candidates = [
+            row for row in candidates
+            if _last_date(row.get("created_at")) and
+               _last_date(row.get("created_at")) >= created_after
+        ]
+    # 跳过最近 N 天内采过的账号
+    if skip_recent_days > 0:
+        cutoff = (today or date.today()) - timedelta(days=skip_recent_days)
+        candidates = [
+            row for row in candidates
+            if not _last_date(row.get("last_collected_at"))
+            or _last_date(row.get("last_collected_at")) < cutoff
+        ]
     candidates.sort(
         key=lambda row: (-int(row.get("等级") or 0), str(row.get("账号名称") or ""))
     )
@@ -145,6 +163,8 @@ def write_ttd_accounts(
     settings_path: Path,
     platform: str,
     planned: list[PlannedAccount],
+    folder_name: str = "",
+    name_format: str = "",
 ) -> list[dict]:
     key = "accounts_urls" if platform == "douyin" else "accounts_urls_tiktok"
     entries = [
@@ -166,6 +186,11 @@ def write_ttd_accounts(
     else:
         settings = {}
     settings[key] = entries
+    # 覆写采集设置（空值不覆写，保留 TTD 原始默认）
+    if folder_name:
+        settings["folder_name"] = folder_name
+    if name_format:
+        settings["name_format"] = name_format
 
     temporary = settings_path.with_name(f"{settings_path.name}.doukhub.tmp")
     with temporary.open("w", encoding="utf-8") as file:

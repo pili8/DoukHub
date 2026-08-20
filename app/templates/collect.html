@@ -20,6 +20,53 @@
   .batch-card-label { color: var(--dh-text-muted, var(--text-muted)); flex-shrink: 0; margin-right: 8px; }
   .batch-card-stats { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; margin-bottom: 8px; }
   .batch-card-ops { display: flex; gap: 8px; }
+  .batch-card-ops .btn { flex: 1; justify-content: center; }
+  /* 方案管理弹窗:左右分栏改上下布局 */
+  .preset-modal-layout { flex-direction: column; gap: 12px; min-height: auto; }
+  .preset-modal-left { width: 100%; border-right: none; border-bottom: 1px solid var(--dh-border, var(--border-default)); padding-right: 0; padding-bottom: 12px; max-height: 180px; overflow-y: auto; }
+  .preset-modal-right { width: 100%; }
+  /* 预览统计条:窄屏缩小数字字号 */
+  .preview-stats-bar { padding: 8px 10px; gap: 2px; }
+  .preview-stat-num { font-size: 16px; }
+  .preview-stat-label { font-size: 10px; }
+  .preview-stat-divider { height: 22px; }
+  /* 运行状态统计卡片:窄屏横排3个稍小 */
+  .stat-cards { display: flex; gap: 8px; }
+  .stat-cards .stat-card { flex: 1; padding: 10px 8px; text-align: center; }
+  .stat-cards .stat-card .stat-value { font-size: 18px; font-weight: 700; display: block; }
+  .stat-cards .stat-card .stat-label { font-size: 10px; color: var(--dh-text-muted, var(--text-muted)); }
+  /* 筛选栏:触控目标加大 */
+  .batch-filter-bar select { min-height: 36px; padding: 6px 10px; font-size: 13px; }
+  /* 定时任务表:窄屏卡片化 */
+  .sched-card { background: var(--dh-surface, var(--bg-muted)); border: 1px solid var(--dh-border, var(--border-default)); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; }
+  .sched-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .sched-card-name { font-weight: 600; font-size: 13px; }
+  .sched-card-body { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 12px; color: var(--dh-text-secondary, var(--text-secondary)); margin-bottom: 8px; }
+  .sched-card-cell { display: flex; justify-content: space-between; min-width: 0; }
+  .sched-card-label { color: var(--dh-text-muted, var(--text-muted)); flex-shrink: 0; margin-right: 6px; }
+  .sched-card-ops { display: flex; gap: 8px; }
+  .sched-card-ops .btn { flex: 1; justify-content: center; }
+  /* 定时任务表格 → 卡片化(data-label 方案,纯 CSS 无需 JS) */
+  .sched-table table thead { display: none; }
+  .sched-table table, .sched-table table tbody, .sched-table table tr, .sched-table table td { display: block; width: 100%; }
+  .sched-table table tr { background: var(--dh-surface, var(--bg-muted)); border: 1px solid var(--dh-border, var(--border-default)); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; }
+  .sched-table table td { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; font-size: 12px; border: none; }
+  .sched-table table td::before { content: attr(data-label); color: var(--dh-text-muted, var(--text-muted)); font-weight: 500; flex-shrink: 0; }
+  .sched-table table td:last-child { justify-content: flex-end; gap: 6px; padding-top: 6px; border-top: 1px solid var(--dh-border, var(--border-default)); margin-top: 4px; }
+  .sched-table table td:last-child::before { display: none; }
+  /* 目录选择器弹窗:窄屏按钮换行 */
+  #preset-dir-modal .btn-group { flex-wrap: wrap; }
+  #preset-dir-modal .btn-group .btn { flex: 1 1 calc(50% - 4px); min-width: 120px; }
+  /* 文件名模板弹窗:窄屏可拖字段换行 */
+  #preset-template-modal .template-field-row { flex-wrap: wrap; }
+  /* 全局默认设置:窄屏紧凑 */
+  .preset-form-footer { flex-wrap: wrap; gap: 6px; }
+  .preset-form-footer .btn { flex: 1 1 auto; min-width: 80px; justify-content: center; }
+}
+@media (max-width: 420px) {
+  .preview-stat-num { font-size: 14px; }
+  .preview-stat-label { font-size: 9px; }
+  .stat-cards .stat-card .stat-value { font-size: 16px; }
 }
 </style>
 
@@ -172,7 +219,7 @@
     </div>
     <div id="task-list">
         {% if tasks %}
-        <div class="table-scroll"><table>
+        <div class="table-scroll sched-table"><table>
             <thead>
                 <tr>
                     <th>任务名</th>
@@ -186,18 +233,18 @@
             <tbody>
                 {% for task in tasks %}
                 <tr>
-                    <td>{{ task.name }}</td>
-                    <td><code>{{ task.cron_expression }}</code></td>
-                    <td>{{ task.rating_filter }}</td>
-                    <td>
+                    <td data-label="任务名">{{ task.name }}</td>
+                    <td data-label="Cron"><code>{{ task.cron_expression }}</code></td>
+                    <td data-label="等级">{{ task.rating_filter }}</td>
+                    <td data-label="状态">
                         {% if task.enabled %}
                         <span class="workflow-status running">启用</span>
                         {% else %}
                         <span class="workflow-status pending">禁用</span>
                         {% endif %}
                     </td>
-                    <td>{{ task.next_run or '-' }}</td>
-                    <td>
+                    <td data-label="下次执行">{{ task.next_run or '-' }}</td>
+                    <td data-label="操作">
                         <button class="btn btn-sm btn-secondary" onclick="toggleTask({{ task.id }})">{{ '禁用' if task.enabled else '启用' }}</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteTask({{ task.id }})"><i data-lucide="trash-2"></i></button>
                     </td>

@@ -37,14 +37,14 @@ def test_account_cache_no_proxy_field(db):
 
 
 def test_account_cache_fields_align_with_feishu(db):
-    """账号表关键字段应与飞书对齐：sec_user_id / 备注 / 同步时间 / 已获取信息"""
+    """账号表关键字段应与飞书对齐：sec_user_id / 备注 / 同步时间 / 获取状态"""
     schema = db.get_table_schema("account_cache")
     names = {c["name"] for c in schema}
     # 飞书字段名（应全部存在）
     assert "sec_user_id" in names
     assert "备注" in names
     assert "同步时间" in names
-    assert "已获取信息" in names
+    assert "获取状态" in names
     # 旧字段名（应已迁移）
     assert "账号标识" not in names
     assert "更新错误" not in names
@@ -131,12 +131,17 @@ def test_table_counts_exclude_soft_deleted_rows(db):
     assert db.get_table_counts()["share_cache"] == 1
 
 
-def test_collection_resolved_is_independent_action_feedback(db):
-    db.insert_collection({"record_id": "c1", "share_code": "a", "sec_user_id": "sec1", "已解析": 0})
+def test_collection_ready_status_default(db):
+    db.insert_collection({"record_id": "c1", "share_code": "a", "sec_user_id": "sec1"})
 
-    db.update_collection("c1", {"已解析": 0})
+    row = db.get_collection_by_id("c1")
+    assert row["解析状态"] == "待解析"
 
-    assert db.get_collection_by_id("c1")["已解析"] in (0, False)
+
+def test_collection_ready_status_update(db):
+    db.insert_collection({"record_id": "c2", "share_code": "b", "sec_user_id": "sec2"})
+    db.update_collection("c2", {"解析状态": "已就绪"})
+    assert db.get_collection_by_id("c2")["解析状态"] == "已就绪"
 
 
 # ========== update_record_field 启用开关 ==========
@@ -282,7 +287,7 @@ def test_old_db_migration_adds_enabled_column():
     assert "sec_user_id" in names
     assert "备注" in names
     assert "同步时间" in names
-    assert "已获取信息" in names
+    assert "获取状态" in names
     assert "启用" in names
     assert "采集类型" in names
     # 旧字段名已迁移走
@@ -293,7 +298,7 @@ def test_old_db_migration_adds_enabled_column():
     assert acc is not None
     assert acc["sec_user_id"] == "sec1"
     assert acc["备注"] == "old error msg"  # 旧"更新错误"的值迁过来
-    assert acc["已获取信息"] in (1, True)  # 旧"已更新"的值迁过来
+    assert acc["获取状态"] == "已获取"  # 旧"已更新"的值迁过来
     assert acc["启用"] in (1, True)  # 默认值
     assert acc["采集类型"] == "发布"  # 默认值
 

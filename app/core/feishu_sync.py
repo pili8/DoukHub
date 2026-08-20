@@ -56,15 +56,15 @@ class FeishuSyncer:
             # LWW 字段：两端都能改，比较时间戳谁新谁赢
             "lww": ["等级", "标签", "备注", "账号名称", "粉丝数", "作品数"],
             # 本地赢字段：DoukHub 是权威源
-            "local_wins": ["sec_user_id", "已解析"],
+            "local_wins": ["sec_user_id", "解析状态"],
             # 元数据：创建后不变
             "immutable": ["share_code", "平台"],
             # 同步产生
-            "sync_generated": ["同步错误", "同步时间"],
+            "sync_generated": ["同步时间"],
         },
         "account_cache": {
             "lww": ["等级", "标签", "备注", "启用", "采集类型", "账号名称"],
-            "local_wins": ["sec_user_id", "粉丝数", "作品数", "签名", "头像", "链接", "已获取信息"],
+            "local_wins": ["sec_user_id", "粉丝数", "作品数", "签名", "头像", "链接", "获取状态"],
             "immutable": ["平台"],
             "sync_generated": ["同步时间"],
         },
@@ -171,7 +171,7 @@ class FeishuSyncer:
         if isinstance(value, (int, float)):
             return value != 0
         if isinstance(value, str):
-            return value.lower() in ("true", "1", "是", "yes", "已解析")
+            return value.lower() in ("true", "1", "是", "yes")
         return default
 
     @staticmethod
@@ -263,7 +263,11 @@ class FeishuSyncer:
         if field in ("等级", "粉丝数", "作品数"):
             v = self._safe_int(feishu_val)
             return v if v > 0 else None
-        if field in ("已解析", "已获取信息", "启用"):
+        if field == "解析状态":
+            return self._safe_text(feishu_val)
+        if field == "获取状态":
+            return self._safe_text(feishu_val)
+        if field == "启用":
             return self._safe_bool(feishu_val)
         if field == "状态":
             v = self._parse_text_value(feishu_val)
@@ -297,15 +301,13 @@ class FeishuSyncer:
             "分享码": record.get("share_code", ""),
             "平台": record.get("平台", ""),
             "等级": record.get("等级", 3),
-            "已解析": bool(record.get("已解析", False)),
+            "解析状态": record.get("解析状态") or "待解析",
         }
         tags = self._normalize_tags(record.get("标签"))
         if tags:
             fields["标签"] = tags
         if record.get("sec_user_id"):
             fields["sec_user_id"] = record["sec_user_id"]
-        if record.get("同步错误"):
-            fields["同步错误"] = record["同步错误"]
         if record.get("备注"):
             fields["备注"] = record["备注"]
         if record.get("账号名称"):
@@ -324,7 +326,7 @@ class FeishuSyncer:
             "平台": record.get("平台", ""),
             "sec_user_id": record.get("sec_user_id", ""),
             "等级": record.get("等级", 3),
-            "已获取信息": bool(record.get("已获取信息", False)),
+            "获取状态": record.get("获取状态") or "待获取",
         }
         if record.get("链接"):
             fields["链接"] = {"link": record["链接"], "text": "链接"}
@@ -392,12 +394,10 @@ class FeishuSyncer:
             "share_code": share,
             "平台": self._parse_text_value(fields.get("平台", "")),
             "等级": self._safe_int(fields.get("等级", 3), 3),
-            "已解析": self._safe_bool(fields.get("已解析"), False),
+            "解析状态": fields.get("解析状态") or "待解析",
         }
         if fields.get("sec_user_id"):
             data["sec_user_id"] = self._parse_text_value(fields.get("sec_user_id"))
-        if fields.get("同步错误"):
-            data["同步错误"] = self._parse_text_value(fields.get("同步错误"))
         if fields.get("备注"):
             data["备注"] = self._parse_text_value(fields.get("备注"))
         if fields.get("账号名称"):
@@ -445,8 +445,8 @@ class FeishuSyncer:
         ct = fields.get("采集类型")
         if ct:
             data["采集类型"] = self._parse_text_value(ct)
-        if "已获取信息" in fields:
-            data["已获取信息"] = self._safe_bool(fields.get("已获取信息"), False)
+        if "获取状态" in fields:
+            data["获取状态"] = self._safe_text(fields.get("获取状态")) or "待获取"
         return data
 
     def _feishu_record_to_local_cookie(self, record):
@@ -486,7 +486,9 @@ class FeishuSyncer:
         if field in ("等级", "粉丝数", "作品数"):
             return self._safe_int(local_val) == self._safe_int(feishu_val)
         # 布尔字段
-        if field in ("已解析", "已获取信息", "启用"):
+        if field in ("解析状态", "获取状态"):
+            return str(local_val) == str(feishu_val)
+        if field == "启用":
             return self._safe_bool(local_val) == self._safe_bool(feishu_val)
         # 文本字段：去空格比较
         local_str = self._parse_text_value(local_val).strip() if local_val is not None else ""
@@ -671,7 +673,7 @@ class FeishuSyncer:
                         # 如果之前是按业务键匹配但 record_id 不一样，更新本地 record_id
                         if match_by == "key" and local.get("record_id") != matched_feishu["record_id"]:
                             try:
-                                _sync_data = {"record_id": matched_feishu["record_id"]}
+                                _sync_data = {"record_id": matched_feishu["record_id"], "synced": True}
                                 _existing_ts = local.get("local_updated_at")
                                 if _existing_ts:
                                     _sync_data["local_updated_at"] = _existing_ts

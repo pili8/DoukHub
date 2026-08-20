@@ -11,6 +11,18 @@
   .recent-batch-table td:nth-child(2),
   .recent-batch-table th:nth-child(4),
   .recent-batch-table td:nth-child(4) { display: none; }
+  /* 指标区:窄屏2列 */
+  .workflow-metrics { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .workflow-metric { padding: 10px 8px; text-align: center; }
+  .metric-value { font-size: 20px; }
+  .metric-label { font-size: 10px; }
+  /* 最近批次表:窄屏字号缩小 */
+  .recent-batch-table th, .recent-batch-table td { font-size: 11px; padding: 8px 6px; }
+  .recent-batch-table code { font-size: 10px; }
+}
+@media (max-width: 420px) {
+  .workflow-metrics { grid-template-columns: 1fr 1fr; }
+  .metric-value { font-size: 18px; }
 }
 </style>
 <div class="page-head">

@@ -84,6 +84,10 @@ DEFAULT_CONFIG = {
             "updated_at": "2026-08-16 00:00:00",
         }],
     },
+    "collection_defaults": {
+        "folder_name": "Download",
+        "name_format": "create_time type nickname desc",
+    },
 }
 
 
@@ -174,6 +178,14 @@ class Config:
     @property
     def single_work(self) -> dict:
         return self._data.get("single_work", {})
+
+    @property
+    def collection_defaults(self) -> dict:
+        """增量采集的全局默认设置（folder_name + name_format）"""
+        return self._data.get("collection_defaults", {
+            "folder_name": "Download",
+            "name_format": "create_time type nickname desc",
+        })
 
     @property
     def concurrent_accounts(self) -> int:

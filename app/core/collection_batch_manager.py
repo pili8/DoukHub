@@ -9,11 +9,21 @@ import subprocess
 import sys
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
 
 import httpx
+
+
+def _parse_date(value: str) -> date | None:
+    """将 'YYYY-MM-DD' 字符串转为 date，空或无效返回 None。"""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except (ValueError, TypeError):
+        return None
 
 from .collection_planner import PlannedAccount, plan_collection, write_ttd_accounts
 from .database import Database
@@ -50,6 +60,11 @@ class CollectionBatchManager:
         record_ids: list[str] | None = None,
         platforms: tuple[str, ...] = ("douyin",),
         mode: str = "incremental",
+        preset_name: str = "",
+        folder_name: str = "",
+        name_format: str = "",
+        account_created_after: str = "",
+        skip_recent_days: int = 0,
     ) -> list[dict]:
         if self.db.get_active_collection_batch():
             if self._worker and not self._worker.done():
@@ -70,6 +85,8 @@ class CollectionBatchManager:
                 record_ids=record_ids,
                 platform=platform,
                 mode=mode,
+                created_after=_parse_date(account_created_after),
+                skip_recent_days=skip_recent_days,
             )
             if not planned:
                 continue
@@ -82,11 +99,16 @@ class CollectionBatchManager:
                 "record_ids": record_ids or [],
                 "platform": platform,
                 "mode": mode,
+                "folder_name": folder_name,
+                "name_format": name_format,
+                "account_created_after": account_created_after,
+                "skip_recent_days": skip_recent_days,
             }
             self.db.create_collection_batch(
                 batch_id=batch_id,
                 filter_json=json.dumps(snapshot, ensure_ascii=False),
                 platform=platform,
+                preset_name=preset_name,
                 log_path=str(log_path),
                 items=[{**vars(item), "account_record_id": item.record_id} for item in planned],
             )
@@ -274,6 +296,18 @@ class CollectionBatchManager:
         self._cancel_requested = False
         batch = self.db.get_collection_batch(batch_id)
         items = self.db.get_collection_batch_items(batch_id)
+        # 从 filter_json 中解析采集设置
+        try:
+            filter_data = json.loads(batch.get("filter_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            filter_data = {}
+        folder_name = filter_data.get("folder_name", "")
+        name_format = filter_data.get("name_format", "")
+        # 防御性回退：正常情况下 main.py 已注入全局默认值
+        if not folder_name:
+            folder_name = "Download"
+        if not name_format:
+            name_format = "create_time type nickname desc"
         pending = [item for item in items if item["status"] == "pending"]
         started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -304,6 +338,8 @@ class CollectionBatchManager:
                 self.ttd_path / "Volume" / "settings.json",
                 batch["platform"],
                 planned_items,
+                folder_name=folder_name,
+                name_format=name_format,
             )
         except Exception as error:
             for item in pending:

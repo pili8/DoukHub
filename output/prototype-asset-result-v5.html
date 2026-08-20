@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>资产结果 · 显示条件 + 多作品聚合 V5 — DoukHub</title>
+<style>
+:root{
+  --bg:#FBFAF7; --surface:#FFFFFF; --muted:#F5F2EC; --muted2:#EFEAE2;
+  --text:#1F1B17; --text2:#5C564E; --textm:#A39E96;
+  --border:#ECE7DF; --border2:#D9D3C8;
+  --accent:#0061A4; --accent-hover:#004F8A; --accent-soft:#E7F0F8;
+  --video:#0061A4; --video-soft:#E7F0F8;
+  --image:#0E7490; --image-soft:#E0F2F7;
+  --cover:#C2410C; --cover-soft:#FDEEE3;
+  --music:#7C3AED; --music-soft:#F1EBFD;
+  --success:#16A34A; --success-soft:#ECFDF3;
+  --r-sm:6px; --r:8px; --r-lg:12px;
+  --shadow-sm:0 1px 2px rgba(31,27,23,.05);
+  --shadow-md:0 4px 14px rgba(31,27,23,.08);
+  --shadow-lg:0 10px 30px rgba(31,27,23,.14);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"SF Mono",ui-monospace,Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);font-family:var(--font);color:var(--text);padding:28px 20px 90px;display:flex;justify-content:center}
+.wrap{width:100%;max-width:880px;display:flex;flex-direction:column;gap:18px}
+
+/* ===== 说明条 ===== */
+.note{font-size:13px;color:var(--text2);background:var(--accent-soft);border:1px solid rgba(0,97,164,.25);border-radius:var(--r);padding:11px 14px;line-height:1.65}
+.note b{color:var(--accent)}
+.note .k{display:inline-block;font-size:11px;font-weight:700;color:#fff;background:var(--accent);border-radius:4px;padding:1px 6px;margin-right:4px;vertical-align:1px}
+
+/* ===== 规则卡：资产类型显示条件 ===== */
+.rules{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-sm);padding:14px 16px}
+.rules h3{font-size:13px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:7px;color:var(--text)}
+.rules h3 svg{width:15px;height:15px;color:var(--accent)}
+.rule-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px}
+.rule{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--text2)}
+.rule .demo{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:4px 12px;border-radius:999px;white-space:nowrap;flex-shrink:0}
+.rule .txt{line-height:1.45}
+.rule .txt b{color:var(--text)}
+/* 主类型高亮：实线蓝底 */
+.btn-demo.kind-filter{color:var(--accent);background:var(--accent-soft);border:1px solid rgba(0,97,164,.4);font-weight:600}
+/* 普通类型：实线中性 */
+.btn-demo.plain{color:var(--text2);background:var(--surface);border:1px solid var(--border)}
+/* 附属类型：虚线 */
+.btn-demo.aux{border:1px dashed var(--border2);color:var(--textm);background:var(--surface);font-weight:500}
+/* 折叠组示意 */
+.demo-aux{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text2);background:var(--muted);padding:4px 12px;border-radius:999px;white-space:nowrap}
+.demo-aux svg{width:13px;height:13px}
+
+/* ===== 作品卡片 ===== */
+.work-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-sm);overflow:hidden}
+.wc-head{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#FCFBF9,#FFF)}
+.wc-idx{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.wc-head h2{font-size:14px;font-weight:700}
+.wc-head .wsub{font-size:12px;color:var(--textm)}
+
+/* 上下文条 */
+.workbar{display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border)}
+.cover-sm{width:42px;height:54px;border-radius:var(--r-sm);object-fit:cover;flex-shrink:0;cursor:zoom-in;border:1px solid var(--border)}
+.wmeta{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.wtop{display:flex;align-items:center;gap:8px;min-width:0}
+.aname{font-weight:700;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:4px;flex-shrink:0}
+.badge.dy{background:#FBEBF1;color:#B0356B}
+.wstats{font-size:11.5px;color:var(--textm);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wstats b{color:var(--text2);font-weight:600}
+.wright{flex-shrink:0}
+.btn-share{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;font-size:12px;font-weight:600;color:var(--accent);background:var(--surface);border:1.5px solid rgba(0,97,164,.4);border-radius:999px;cursor:pointer;transition:.15s;white-space:nowrap}
+.btn-share:hover{background:var(--accent-soft);border-color:var(--accent)}
+.btn-share svg{width:13px;height:13px}
+
+/* 资产工具栏（每卡片） */
+.wtb{display:flex;align-items:center;gap:7px;padding:8px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.wtb-count{font-size:12px;font-weight:600;color:var(--textm);white-space:nowrap}
+.tbtn{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;font-weight:500;color:var(--text2);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:4px 12px;cursor:pointer;transition:.15s;white-space:nowrap}
+.tbtn:hover{border-color:var(--border2);background:var(--muted)}
+.tbtn svg{width:13px;height:13px}
+.tbtn .n{font-size:11px;font-weight:700}
+/* 主类型：实线高亮（默认） */
+.tbtn.kind-filter{color:var(--accent);background:var(--accent-soft);border-color:rgba(0,97,164,.4);font-weight:600}
+/* 附属类型：虚线 */
+.tbtn.aux-filter-btn{border-style:dashed;color:var(--textm);font-weight:500}
+.wtb-right{margin-left:auto;display:flex;align-items:center;gap:7px}
+.iconbtn{width:30px;height:30px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--surface);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--textm);transition:.15s}
+.iconbtn:hover{border-color:var(--border2);background:var(--muted);color:var(--accent)}
+.iconbtn svg{width:15px;height:15px}
+
+/* 资产列表 */
+.wassets{padding:6px 12px 10px}
+.row{display:flex;align-items:center;gap:10px;padding:8px 8px;border-radius:var(--r);transition:.12s;position:relative;cursor:pointer}
+.row:hover{background:var(--muted)}
+.row.selected{background:var(--accent-soft)}
+.row input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex-shrink:0}
+.thumb{width:46px;height:46px;border-radius:var(--r-sm);object-fit:cover;flex-shrink:0;background:var(--muted);position:relative}
+.thumb.vid::after{content:attr(data-dur);position:absolute;right:3px;bottom:3px;font-size:9.5px;font-weight:700;color:#fff;background:rgba(0,0,0,.68);padding:1px 5px;border-radius:4px}
+.kind{display:inline-flex;align-items:center;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;flex-shrink:0}
+.kind.video{background:var(--video-soft);color:var(--video)}
+.kind.image{background:var(--image-soft);color:var(--image)}
+.kind.cover{background:var(--cover-soft);color:var(--cover)}
+.kind.music{background:var(--music-soft);color:var(--music)}
+.info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.info .name{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.info .meta{font-size:11.5px;color:var(--textm);font-family:var(--mono)}
+.done{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--success);flex-shrink:0}
+.done svg{width:13px;height:13px}
+.ops{display:flex;gap:4px;opacity:0;transform:translateX(4px);transition:.15s}
+.row:hover .ops{opacity:1;transform:none}
+.ops button{width:28px;height:28px;border:none;border-radius:var(--r-sm);background:var(--surface);border:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);transition:.12s}
+.ops button:hover{border-color:rgba(0,97,164,.45);color:var(--accent);background:var(--accent-soft)}
+.ops button.dl{color:var(--accent);border-color:rgba(0,97,164,.3)}
+.ops svg{width:13px;height:13px}
+
+/* 附属折叠组 */
+.aux-toggle{display:flex;align-items:center;gap:7px;padding:7px 10px;margin:2px 8px 4px;border-radius:var(--r);font-size:12px;font-weight:600;color:var(--text2);background:var(--muted);cursor:pointer;user-select:none;transition:.12s}
+.aux-toggle:hover{background:var(--muted2)}
+.aux-toggle svg{width:14px;height:14px;transition:transform .18s}
+.aux-toggle.open svg{transform:rotate(90deg)}
+.aux-toggle .aux-count{margin-left:auto;font-size:11px;color:var(--textm);font-weight:500}
+.aux-group{display:none}
+.aux-group.open{display:block}
+.aux-group .row{background:var(--muted)}
+.aux-group .row.selected{background:var(--accent-soft)}
+
+/* ===== 底部全局下载栏 ===== */
+.dlbar{position:sticky;bottom:0;display:flex;align-items:center;gap:12px;padding:11px 18px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:0 -6px 22px rgba(31,27,23,.08);z-index:10;flex-wrap:wrap}
+.dlbar .baricon{width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.dlbar .baricon svg{width:15px;height:15px}
+.sel-count{font-size:13px;color:var(--text2);font-weight:500}
+.sel-count b{color:var(--accent);font-size:14px}
+.sel-count .from{color:var(--textm);font-size:12px;margin-left:4px}
+.sel-count.empty b{color:var(--textm)}
+.clear{font-size:12px;color:var(--textm);border:none;background:none;cursor:pointer;padding:3px 6px;border-radius:4px;text-decoration:underline;text-underline-offset:2px}
+.clear:hover{color:var(--accent)}
+.dlbar .spacer{margin-left:auto}
+.dlseg{display:flex;background:var(--muted);border-radius:999px;padding:3px;flex-shrink:0}
+.dlseg button{border:none;background:transparent;font:inherit;font-size:12px;font-weight:600;color:var(--text2);padding:4px 12px;border-radius:999px;cursor:pointer;transition:.15s;display:flex;align-items:center;gap:5px}
+.dlseg button.active{background:var(--surface);color:var(--accent);box-shadow:var(--shadow-sm)}
+.dlseg button svg{width:12px;height:12px}
+.btn-dl{display:flex;align-items:center;gap:7px;font:inherit;font-size:13px;font-weight:600;padding:8px 20px;border-radius:var(--r);cursor:pointer;transition:.2s;border:1px solid transparent;background:var(--muted);color:var(--textm);flex-shrink:0}
+.btn-dl svg{width:15px;height:15px}
+.btn-dl.ready{background:var(--accent);color:#fff;box-shadow:0 2px 10px rgba(0,97,164,.28)}
+.btn-dl.ready:hover{background:var(--accent-hover)}
+.btn-dl:active{transform:scale(.97)}
+
+.lb{position:fixed;inset:0;background:rgba(20,17,14,.88);display:none;align-items:center;justify-content:center;z-index:99;cursor:zoom-out}
+.lb img{max-width:88vw;max-height:88vh;border-radius:var(--r-lg)}
+
+.toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%) translateY(12px);background:var(--text);color:#fff;font-size:13px;padding:10px 18px;border-radius:999px;opacity:0;pointer-events:none;transition:.25s;z-index:100;box-shadow:var(--shadow-lg)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.ok{background:var(--success)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <span class="k">V5</span><b>补齐两处遗漏</b>：① <b>类型按钮显示条件</b>——主类型（视频/实况/图片）实线高亮、附属类型（音乐/封面）虚线且数量&gt;1 才显示按钮、附属资产折叠到底部默认隐藏；② <b>多链接聚合</b>——一次解析多个链接时多个作品卡片叠加，底部一条全局下载栏跨卡片统计「已选 N · 来自 M 个作品」。<br>
+    ⚠️ 语义纠正：类型按钮 = <b>批量勾选该类型</b>（selectAssetsByKind），<b>不是过滤显示</b>。下方均可点击体验。
+  </div>
+
+  <!-- 规则卡：显示条件 -->
+  <section class="rules">
+    <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>资产类型显示条件（对应现有 class）</h3>
+    <div class="rule-grid">
+      <div class="rule">
+        <span class="demo btn-demo kind-filter">视频 1</span>
+        <span class="txt"><b>主类型</b>：实线蓝底高亮，默认高亮主打类型（视频 &gt; 实况 &gt; 图片）<br><span style="color:var(--textm)">class = kind-filter</span></span>
+      </div>
+      <div class="rule">
+        <span class="demo btn-demo plain">图片 7</span>
+        <span class="txt"><b>普通类型</b>：实线中性，非主、非附属<br><span style="color:var(--textm)">数量&gt;1 或类型多样时显示</span></span>
+      </div>
+      <div class="rule">
+        <span class="demo btn-demo aux">封面 2</span>
+        <span class="txt"><b>附属类型</b>：虚线弱化，仅数量&gt;1 才显示按钮<br><span style="color:var(--textm)">class = aux-filter-btn（音乐/静态封面/动态封面）</span></span>
+      </div>
+      <div class="rule">
+        <span class="demo demo-aux"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>音乐 · 封面 · 3 项</span>
+        <span class="txt"><b>附属资产</b>：排序折叠到最后，默认隐藏，点击展开<br><span style="color:var(--textm)">asset-aux-toggle / toggleAuxAssets</span></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 作品卡片区 -->
+  <div id="works"></div>
+
+  <!-- 底部全局下载栏 -->
+  <div class="dlbar">
+    <span class="baricon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
+    <span class="sel-count empty" id="selCount">已选 <b>0</b> 个资产<span class="from" id="selFrom"></span></span>
+    <button class="clear" id="clearBtn" style="display:none" onclick="clearSel()">清空</button>
+    <span class="spacer"></span>
+    <div class="dlseg" id="dlseg">
+      <button class="active" data-m="local" title="保存到本机目录"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>本地</button>
+      <button data-m="browser" title="通过浏览器另存为"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>浏览器</button>
+    </div>
+    <button class="btn-dl" id="dlBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <span>选择资产以下载</span>
+    </button>
+  </div>
+</div>
+
+<div class="lb" id="lb" onclick="this.style.display='none'"><img id="lbImg" src="" alt="preview"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const MAIN_KINDS = ['video','live_photo','image'];
+const AUX_KINDS = ['music','static_cover','dynamic_cover'];
+const KIND_LABEL = {video:'视频',image:'图片',live_photo:'实况',music:'音乐',static_cover:'静态封面',dynamic_cover:'动态封面'};
+const KIND_CLS = {video:'video',image:'image',live_photo:'image',music:'music',static_cover:'cover',dynamic_cover:'cover'};
+
+const WORKS = [
+  {
+    id:'w1', idx:1, author:'你的姨姨', platform:'抖音', type:'视频',
+    stats:{digg:'2.4w',comment:'1832',collect:'9806',share:'3211'}, date:'2026-08-17',
+    desc:'#夏日辣妹穿搭 #户外长裙穿搭 夏天的快乐就是穿漂亮裙子出门晒太阳☀️ 同款链接在评论区～',
+    coverSeed:'dk1',
+    assets:[
+      {id:'w1v', kind:'video', n:'视频', meta:'00:32 · 1080P · 12.4 MB', seed:'v1', dur:'00:32', done:false},
+      {id:'w1i1', kind:'image', n:'图片 1', meta:'1280×1707 · 2.1 MB', seed:'i1', done:true},
+      {id:'w1i2', kind:'image', n:'图片 2', meta:'1280×1707 · 1.9 MB', seed:'i2', done:false},
+      {id:'w1i3', kind:'image', n:'图片 3', meta:'1280×1707 · 2.3 MB', seed:'i3', done:false},
+      {id:'w1i4', kind:'image', n:'图片 4', meta:'1080×1440 · 1.6 MB', seed:'i4', done:false},
+      {id:'w1i5', kind:'image', n:'图片 5', meta:'1080×1440 · 1.8 MB', seed:'i5', done:false},
+      {id:'w1i6', kind:'image', n:'图片 6', meta:'1080×1440 · 2.0 MB', seed:'i6', done:false},
+      {id:'w1i7', kind:'image', n:'图片 7', meta:'1080×1440 · 1.7 MB', seed:'i7', done:false},
+      {id:'w1m', kind:'music', n:'音乐', meta:'原声 · 3.2 MB', seed:'m1', done:false},
+      {id:'w1sc', kind:'static_cover', n:'静态封面', meta:'720×960 · 0.8 MB', seed:'c1', done:true},
+      {id:'w1dc', kind:'dynamic_cover', n:'动态封面', meta:'720×960 · 2.4 MB', seed:'c2', done:false},
+    ]
+  },
+  {
+    id:'w2', idx:2, author:'阿斌的日常', platform:'抖音', type:'图集',
+    stats:{digg:'1.1w',comment:'720',collect:'4100',share:'980'}, date:'2026-08-16',
+    desc:'街拍合集｜第 12 期，你最喜欢哪一套？',
+    coverSeed:'dk2',
+    assets:[
+      {id:'w2i1', kind:'image', n:'图片 1', meta:'1080×1440 · 1.5 MB', seed:'b1', done:false},
+      {id:'w2i2', kind:'image', n:'图片 2', meta:'1080×1440 · 1.7 MB', seed:'b2', done:true},
+      {id:'w2i3', kind:'image', n:'图片 3', meta:'1080×1440 · 1.9 MB', seed:'b3', done:false},
+      {id:'w2i4', kind:'image', n:'图片 4', meta:'1080×1440 · 2.2 MB', seed:'b4', done:false},
+      {id:'w2m', kind:'music', n:'音乐', meta:'BGM · 2.8 MB', seed:'bm', done:false},
+      {id:'w2sc', kind:'static_cover', n:'静态封面', meta:'720×960 · 0.9 MB', seed:'bc1', done:false},
+      {id:'w2dc', kind:'dynamic_cover', n:'动态封面', meta:'720×960 · 2.1 MB', seed:'bc2', done:false},
+    ]
+  },
+];
+
+const ICONS = {
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+  open:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+  dl:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg>',
+  video:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>',
+  image:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+  music:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  checkSq:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+  list:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/></svg>',
+  chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>',
+};
+const img = s => `https://picsum.photos/seed/${s}/200/240`;
+const kindIcon = k => ICONS[k] || ICONS.image;
+
+const sel = new Set();
+const auxOpen = new Set();   // 记录已展开「附属折叠组」的作品 id，勾选重渲染时保持展开态
+let dlMode = 'local';
+
+function toast(msg, ok){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show' + (ok ? ' ok' : '');
+  clearTimeout(t._t); t._t = setTimeout(()=> t.className='toast', 2300);
+}
+
+function primaryKindOf(work){
+  for(const k of MAIN_KINDS){ if(work.assets.some(a=>a.kind===k)) return k; }
+  return null;
+}
+
+function kindGroups(work){
+  const g = {};
+  work.assets.forEach(a => { (g[a.kind] ||= []).push(a); });
+  return g;
+}
+
+function kindButtonsHtml(work){
+  const g = kindGroups(work), keys = Object.keys(g), pk = primaryKindOf(work);
+  let html = '';
+  keys.forEach(k => {
+    const isAux = AUX_KINDS.includes(k);
+    const show = g[k].length > 1 || (!isAux && keys.length > 1);
+    if(!show) return;
+    const isPrimary = k === pk;
+    html += `<button type="button" class="tbtn ${isPrimary?'kind-filter':''} ${isAux?'aux-filter-btn':''}" data-work="${work.id}" data-kind="${k}">${kindIcon(k)} ${KIND_LABEL[k]} <span class="n">${g[k].length}</span></button>`;
+  });
+  return html;
+}
+
+function assetRowHtml(work, a, aux){
+  const thumb = a.seed;
+  return `<div class="row ${sel.has(a.id)?'selected':''}" data-id="${a.id}">
+    <input type="checkbox" ${sel.has(a.id)?'checked':''} data-id="${a.id}">
+    <img class="thumb ${a.kind==='video'?'vid':''}" data-dur="${a.dur||''}" src="${img(a.seed)}" alt="">
+    <span class="kind ${KIND_CLS[a.kind]}">${KIND_LABEL[a.kind]}</span>
+    <div class="info"><span class="name">${a.n}</span><span class="meta">${a.meta}</span></div>
+    ${a.done?'<span class="done">'+ICONS.check+'已下载</span>':''}
+    <div class="ops">
+      <button title="复制链接" onclick="event.stopPropagation();toast('已复制链接：' + '${a.n}')">${ICONS.copy}</button>
+      <button title="打开原图" onclick="event.stopPropagation();toast('在新标签打开：' + '${a.n}')">${ICONS.open}</button>
+      <button class="dl" title="单项下载" onclick="event.stopPropagation();dlOne('${a.n}')">${ICONS.dl}</button>
+    </div>
+  </div>`;
+}
+
+function renderWorkCard(work){
+  const main = work.assets.filter(a=>!AUX_KINDS.includes(a.kind));
+  const aux = work.assets.filter(a=>AUX_KINDS.includes(a.kind));
+  const auxLabel = [];
+  if(aux.some(a=>a.kind==='music')) auxLabel.push('音乐');
+  if(aux.some(a=>['static_cover','dynamic_cover'].includes(a.kind))) auxLabel.push('封面');
+
+  let html = `<section class="work-card">
+    <div class="wc-head"><span class="wc-idx">${work.idx}</span><h2>作品 ${work.idx}</h2><span class="wsub">${work.type} · ${work.assets.length} 个资产</span></div>
+    <div class="workbar">
+      <img class="cover-sm" src="${img(work.coverSeed)}" alt="">
+      <div class="wmeta">
+        <div class="wtop"><span class="aname">${work.author}</span><span class="badge dy">${work.platform}</span></div>
+        <div class="wstats"><span>赞 <b>${work.stats.digg}</b></span><span>藏 <b>${work.stats.collect}</b></span><span>评 <b>${work.stats.comment}</b></span><span>转 <b>${work.stats.share}</b></span><span>· ${work.date}</span></div>
+        <div class="wstats" style="margin-top:2px;color:var(--text2)">${work.desc}</div>
+      </div>
+      <div class="wright"><button class="btn-share" title="将此账号录入分享表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>录入分享表</button></div>
+    </div>
+    <div class="wtb">
+      <span class="wtb-count">${work.assets.length} 个资产</span>
+      ${kindButtonsHtml(work)}
+      <button type="button" class="tbtn" data-work="${work.id}" data-act="all">${ICONS.checkSq} 全选</button>
+      <div class="wtb-right">
+        <button class="iconbtn" data-work="${work.id}" data-act="view" title="切换列表/网格视图">${ICONS.grid}</button>
+      </div>
+    </div>
+    <div class="wassets" data-work="${work.id}">
+      ${main.map(a=>assetRowHtml(work,a)).join('')}
+      ${aux.length?`
+        <div class="aux-toggle ${auxOpen.has(work.id)?'open':''}" data-work="${work.id}">${ICONS.chev}<span>${auxLabel.join(' · ')}</span><span class="aux-count">${aux.length} 项</span></div>
+        <div class="aux-group ${auxOpen.has(work.id)?'open':''}" data-work="${work.id}">${aux.map(a=>assetRowHtml(work,a)).join('')}</div>`:''}
+    </div>
+  </section>`;
+  return html;
+}
+
+function render(){
+  document.getElementById('works').innerHTML = WORKS.map(renderWorkCard).join('');
+
+  // 行点击 = 切换勾选
+  document.querySelectorAll('.wassets .row').forEach(r=>{
+    r.onclick = e => {
+      if(e.target.tagName==='INPUT' || e.target.closest('.ops')) return;
+      toggle(r.dataset.id);
+    };
+    r.querySelector('input').onchange = e => { e.stopPropagation(); toggle(r.dataset.id); };
+    r.querySelector('.thumb').ondblclick = e => { e.stopPropagation(); lbImg.src=img(r.dataset.id); lb.style.display='flex'; };
+  });
+  // 类型按钮 = 批量勾选该类型（toggle）
+  document.querySelectorAll('.tbtn[data-kind]').forEach(b=>{
+    b.onclick = ()=>{
+      const ids = WORKS.find(w=>w.id===b.dataset.work).assets.filter(a=>a.kind===b.dataset.kind).map(a=>a.id);
+      const allOn = ids.every(id=>sel.has(id));
+      ids.forEach(id => allOn ? sel.delete(id) : sel.add(id));
+      render();
+    };
+  });
+  // 全选 = 该卡片
+  document.querySelectorAll('.tbtn[data-act="all"]').forEach(b=>{
+    b.onclick = ()=>{
+      const ids = WORKS.find(w=>w.id===b.dataset.work).assets.map(a=>a.id);
+      const allOn = ids.every(id=>sel.has(id));
+      ids.forEach(id => allOn ? sel.delete(id) : sel.add(id));
+      render();
+    };
+  });
+  // 折叠组：展开状态持久化到 auxOpen，勾选重渲染后仍保持
+  document.querySelectorAll('.aux-toggle').forEach(t=>{
+    t.onclick = ()=>{
+      const id = t.dataset.work;
+      auxOpen.has(id) ? auxOpen.delete(id) : auxOpen.add(id);
+      render();
+    };
+  });
+  // 视图切换（仅演示，弹提示）
+  document.querySelectorAll('.iconbtn[data-act="view"]').forEach(b=>{
+    b.onclick = ()=>{ toast('切换列表/网格视图（toggleAssetView）'); };
+  });
+  update();
+}
+
+function toggle(id){ sel.has(id) ? sel.delete(id) : sel.add(id); render(); }
+function clearSel(){ sel.clear(); render(); }
+function dlOne(n){ toast('开始下载「'+n+'」→ ' + (dlMode==='local'?'本机目录':'浏览器另存'), true); }
+
+function update(){
+  const count = sel.size;
+  const works = new Set([...sel].map(id=>WORKS.find(w=>w.assets.some(a=>a.id===id)).id));
+  const sc = document.getElementById('selCount');
+  sc.innerHTML = '已选 <b>'+count+'</b> 个资产' + (count? `<span class="from">来自 ${works.size} 个作品</span>`:'');
+  sc.classList.toggle('empty', count===0);
+  document.getElementById('clearBtn').style.display = count>0 ? '' : 'none';
+  const btn = document.getElementById('dlBtn');
+  if(count>0){ btn.classList.add('ready'); btn.innerHTML = ICONS.dl + '<span>下载 '+count+' 项</span>'; }
+  else { btn.classList.remove('ready'); btn.innerHTML = ICONS.dl + '<span>选择资产以下载</span>'; }
+}
+
+document.getElementById('dlBtn').onclick = ()=>{
+  if(sel.size===0){ toast('请先勾选要下载的资产'); return; }
+  const works = new Set([...sel].map(id=>WORKS.find(w=>w.assets.some(a=>a.id===id)).id));
+  toast('开始下载 '+sel.size+' 项 · 跨 '+works.size+' 个作品 → '+(dlMode==='local'?'本机目录':'浏览器另存'), true);
+};
+document.getElementById('dlseg').querySelectorAll('button').forEach(b=>{
+  b.onclick = ()=>{
+    document.getElementById('dlseg').querySelectorAll('button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); dlMode = b.dataset.m;
+  };
+});
+
+render();
+</script>
+</body>
+</html>

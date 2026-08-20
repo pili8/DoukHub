@@ -21,14 +21,13 @@
         <div class="workflow-title">
             <i data-lucide="link"></i><span>作品链接</span>
         </div>
-        <span class="workflow-count" id="link-summary"><i data-lucide="link-2"></i> <span id="link-count-text">0 个链接</span></span>
     </div>
 
     {# ====== 链接输入：右下角悬浮 快捷粘贴 / 清空 ====== #}
     <div class="link-area">
         <textarea id="links-input" rows="5" spellcheck="false"
-            placeholder="粘贴作品链接，每行一个，例如：&#10;https://www.douyin.com/video/7300...&#10;https://www.tiktok.com/@name/video/7300..."
-            oninput="renderLinkLines(); updateLinkCount(); invalidateResolvedSingleWorks()" aria-label="作品链接输入框"></textarea>
+            placeholder="粘贴作品链接，支持换行、空格或逗号分隔，例如：&#10;https://www.douyin.com/video/7300... https://www.tiktok.com/@name/video/7300...&#10;https://v.douyin.com/xxx&#10;也可一行放多个链接"
+            oninput="renderLinkLines(); invalidateResolvedSingleWorks()" aria-label="作品链接输入框"></textarea>
         <div class="link-float-ops">
             <button type="button" class="icon-btn" title="读取剪贴板并粘贴" onclick="quickPaste()"><i data-lucide="clipboard-paste"></i></button>
             <button type="button" class="icon-btn" title="清空" onclick="clearLinks()"><i data-lucide="eraser"></i></button>
@@ -226,45 +225,120 @@
     </div>
 </div>
 
-{# ====== 浮动操作条（跨卡片批量下载） ====== #}
+{# ====== 录入分享表弹窗 ====== #}
+<div id="share-add-overlay" class="pop-overlay" style="display:none;" onclick="if(event.target===this)closeShareAdd()">
+    <div class="pop-card" style="max-width:480px;">
+        <div class="pop-head">
+            <div class="pico blue"><i data-lucide="user-plus"></i></div>
+            <span class="pop-title">录入分享表</span>
+            <button type="button" class="icon-btn2 close" onclick="closeShareAdd()"><i data-lucide="x"></i></button>
+        </div>
+        <div style="padding:16px;">
+            <div class="form-group">
+                <label><i data-lucide="user"></i> 账号名称</label>
+                <input type="text" id="share-add-name" placeholder="从作品解析中预填" style="width:100%;">
+            </div>
+            <div class="form-group">
+                <label><i data-lucide="smartphone"></i> 平台</label>
+                <select id="share-add-platform" style="width:100%;">
+                    <option value="抖音">抖音</option>
+                    <option value="TikTok">TikTok</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label><i data-lucide="star"></i> 等级</label>
+                <select id="share-add-rating" style="width:100%;">
+                    <option value="1">1 星</option>
+                    <option value="2">2 星</option>
+                    <option value="3" selected>3 星</option>
+                    <option value="4">4 星</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label><i data-lucide="tag"></i> 标签（逗号分隔）</label>
+                <input type="text" id="share-add-tags" placeholder="如：个人,街拍" style="width:100%;">
+            </div>
+            <div class="form-group">
+                <label><i data-lucide="link"></i> sec_user_id</label>
+                <input type="text" id="share-add-sec-uid" readonly style="width:100%;font-family:var(--font-mono);font-size:11px;background:var(--dh-surface-muted);">
+            </div>
+            <div class="form-group">
+                <label><i data-lucide="link-2"></i> 原始作品链接</label>
+                <input type="text" id="share-add-source-link" readonly style="width:100%;font-family:var(--font-mono);font-size:11px;background:var(--dh-surface-muted);">
+            </div>
+            <div class="form-group">
+                <label><i data-lucide="message-square"></i> 备注</label>
+                <input type="text" id="share-add-note" value="从单作品采集录入" style="width:100%;">
+            </div>
+        </div>
+        <div class="btn-group" style="justify-content:flex-end;padding:0 16px 16px;">
+            <button type="button" class="btn btn-secondary" onclick="closeShareAdd()">取消</button>
+            <button type="button" class="btn btn-primary" onclick="confirmAddToShare()" id="share-add-confirm"><i data-lucide="check"></i> 确认录入</button>
+        </div>
+    </div>
+</div>
+
+{# ====== 底部常驻下载栏（跨卡片批量下载 + 下载方式内联） ====== #}
+<style>
+#main-content { padding-bottom: 96px; }
+@media (max-width: 768px) {
+  /* 底部下载栏:窄屏换行后加大底部留白 */
+  #main-content { padding-bottom: 140px; }
+  /* 下载栏:元素换行时间距紧凑 */
+  .float-bar { padding: 8px 10px; gap: 6px; }
+  .float-bar .fb-count { font-size: 12px; }
+  .float-bar .fb-sub { display: none; }
+  .float-bar .fb-dl-mode button { padding: 4px 8px; font-size: 11px; }
+  .float-bar .btn { padding: 6px 12px; font-size: 12px; }
+  /* 设置面板:窄屏内边距缩小 */
+  .settings-sec { padding: 10px 12px; }
+  .settings-body { padding: 0; }
+  /* belong-row:窄屏 chip 可换行 */
+  .belong-row { gap: 6px; }
+  .belong-row .chip { padding: 4px 8px; font-size: 11px; }
+  /* 目录选择器/模板管理弹窗:窄屏按钮换行 */
+  #single-dir-modal .btn-group, #template-modal .btn-group { flex-wrap: wrap; }
+  #single-dir-modal .btn-group .btn, #template-modal .btn-group .btn { flex: 1 1 calc(50% - 4px); min-width: 100px; justify-content: center; }
+  /* 录入分享表弹窗:窄屏紧凑 */
+  .pop-card { padding: 14px 16px; }
+}
+@media (max-width: 420px) {
+  /* 下载栏:极窄屏隐藏文字只留图标 */
+  .float-bar .fb-dl-mode button span:not([data-lucide]) { display: none; }
+  .float-bar #fb-download-label { display: none; }
+  .float-bar .btn { padding: 6px 10px; }
+}
+</style>
 <div id="float-bar" class="float-bar">
-    <span class="fb-count"><i data-lucide="check-check"></i><span id="fb-count-text">已选 0 个资产</span></span>
+    <span class="baricon"><i data-lucide="download"></i></span>
+    <span class="fb-count"><span id="fb-count-text">已选 0 个资产</span></span>
     <span class="fb-sub" id="fb-sub"></span>
-    <button type="button" class="btn btn-primary" onclick="downloadAllSelected()"><i data-lucide="download"></i>下载选中</button>
-    <button type="button" class="btn btn-secondary" onclick="clearAllSelection()">清除</button>
+    <div class="fb-dl-mode" id="fb-dl-mode">
+        <button type="button" class="active" data-m="local" onclick="setDownloadMode('local')" title="保存到本机目录"><i data-lucide="hard-drive"></i>本地</button>
+        <button type="button" data-m="browser" onclick="setDownloadMode('browser')" title="通过浏览器另存为"><i data-lucide="globe"></i>浏览器</button>
+    </div>
+    <button type="button" class="btn btn-secondary" id="fb-download-btn" onclick="downloadAllSelected()"><i data-lucide="download"></i><span id="fb-download-label">选择资产以下载</span></button>
+    <button type="button" class="btn btn-secondary" id="fb-clear-btn" onclick="clearAllSelection()" style="display:none;">清除</button>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/collect_detail.js?v=18"></script>
+<script src="/static/js/collect_detail.js?v=32"></script>
 <script>
 (function init() {
     renderTemplateSelect();
     renderRecentDirs();
     loadSingleWorkHistory();
-    updateLinkCount();
     updateSettingsSummary();
     if (singleWorkState.works.length) { el('settings-panel').style.display = 'block'; }
+    updateSelection();
 })();
 
-// ===== 链接计数 / 清空 / 快捷粘贴 =====
-function updateLinkCount() {
-    var text = String(el('links-input').value || '');
-    var lines = text.split(/\r?\n/).map(function(s){ return s.trim(); }).filter(Boolean);
-    var valid = 0;
-    lines.forEach(function(l){ if (detectPlatform(l)) valid++; });
-    var chip = el('link-count-text');
-    if (chip) {
-        chip.textContent = lines.length + ' 个链接' + (valid < lines.length ? ' · ' + valid + ' 有效' : '');
-        el('link-summary').style.color = (lines.length && valid < lines.length) ? 'var(--dh-warning)' : '';
-    }
-}
-
+// ===== 清空 / 快捷粘贴 =====
 function clearLinks() {
     el('links-input').value = '';
     el('link-lines').innerHTML = '';
     invalidateResolvedSingleWorks();
-    updateLinkCount();
     el('links-input').focus();
 }
 
@@ -281,7 +355,6 @@ async function quickPaste() {
     ta.value = existing ? existing + '\n' + clip.trim() : clip.trim();
     invalidateResolvedSingleWorks();
     renderLinkLines();
-    updateLinkCount();
     var n = clip.trim().split(/\r?\n/).filter(Boolean).length;
     showToast('已粘贴 ' + n + ' 个链接', 'success');
 }

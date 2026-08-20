@@ -234,10 +234,10 @@ function showProgressPanel(title, segCount) {
         '</div>' +
         '<div class="collect-segments" id="sse-segments"></div>' +
         '<div class="workflow-progress-meta"><span id="sse-text">等待开始...</span><span id="sse-count"></span></div>' +
-        '<div class="workflow-metrics" style="margin-top:10px;">' +
-            '<div class="workflow-metric" style="border-left-color:var(--dh-accent);"><span class="metric-value" id="sse-total" style="color:var(--dh-accent);">0</span><span class="metric-label">总数</span></div>' +
-            '<div class="workflow-metric" style="border-left-color:var(--dh-success);"><span class="metric-value" id="sse-success" style="color:var(--dh-success);">0</span><span class="metric-label">成功</span></div>' +
-            '<div class="workflow-metric" style="border-left-color:var(--dh-danger);"><span class="metric-value" id="sse-failed" style="color:var(--dh-danger);">0</span><span class="metric-label">失败</span></div>' +
+        '<div class="collect-metrics">' +
+            '<div class="workflow-metric" style="border-left-color:var(--dh-accent);"><span class="metric-label">总数</span><span class="metric-value" id="sse-total" style="color:var(--dh-accent);">0</span></div>' +
+            '<div class="workflow-metric" style="border-left-color:var(--dh-success);"><span class="metric-label">成功</span><span class="metric-value" id="sse-success" style="color:var(--dh-success);">0</span></div>' +
+            '<div class="workflow-metric" style="border-left-color:var(--dh-danger);"><span class="metric-label">失败</span><span class="metric-value" id="sse-failed" style="color:var(--dh-danger);">0</span></div>' +
         '</div>' +
         '<div class="workflow-log" id="sse-log" style="margin-top:10px;max-height:200px;"></div>';
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
@@ -334,6 +334,26 @@ function platformBadge(p) {
 
 function assetKindLabel(k) { return {video:'视频',image:'图片',live_photo:'实况',music:'音乐',static_cover:'静态封面',dynamic_cover:'动态封面'}[k] || k; }
 function assetKindIcon(k) { return {video:'video',image:'image',live_photo:'camera',music:'music',static_cover:'image',dynamic_cover:'film'}[k] || 'file'; }
+// 时长格式化：数字（毫秒）→ mm:ss；已是 "00:32" 等格式原样返回
+function formatDuration(v) {
+    if (!v) return '';
+    var s = String(v).trim();
+    if (/^\d+$/.test(s)) {
+        var sec = Math.round(parseInt(s, 10) / 1000);
+        if (sec > 0) return (Math.floor(sec / 60) < 10 ? '0' : '') + Math.floor(sec / 60) + ':' + (sec % 60 < 10 ? '0' : '') + (sec % 60);
+    }
+    return s;
+}
+// 资产元信息（时长 · 分辨率 · 大小）；asset 级字段 duration/width/height/size 由后端补充，缺省时降级用作品级 media
+function assetMeta(a, media) {
+    var parts = [];
+    if (a.duration) parts.push(formatDuration(a.duration));
+    else if (a.kind === 'video' && media.duration && media.duration !== '00:00:00') parts.push(formatDuration(media.duration));
+    if (a.width && a.height) parts.push(a.width + '×' + a.height);
+    else if ((a.kind === 'image' || a.kind === 'static_cover' || a.kind === 'dynamic_cover' || a.kind === 'live_photo') && media.width > 0 && media.height > 0) parts.push(media.width + '×' + media.height);
+    if (a.size) parts.push(a.size);
+    return parts.join(' · ');
+}
 
 function copyAssetUrl(url) { if (navigator.clipboard) navigator.clipboard.writeText(url).then(function() { showToast('已复制', 'success'); }); }
 
@@ -361,6 +381,9 @@ function setDownloadMode(mode) {
     currentDownloadMode = mode;
     document.querySelectorAll('.dl-choice .choice').forEach(function(btn) {
         btn.classList.toggle('active', btn.dataset.dl === mode);
+    });
+    document.querySelectorAll('.fb-dl-mode button').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.m === mode);
     });
 }
 
@@ -393,8 +416,11 @@ async function resolveSingleWorks(event) {
         var resp = await fetch('/api/collection/works/resolve-stream', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({links: linksText, resolve_mode: resolveMode}) });
         await consumeSse(resp, els, function(data) {
             if (data.phase === 'done' && data.work) {
-                singleWorkState.works.push(data.work);
-                appendWorkCard(data.work);
+                var existingIdx = singleWorkState.works.findIndex(function(w) { return String(w.id) === String(data.work.id); });
+                if (existingIdx < 0) {
+                    singleWorkState.works.push(data.work);
+                    appendWorkCard(data.work);
+                }
                 updateSelection();
                 if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
             }
@@ -485,7 +511,7 @@ function updateDownloadProgress(els, ok, msg) {
 
 // ====== Single asset download ======
 async function downloadSingleAsset(link, assetIndex) {
-    openDlChoice(function() { doDownloadSingleAsset(link, assetIndex); }, 1);
+    doDownloadSingleAsset(link, assetIndex);
 }
 
 async function doDownloadSingleAsset(link, assetIndex, els) {
@@ -518,6 +544,17 @@ function onAssetCheckboxChange(workId, assetIndex, checked) {
     if (row) row.classList.toggle('selected', checked);
     updateSelection();
 }
+
+// 网格视图：点击整格 = 切换勾选；列表视图：保持原行为（点击缩略图放大）
+function onAssetCellClick(event, workId, assetIndex) {
+    var row = event.currentTarget;
+    var container = row.closest('.work-assets');
+    if (!container || !container.classList.contains('grid-view')) return;
+    if (event.target.closest('.asset-checkbox') || event.target.closest('.asset-actions')) return; // 勾选框/操作按钮不重复触发
+    var box = row.querySelector('.asset-checkbox');
+    if (box) { box.checked = !box.checked; onAssetCheckboxChange(workId, assetIndex, box.checked); }
+}
+// 缩略图双击才放大（列表/网格统一）；单击不响应
 
 function toggleAllAssets(btn, workId) {
     var container = document.querySelector('.work-assets[data-work-id="' + workId + '"]');
@@ -558,7 +595,7 @@ function getSelectedAssetIndexes(workId) {
 async function downloadSelectedAssets(workId, shareUrl) {
     var indexes = getSelectedAssetIndexes(workId);
     if (!indexes.length) { showToast('请先勾选要下载的资产', 'error'); return; }
-    openDlChoice(function() { doDownloadSelectedAssets(workId, shareUrl, indexes); }, indexes.length);
+    doDownloadSelectedAssets(workId, shareUrl, indexes);
 }
 
 async function doDownloadSelectedAssets(workId, shareUrl, indexes, els) {
@@ -596,89 +633,67 @@ async function doDownloadSelectedAssets(workId, shareUrl, indexes, els) {
 function buildWorkCardHtml(work) {
     var assets = work.assets || [];
     var stats = work.stats || {};
-    var music = work.music || {};
     var media = work.media || {};
+    var music = work.music || {};
     var cover = work.static_cover || '';
     var authorInfo = work.author_info || {};
     var workType = work.type || '';
-
-    var primaryAssets = assets.filter(function(a) { return ['video','image','live_photo'].indexOf(a.kind) >= 0; });
+    var authorName = work.author || authorInfo.nickname || '未知';
+    var AUX_KINDS = ['music', 'static_cover', 'dynamic_cover'];
+    var mainAssets = assets.filter(function(a) { return AUX_KINDS.indexOf(a.kind) < 0; });
+    var auxAssets = assets.filter(function(a) { return AUX_KINDS.indexOf(a.kind) >= 0; });
+    var idx = singleWorkState.works.indexOf(work) + 1 || 1;
 
     var html = '<div class="work-card" data-work-id="' + escapeHtml(work.id) + '">';
 
-    // Left: cover (click to enlarge)
+    // 头部：点击整行折叠/展开整个作品（chevron 仅为状态图标）
+    html += '<div class="wc-head" onclick="toggleWorkCollapsed(\'' + work.id + '\')" style="cursor:pointer;" title="点击折叠/展开整个作品">';
+    html += '<span class="wc-collapse"><i data-lucide="chevron-down"></i></span>';
+    html += '<span class="wc-idx">' + idx + '</span>';
+    html += '<h2>作品 ' + idx + '</h2>';
+    html += '<span class="wsub">' + escapeHtml(workType) + ' · ' + assets.length + ' 个资产</span>';
+    html += '</div>';
+
+    // 上下文条（原型 workbar）：小封面 + 作者/平台 + 互动/日期 + 描述 + 录入分享表
+    html += '<div class="workbar">';
     if (cover) {
-        html += '<div class="work-cover-wrap" onclick="openLightbox(\'' + cover.replace(/'/g, "\\'") + '\')" style="cursor:zoom-in;">';
-        html += '<img src="' + escapeHtml(cover) + '" loading="lazy" alt="封面">';
-        html += '<div class="work-cover-badge">';
-        html += typeBadge(workType);
-        html += '</div>';
-        html += '</div>';
+        html += '<img class="cover-sm" src="' + escapeHtml(cover) + '" loading="lazy" alt="封面" onclick="openLightbox(\'' + cover.replace(/'/g, "\\'") + '\')" style="cursor:zoom-in;">';
     } else {
-        html += '<div class="work-cover-wrap" style="display:flex;align-items:center;justify-content:center;">';
-        html += '<i data-lucide="' + (workType === '视频' ? 'video' : 'images') + '" style="width:32px;height:32px;color:var(--dh-text-muted);"></i>';
-        html += '<div class="work-cover-badge">' + typeBadge(workType) + '</div>';
-        html += '</div>';
+        html += '<div class="cover-sm cover-sm-ph"><i data-lucide="' + (workType === '视频' ? 'video' : 'images') + '"></i></div>';
     }
-
-    // Right: info
-    html += '<div class="work-info">';
-
-    // Author row (top)
-    var authorName = work.author || authorInfo.nickname || '未知';
-    var authorInitial = (authorName || '未').trim().charAt(0);
-    html += '<div class="work-author-row">';
-    html += '<div class="work-author-avatar">' + escapeHtml(authorInitial) + '</div>';
-    html += '<div class="work-author-main">';
-    html += '<span class="work-author-name">' + escapeHtml(authorName) + '</span>';
-    if (work.create_time) html += '<span class="work-author-sub"><i data-lucide="calendar"></i> ' + escapeHtml(work.create_time) + '</span>';
+    html += '<div class="wmeta">';
+    html += '<div class="wtop"><span class="aname">' + escapeHtml(authorName) + '</span>' + platformBadge(work.platform) + '</div>';
+    html += '<div class="wstats">';
+    html += '<span>赞 <b>' + formatCount(stats.digg_count) + '</b></span>';
+    html += '<span>藏 <b>' + formatCount(stats.collect_count) + '</b></span>';
+    html += '<span>评 <b>' + formatCount(stats.comment_count) + '</b></span>';
+    html += '<span>转 <b>' + formatCount(stats.share_count) + '</b></span>';
     html += '</div>';
-    html += '<div class="work-author-tags">' + platformBadge(work.platform) + typeBadge(workType) + '</div>';
-    html += '</div>';
-
-    // Description
-    var desc = work.desc || work.title || '';
-    if (desc && desc !== work.id) {
-        html += '<div class="work-desc">' + escapeHtml(desc) + '</div>';
-    }
-
-    // Badges（媒体信息 + 多资产计数；平台/类型已上移至作者行）
-    var badgeItems = [];
-    if (primaryAssets.length > 1) badgeItems.push('<span class="workflow-status pending">' + primaryAssets.length + ' 个' + (workType === '视频' ? '视频' : '图片') + '</span>');
-    var mediaParts = [];
-    if (media.duration && media.duration !== '00:00:00') mediaParts.push('<i data-lucide="clock" style="width:13px;height:13px;"></i> ' + escapeHtml(media.duration));
-    if (media.width > 0 && media.height > 0) mediaParts.push('<i data-lucide="ratio" style="width:13px;height:13px;"></i> ' + media.width + '\u00d7' + media.height);
-    if (mediaParts.length) badgeItems.push('<span class="workflow-status pending">' + mediaParts.join(' \u00b7 ') + '</span>');
-    if (badgeItems.length) html += '<div class="work-badges">' + badgeItems.join('') + '</div>';
-
-    // Stats
-    html += '<div class="work-stats">';
-    html += '<span class="work-stat"><i data-lucide="heart"></i><span class="stat-num">' + formatCount(stats.digg_count) + '</span> 赞</span>';
-    html += '<span class="work-stat"><i data-lucide="message-circle"></i><span class="stat-num">' + formatCount(stats.comment_count) + '</span> 评</span>';
-    html += '<span class="work-stat"><i data-lucide="star"></i><span class="stat-num">' + formatCount(stats.collect_count) + '</span> 藏</span>';
-    html += '<span class="work-stat"><i data-lucide="share-2"></i><span class="stat-num">' + formatCount(stats.share_count) + '</span> 转</span>';
-    html += '</div>';
-
-    // Meta (音乐等附属信息；作者/时间已上移至头部)
+    // 媒体信息组：时长 · 分辨率 · 日期
+    var wmediaParts = [];
+    if (media.duration && media.duration !== '00:00:00') wmediaParts.push('<i data-lucide="clock"></i>' + formatDuration(media.duration));
+    if (media.width > 0 && media.height > 0) wmediaParts.push('<i data-lucide="ratio"></i>' + media.width + '×' + media.height);
+    if (work.create_time) wmediaParts.push('<i data-lucide="calendar"></i>' + escapeHtml(work.create_time));
+    if (wmediaParts.length) html += '<div class="wmedia">' + wmediaParts.join('<span class="sep">·</span>') + '</div>';
+    // 音乐组（BGM）
     if (music.title) {
-        html += '<div class="work-meta">';
-        html += '<span class="work-meta-item"><i data-lucide="music"></i> ' + escapeHtml(music.title);
-        if (music.author) html += ' - ' + escapeHtml(music.author);
-        html += '</span>';
-        html += '</div>';
+        html += '<div class="wmusic"><i data-lucide="music"></i><span>' + escapeHtml(music.title) + (music.author ? ' - ' + escapeHtml(music.author) : '') + '</span></div>';
     }
-
-    // Tags
+    // 标签组（#话题）
     var tags = (work.hashtags || []).concat(work.video_tags || []);
     if (tags.length) {
-        html += '<div class="work-tags">';
-        tags.forEach(function(tag) {
-            html += '<span class="work-tag">#' + escapeHtml(tag) + '</span>';
-        });
-        html += '</div>';
+        html += '<div class="wtags">' + tags.map(function(tag) {
+            var name = (typeof tag === 'object' && tag !== null) ? (tag.hashtag_name || '') : String(tag);
+            return name ? '<span class="work-tag">#' + escapeHtml(name) + '</span>' : '';
+        }).join('') + '</div>';
     }
+    var desc = work.desc || work.title || '';
+    if (desc && desc !== work.id) html += '<div class="wdesc">' + escapeHtml(desc) + '</div>';
+    html += '</div>';
+    html += '<div class="wright"><button type="button" class="btn-share" onclick="addToShareTable(\'' + work.id + '\')" title="将此账号录入分享表"><i data-lucide="user-plus"></i>录入分享表</button></div>';
+    html += '</div>';
 
-    // Assets list with toolbar
+    // 工具栏（原型 wtb）：计数 + 类型筛选 + 全选 + 视图切换
     if (assets.length) {
         var kindGroups = {};
         assets.forEach(function(a) {
@@ -689,51 +704,67 @@ function buildWorkCardHtml(work) {
 
         html += '<div class="work-asset-toolbar">';
         html += '<span class="toolbar-count">' + assets.length + ' 个资产</span>';
-        html += '<button type="button" class="toolbar-btn" onclick="toggleAllAssets(this,\'' + work.id + '\')"><i data-lucide="check-square"></i> 全选</button>';
+        // 类型筛选按钮：主类型高亮（kind-filter）/ 附属虚线（aux-filter-btn）
+        var MAIN_KINDS = ['video', 'live_photo', 'image'];
+        var primaryKind = null;
+        MAIN_KINDS.forEach(function(k) {
+            if (!primaryKind && kindGroups[k] && kindGroups[k].length) primaryKind = k;
+        });
         kindKeys.forEach(function(k) {
-            if (kindKeys.length > 1 || kindGroups[k].length > 1) {
-                html += '<button type="button" class="toolbar-btn" onclick="selectAssetsByKind(\'' + work.id + '\',\'' + k + '\')"><i data-lucide="' + assetKindIcon(k) + '"></i> ' + escapeHtml(assetKindLabel(k)) + '(' + kindGroups[k].length + ')</button>';
+            var isAuxKind = AUX_KINDS.indexOf(k) >= 0;
+            var show = kindGroups[k].length > 1 || (!isAuxKind && kindKeys.length > 1);
+            if (show) {
+                var isPrimary = (k === primaryKind);
+                html += '<button type="button" class="toolbar-btn' + (isPrimary ? ' kind-filter' : '') + (isAuxKind ? ' aux-filter-btn' : '') + '" onclick="selectAssetsByKind(\'' + work.id + '\',\'' + k + '\')"><i data-lucide="' + assetKindIcon(k) + '"></i> ' + escapeHtml(assetKindLabel(k)) + ' <b class="kind-count">' + kindGroups[k].length + '</b></button>';
             }
         });
-        html += '<button type="button" class="toolbar-btn primary" onclick="downloadSelectedAssets(\'' + work.id + '\',\'' + work.share_url.replace(/'/g, "\\'") + '\')"><i data-lucide="download"></i> 下载选中<span class="toolbar-count-selected" data-work-id="' + escapeHtml(work.id) + '"></span></button>';
+        html += '<button type="button" class="toolbar-btn" onclick="toggleAllAssets(this,\'' + work.id + '\')"><i data-lucide="check-square"></i> 全选</button>';
+        html += '<button type="button" class="toolbar-btn view-toggle" onclick="toggleAssetView(\'' + work.id + '\')" title="切换列表/网格视图" data-work-id="' + escapeHtml(work.id) + '"><i data-lucide="layout-grid"></i></button>';
         html += '</div>';
 
-        // Asset rows with thumbnails (clickable to enlarge)
-        // 排序：主资产（视频/图片/实况）在前，低频附属（音乐/封面）在后并弱化区分
-        var AUX_KINDS = ['music', 'static_cover', 'dynamic_cover'];
-        var orderedAssets = assets.slice().sort(function(x, y) {
-            var xAux = AUX_KINDS.indexOf(x.kind) >= 0 ? 1 : 0;
-            var yAux = AUX_KINDS.indexOf(y.kind) >= 0 ? 1 : 0;
-            return xAux - yAux || (x.index || 0) - (y.index || 0);
-        });
-        html += '<div class="work-assets" data-work-id="' + escapeHtml(work.id) + '">';
-        orderedAssets.forEach(function(a) {
-            var isAux = AUX_KINDS.indexOf(a.kind) >= 0;
-            var thumb = a.cover_url || (a.kind === 'static_cover' || a.kind === 'dynamic_cover' ? a.url : '');
-            html += '<div class="work-asset-row' + (isAux ? ' aux' : '') + '" data-asset-index="' + a.index + '">';
-            html += '<input type="checkbox" class="asset-checkbox" data-work-id="' + escapeHtml(work.id) + '" data-asset-index="' + a.index + '" data-asset-kind="' + escapeHtml(a.kind) + '" onchange="onAssetCheckboxChange(\'' + work.id + '\',' + a.index + ', this.checked)">';
-            // Thumbnail (clickable for lightbox)
-            if (thumb) {
-                html += '<div class="asset-thumb" onclick="openLightbox(\'' + thumb.replace(/'/g, "\\'") + '\')" style="cursor:zoom-in;"><img src="' + escapeHtml(thumb) + '" loading="lazy" alt="预览"></div>';
-            } else {
-                html += '<div class="asset-thumb"><i data-lucide="' + assetKindIcon(a.kind) + '"></i></div>';
+        // 资产行：缩略图（视频带时长角标）+ 类型徽章 + 名称 + 元信息 + 已下载 + hover 操作
+        function assetRowHtml(a, extraCls) {
+            var thumb = a.cover_url || '';
+            if (!thumb && (a.kind === 'image' || a.kind === 'static_cover' || a.kind === 'dynamic_cover' || a.kind === 'live_photo')) {
+                thumb = a.url;
             }
-            html += '<span class="asset-label">' + escapeHtml(assetKindLabel(a.kind)) + (assets.length > 1 ? ' ' + a.index : '') + '</span>';
-            html += '<span class="asset-url" title="' + escapeHtml(a.url) + '">' + escapeHtml(a.url) + '</span>';
-            html += '<div class="asset-actions">';
-            html += '<button type="button" title="复制链接" onclick="copyAssetUrl(\'' + a.url.replace(/'/g, "\\'") + '\')"><i data-lucide="copy"></i></button>';
-            html += '<a href="' + escapeHtml(a.url) + '" target="_blank" title="打开"><i data-lucide="external-link"></i></a>';
-            html += '<button type="button" title="下载此项" onclick="downloadSingleAsset(\'' + work.share_url.replace(/'/g, "\\'") + '\',' + a.index + ')"><i data-lucide="download"></i></button>';
+            var h = '<div class="work-asset-row' + (extraCls ? ' ' + extraCls : '') + '" data-asset-index="' + a.index + '" onclick="onAssetCellClick(event, \'' + work.id + '\',' + a.index + ')">';
+            h += '<input type="checkbox" class="asset-checkbox" data-work-id="' + escapeHtml(work.id) + '" data-asset-index="' + a.index + '" data-asset-kind="' + escapeHtml(a.kind) + '" onchange="onAssetCheckboxChange(\'' + work.id + '\',' + a.index + ', this.checked)">';
+            if (thumb) {
+                var dur = (a.kind === 'video' && media.duration && media.duration !== '00:00:00') ? formatDuration(media.duration) : '';
+                h += '<div class="asset-thumb' + (a.kind === 'video' ? ' vid' : '') + '"' + (dur ? ' data-dur="' + escapeHtml(dur) + '"' : '') + ' ondblclick="openLightbox(\'' + thumb.replace(/'/g, "\\'") + '\')" title="双击放大预览" style="cursor:zoom-in;"><img src="' + escapeHtml(thumb) + '" loading="lazy" alt="预览"></div>';
+            } else {
+                h += '<div class="asset-thumb"><i data-lucide="' + assetKindIcon(a.kind) + '"></i></div>';
+            }
+            h += '<span class="asset-kind-badge ' + escapeHtml(a.kind) + '">' + escapeHtml(assetKindLabel(a.kind)) + '</span>';
+            h += '<div class="asset-info"><span class="asset-name">' + escapeHtml(assetKindLabel(a.kind)) + (assets.length > 1 ? ' ' + a.index : '') + '</span><span class="asset-meta">' + escapeHtml(assetMeta(a, media)) + '</span></div>';
+            if (a.downloaded) h += '<span class="asset-done"><i data-lucide="check"></i>已下载</span>';
+            h += '<div class="asset-actions">';
+            h += '<button type="button" title="复制链接" onclick="copyAssetUrl(\'' + a.url.replace(/'/g, "\\'") + '\')"><i data-lucide="copy"></i></button>';
+            h += '<a href="' + escapeHtml(a.url) + '" target="_blank" title="打开"><i data-lucide="external-link"></i></a>';
+            h += '<button type="button" class="dl" title="下载此项" onclick="downloadSingleAsset(\'' + work.share_url.replace(/'/g, "\\'") + '\',' + a.index + ')"><i data-lucide="download"></i></button>';
+            h += '</div></div>';
+            return h;
+        }
+        html += '<div class="work-assets" data-work-id="' + escapeHtml(work.id) + '">';
+        mainAssets.forEach(function(a) { html += assetRowHtml(a); });
+        if (auxAssets.length) {
+            var labelParts = [];
+            if (auxAssets.some(function(a) { return a.kind === 'music'; })) labelParts.push('音乐');
+            if (auxAssets.some(function(a) { return a.kind === 'static_cover' || a.kind === 'dynamic_cover'; })) labelParts.push('封面');
+            html += '<div class="asset-aux-toggle" data-work-id="' + escapeHtml(work.id) + '" onclick="toggleAuxAssets(\'' + work.id + '\')">';
+            html += '<i data-lucide="chevron-right"></i><span>' + (labelParts.join(' · ') || '附属文件') + '</span>';
+            html += '<span class="aux-count">' + auxAssets.length + ' 项</span></div>';
+            html += '<div class="asset-aux-group" data-work-id="' + escapeHtml(work.id) + '" style="display:none;">';
+            auxAssets.forEach(function(a) { html += assetRowHtml(a); });
             html += '</div>';
-            html += '</div>';
-        });
+        }
         html += '</div>';
     }
 
     // Download status area
     html += '<div class="work-download-status-area" data-work-title="' + escapeHtml(work.title || work.id) + '"></div>';
 
-    html += '</div>'; // work-info
     html += '</div>'; // work-card
     return html;
 }
@@ -798,18 +829,44 @@ function renderSingleWorkHistory() {
     if (!rows.length) { container.innerHTML = '<div class="text-muted">' + (filter ? '无匹配记录' : '暂无下载记录') + '</div>'; return; }
     container.innerHTML = rows.map(function(row) {
         var files = safeParseJsonArray(row.files_json);
+        var work = safeParseJson(row.work_json);
         var isOk = row.status === 'success';
         var sub = isOk
             ? (files.length + ' 个文件 · ' + escapeHtml(row.work_type || ''))
             : escapeHtml(row.error || '未知错误');
-        var actions = !isOk
-            ? ' <button type="button" class="btn btn-secondary" style="height:28px;padding:0 10px;font-size:12px;flex-shrink:0;" onclick="retrySingleWorkHistory(' + row.id + ')"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> 重试</button>'
-            : '';
+        // 增强信息：作者 + 平台 + 目录
+        var metaLine = '';
+        if (row.author || row.platform || row.target_dir) {
+            var metaParts = [];
+            if (row.author) metaParts.push(escapeHtml(row.author));
+            if (row.platform) metaParts.push(escapeHtml(row.platform));
+            if (row.target_dir) metaParts.push('📁 ' + escapeHtml(shortenPath(row.target_dir)));
+            metaLine = '<div class="hist-meta">' + metaParts.join(' · ') + '</div>';
+        }
+        // 原始链接
+        var linkLine = '';
+        if (row.source_link) {
+            linkLine = '<div class="hist-link" title="' + escapeHtml(row.source_link) + '">' +
+                '<i data-lucide="link" style="width:11px;height:11px;"></i> ' +
+                escapeHtml(truncateUrl(row.source_link)) +
+                ' <button type="button" class="hist-copy-btn" onclick="event.stopPropagation();copyHistoryLink(\'' + row.source_link.replace(/'/g, "\\'") + '\')" title="复制链接"><i data-lucide="copy" style="width:11px;height:11px;"></i></button>' +
+                '</div>';
+        }
+        // 操作按钮
+        var actions = '<div class="hist-actions">';
+        if (!isOk) {
+            actions += '<button type="button" class="btn btn-secondary hist-action-btn" onclick="retrySingleWorkHistory(' + row.id + ')"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> 重试</button>';
+        }
+        if (isOk && files.length && row.target_dir) {
+            actions += '<button type="button" class="btn btn-secondary hist-action-btn" onclick="openHistoryDir(' + row.id + ')"><i data-lucide="folder-open" style="width:12px;height:12px;"></i> 打开目录</button>';
+        }
+        actions += '</div>';
         return '<div class="history-card">' +
             '<div class="hist-icon ' + (isOk ? 'success' : 'failed') + '"><i data-lucide="' + (isOk ? 'check' : 'x') + '"></i></div>' +
             '<div class="hist-body">' +
                 '<div class="hist-title">' + escapeHtml(row.title || row.work_id) + '</div>' +
                 '<div class="hist-sub">' + sub + '</div>' +
+                metaLine + linkLine +
             '</div>' +
             '<span class="hist-time">' + formatDateTime(row.created_at) + '</span>' +
             actions +
@@ -1009,19 +1066,54 @@ function detectPlatform(url) {
     return null;
 }
 
+// 全局 URL 提取正则（与后端 single_work.URL 保持一致）
+var URL_RE = /https?:\/\/[^\s"'<>]+|(?:v\.douyin\.com|t-a\.cn|iesdouyin\.com|vm\.tiktok\.com|vt\.tiktok\.com)\/[^\s"'<>]+/g;
+
+function parseLinkStats() {
+    var raw = String(el('links-input').value || '');
+    var matches = raw.match(URL_RE) || [];
+    var counts = { douyin: 0, tiktok: 0, xhs: 0, bad: 0 };
+    var seen = {};
+    var total = 0;
+    var firstBadUrl = '';
+    matches.forEach(function(url) {
+        var key = url.split('?')[0].replace(/\/$/, '');
+        if (seen[key]) return; // 去重
+        seen[key] = true;
+        total++;
+        var d = detectPlatform(url);
+        if (d) { counts[d.p]++; }
+        else { counts.bad++; if (!firstBadUrl) firstBadUrl = url; }
+    });
+    return { counts: counts, total: total, firstBadUrl: firstBadUrl, rawCount: matches.length };
+}
+
+// 链接识别：汇总统计条（数量 + 平台分布 + 匹配状态），不再逐行展示 URL
 function renderLinkLines() {
-    var lines = String(el('links-input').value || '').split(/\r?\n/).map(function(s) { return s.trim(); }).filter(Boolean);
-    var html = lines.map(function(l) {
-        var d = detectPlatform(l);
-        var safe = escapeHtml(l);
-        if (d) {
-            return '<div class="link-lines-row ok"><span class="ll-url">' + safe + '</span><span class="plat-pill ' + d.cls + '"><i data-lucide="check"></i>' + d.name + '</span></div>';
-        }
-        return '<div class="link-lines-row bad"><span class="ll-url">' + safe + '</span><span class="plat-pill bad-pill"><i data-lucide="x"></i>无法识别</span></div>';
-    }).join('');
+    var s = parseLinkStats();
+    var c = s.counts;
+    var matched = s.total - c.bad;
+    var dupInfo = (s.rawCount > s.total) ? '（已去重 ' + (s.rawCount - s.total) + '）' : '';
+    var html = '<div class="link-summary' + (c.bad ? ' has-bad' : '') + '">';
+    html += '<span class="ls-count"><i data-lucide="link-2"></i> ' + s.total + ' 个链接' + dupInfo + ' · 匹配 ' + matched + '/' + s.total + '</span>';
+    html += '<span class="ls-badges">';
+    if (c.douyin) html += '<span class="ls-pill dy">抖音 ' + c.douyin + '</span>';
+    if (c.tiktok) html += '<span class="ls-pill tt">TikTok ' + c.tiktok + '</span>';
+    if (c.xhs) html += '<span class="ls-pill xhs">小红书 ' + c.xhs + '</span>';
+    if (c.bad) html += '<span class="ls-pill bad" title="点击定位到无法识别的链接" onclick="focusBadLink()"><i data-lucide="x"></i>无法识别 ' + c.bad + '</span>';
+    html += '</span></div>';
     var container = el('link-lines');
     if (container) { container.innerHTML = html; }
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+}
+
+// 点击「无法识别」→ 聚焦输入框
+function focusBadLink() {
+    var ta = el('links-input');
+    if (!ta) return;
+    ta.focus();
+    var ls = document.querySelector('.link-summary');
+    if (ls) { ls.classList.add('flash'); setTimeout(function() { ls.classList.remove('flash'); }, 800); }
 }
 
 // ============================================================
@@ -1044,6 +1136,25 @@ function ensureSettingsOpen() {
     if (btn) btn.classList.add('active');
 }
 
+// ===== 低频资产（音乐/封面）折叠组 =====
+function toggleAuxAssets(workId) {
+    var group = document.querySelector('.asset-aux-group[data-work-id="' + workId + '"]');
+    if (!group) return;
+    var open = group.style.display !== 'none';
+    group.style.display = open ? 'none' : 'block';
+    var container = document.querySelector('.work-assets[data-work-id="' + workId + '"]');
+    if (container) container.classList.toggle('aux-open', !open);
+    var toggle = document.querySelector('.asset-aux-toggle[data-work-id="' + workId + '"]');
+    if (toggle) toggle.classList.toggle('open', !open);
+}
+
+// 折叠 / 展开整个作品卡片的资产区（作品较多时方便快速收起）
+function toggleWorkCollapsed(workId) {
+    var card = document.querySelector('.work-card[data-work-id="' + cssEscape(workId) + '"]');
+    if (!card) return;
+    card.classList.toggle('collapsed');
+}
+
 function updateSettingsSummary() {
     var summary = el('settings-summary');
     if (summary) summary.textContent = el('single-target-dir').value || '未设置目录';
@@ -1060,9 +1171,19 @@ function updateSelection() {
     checks.forEach(function(c) { var w = c.dataset.workId; per[w] = (per[w] || 0) + 1; });
     var keys = Object.keys(per);
     el('fb-sub').textContent = keys.length ? ('来自 ' + keys.length + ' 个作品') : '';
-    var fb = el('float-bar');
-    if (fb) fb.classList.toggle('show', count > 0);
-    // 每卡片工具栏选中计数
+    // 底部常驻下载栏：主按钮随选中态切换 + 清空按钮显隐
+    var dlBtn = el('fb-download-btn'), dlLabel = el('fb-download-label'), clearBtn = el('fb-clear-btn');
+    if (dlBtn && dlLabel) {
+        if (count > 0) {
+            dlBtn.classList.add('btn-primary'); dlBtn.classList.remove('btn-secondary');
+            dlLabel.textContent = '下载 ' + count + ' 项';
+        } else {
+            dlBtn.classList.remove('btn-primary'); dlBtn.classList.add('btn-secondary');
+            dlLabel.textContent = '选择资产以下载';
+        }
+    }
+    if (clearBtn) clearBtn.style.display = count > 0 ? '' : 'none';
+    // 每卡片工具栏选中计数（若存在）
     document.querySelectorAll('.toolbar-count-selected').forEach(function(span) {
         var n = checks.length ? Array.from(checks).filter(function(c) { return c.dataset.workId === span.dataset.workId; }).length : 0;
         span.textContent = n ? ' · 已选 ' + n : '';
@@ -1088,29 +1209,27 @@ function downloadAllSelected() {
     var keys = Object.keys(per);
     if (!keys.length) { showToast('请先勾选要下载的资产', 'error'); return; }
     var total = keys.reduce(function(n, k) { return n + per[k].length; }, 0);
-    openDlChoice(function() {
-        var els = startDownloadProgress(total, total);
-        batchEls = els;
-        (async function() {
-            var doneWorks = 0;
-            for (var i = 0; i < keys.length; i++) {
-                var work = findWorkById(keys[i]);
-                if (work) {
-                    await doDownloadSelectedAssets(keys[i], work.share_url, per[keys[i]], els);
-                }
-                doneWorks++;
-                els.text.textContent = '正在下载 (' + doneWorks + '/' + keys.length + ' 个作品)';
+    var els = startDownloadProgress(total, total);
+    batchEls = els;
+    (async function() {
+        var doneWorks = 0;
+        for (var i = 0; i < keys.length; i++) {
+            var work = findWorkById(keys[i]);
+            if (work) {
+                await doDownloadSelectedAssets(keys[i], work.share_url, per[keys[i]], els);
             }
-            // 收尾：全部完成
-            var failed = parseInt(els.failed.textContent) || 0;
-            var ok = failed === 0;
-            els.status.className = 'workflow-status ' + (ok ? 'success' : 'failed');
-            els.status.textContent = ok ? '已完成' : '部分失败';
-            renderSseSegments(els.segments, 3, 3, !ok);
-            batchEls = null;
-            clearAllSelection();
-        })();
-    }, total);
+            doneWorks++;
+            els.text.textContent = '正在下载 (' + doneWorks + '/' + keys.length + ' 个作品)';
+        }
+        // 收尾：全部完成
+        var failed = parseInt(els.failed.textContent) || 0;
+        var ok = failed === 0;
+        els.status.className = 'workflow-status ' + (ok ? 'success' : 'failed');
+        els.status.textContent = ok ? '已完成' : '部分失败';
+        renderSseSegments(els.segments, 3, 3, !ok);
+        batchEls = null;
+        clearAllSelection();
+    })();
 }
 
 // ============================================================
@@ -1140,4 +1259,110 @@ function chooseDl(mode) {
     var fn = pendingDlAction;
     pendingDlAction = null;
     if (fn) fn();
+}
+
+// ============================================================
+// ====== 问题5：资产网格视图切换 ======
+// ============================================================
+function toggleAssetView(workId) {
+    var container = document.querySelector('.work-assets[data-work-id="' + workId + '"]');
+    if (!container) return;
+    var isGrid = container.classList.contains('grid-view');
+    container.classList.toggle('grid-view', !isGrid);
+    // 切换按钮图标
+    var btn = document.querySelector('.view-toggle[data-work-id="' + workId + '"]');
+    if (btn) {
+        btn.querySelector('svg[data-lucide], i[data-lucide]')?.setAttribute('data-lucide', isGrid ? 'layout-grid' : 'list');
+    }
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+}
+
+// ============================================================
+// ====== 问题3：下载历史增强 ======
+// ============================================================
+function safeParseJson(v) { try { return JSON.parse(v); } catch(e) { return null; } }
+
+function truncateUrl(url, max) {
+    max = max || 60;
+    return String(url || '').length > max ? String(url).slice(0, max) + '...' : String(url);
+}
+
+function shortenPath(path) {
+    if (!path) return '';
+    var parts = String(path).split(/[\\/]/);
+    if (parts.length <= 3) return path;
+    return '.../' + parts.slice(-2).join('/');
+}
+
+function copyHistoryLink(link) {
+    if (navigator.clipboard && link) {
+        navigator.clipboard.writeText(link).then(function() { showToast('已复制链接', 'success'); });
+    }
+}
+
+async function openHistoryDir(historyId) {
+    try {
+        var data = await apiCall('/api/collection/works/history/' + historyId + '/open-dir', 'POST');
+        if (data.success) { showToast('已打开目录', 'success'); }
+        else { showToast(data.message || '打开失败', 'error'); }
+    } catch(e) { showToast(e.message || '打开失败', 'error'); }
+}
+
+// ============================================================
+// ====== 问题6：录入分享表 ======
+// ============================================================
+function addToShareTable(workId) {
+    var work = findWorkById(workId);
+    if (!work) { showToast('未找到作品数据', 'error'); return; }
+    var secUid = (work.author_info || {}).sec_uid || '';
+    if (!secUid) { showToast('该作品未包含 sec_user_id，无法录入', 'error'); return; }
+    var authorName = work.author || (work.author_info || {}).nickname || '';
+    var platform = work.platform === 'tiktok' ? 'TikTok' : '抖音';
+    var shareUrl = work.share_url || '';
+    // 预填
+    el('share-add-name').value = authorName;
+    el('share-add-platform').value = platform;
+    el('share-add-rating').value = '3';
+    el('share-add-tags').value = '';
+    el('share-add-sec-uid').value = secUid;
+    el('share-add-source-link').value = shareUrl;
+    el('share-add-note').value = '从单作品采集录入';
+    // 显示弹窗
+    showPop('share-add-overlay');
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+}
+
+function closeShareAdd() { closePop('share-add-overlay'); }
+
+async function confirmAddToShare() {
+    var secUid = el('share-add-sec-uid').value.trim();
+    if (!secUid) { showToast('缺少 sec_user_id', 'error'); return; }
+    var btn = el('share-add-confirm');
+    btn.disabled = true;
+    btn.innerHTML = '<i data-lucide="loader-circle"></i> 录入中...';
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    try {
+        var tags = el('share-add-tags').value.split(',').map(function(t) { return t.trim(); }).filter(Boolean);
+        var data = await apiCall('/api/collection/quick-add-share', 'POST', {
+            sec_user_id: secUid,
+            platform: el('share-add-platform').value,
+            account_name: el('share-add-name').value.trim(),
+            rating: parseInt(el('share-add-rating').value),
+            tags: tags,
+            source_link: el('share-add-source-link').value.trim(),
+            note: el('share-add-note').value.trim(),
+        });
+        if (data.success) {
+            showToast(data.message || '已录入分享表', 'success');
+            closeShareAdd();
+        } else {
+            showToast(data.message || '录入失败', 'error');
+        }
+    } catch(e) {
+        showToast(e.message || '录入失败', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="check"></i> 确认录入';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    }
 }

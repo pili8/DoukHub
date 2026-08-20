@@ -43,7 +43,7 @@ class FakeTaskManager:
 
 def test_sync_account_without_cookie_still_creates_account_shell(tmp_path, monkeypatch):
     db = Database(tmp_path / "test.db")
-    db.insert_collection({"record_id": "c1", "share_code": "short", "sec_user_id": "sec1"})
+    db.insert_collection({"record_id": "c1", "share_code": "short", "sec_user_id": "sec1", "解析状态": "已就绪"})
     syncer = SimpleNamespace(
         db=db,
         collector=SimpleNamespace(ttd_url="http://ttd"),
@@ -60,12 +60,12 @@ def test_sync_account_without_cookie_still_creates_account_shell(tmp_path, monke
 
     account = db.get_account_by_sec_user_id("sec1")
     assert account is not None
-    assert account["已获取信息"] in (0, False)
+    assert account["获取状态"] == "待获取"
 
 
 def test_refresh_accounts_uses_account_platform(tmp_path, monkeypatch):
     db = Database(tmp_path / "test.db")
-    db.insert_account({"record_id": "a1", "sec_user_id": "sec1", "平台": "小红书", "已获取信息": 0})
+    db.insert_account({"record_id": "a1", "sec_user_id": "sec1", "平台": "小红书", "获取状态": "待获取"})
     db.insert_cookie({"record_id": "ck1", "Cookie": "cookie", "启用": 1})
     platforms = []
 

@@ -131,8 +131,8 @@ class Syncer:
 
     @staticmethod
     def is_ready_for_account(collection: dict) -> bool:
-        """账号表同步只看 sec_user_id；已解析只是步骤2的动作反馈。"""
-        return bool(str(collection.get("sec_user_id") or "").strip())
+        """只有「已就绪」状态的记录才参与生成账号表。"""
+        return collection.get("解析状态") == "已就绪"
 
     # ========== 步骤1：导入分享表 ==========
 
@@ -243,7 +243,7 @@ class Syncer:
                         if import_works:
                             updates["作品数"] = import_works
                         if direct_sec_user_id and not existing.get("sec_user_id"):
-                            updates.update({"sec_user_id": direct_sec_user_id, "已解析": True, "同步错误": None})
+                            updates.update({"sec_user_id": direct_sec_user_id, "解析状态": "已就绪"})
                         self.db.update_collection(existing["record_id"], updates)
                     result.duplicates += 1
                     continue
@@ -271,8 +271,7 @@ class Syncer:
                     # 如果新导入的直接提取了 sec_user_id，补上
                     if direct_sec_user_id and not existing.get("sec_user_id"):
                         updates["sec_user_id"] = direct_sec_user_id
-                        updates["已解析"] = True
-                        updates["同步错误"] = None
+                        updates["解析状态"] = "已就绪"
                     self.db.update_collection(existing["record_id"], updates)
                     result.success += 1
                     result.updated += 1
@@ -283,7 +282,7 @@ class Syncer:
                             "平台": self.detect_platform(share),
                             "等级": level,
                             "标签": json.dumps(self.map_tags(tags)),
-                            "已解析": False,
+                            "解析状态": "待解析",
                         }
                         if import_name:
                             revived_data["账号名称"] = import_name
@@ -292,7 +291,7 @@ class Syncer:
                         if import_works:
                             revived_data["作品数"] = import_works
                         if direct_sec_user_id:
-                            revived_data.update({"sec_user_id": direct_sec_user_id, "已解析": True, "同步错误": None})
+                            revived_data.update({"sec_user_id": direct_sec_user_id, "解析状态": "已就绪"})
                         self.db.update_collection(revived_id, revived_data)
                         result.success += 1
                         result.revived += 1
@@ -306,7 +305,7 @@ class Syncer:
                         "平台": self.detect_platform(share),
                         "等级": level,
                         "标签": json.dumps(self.map_tags(tags)),
-                        "已解析": False,
+                        "解析状态": "待解析",
                     }
                     if import_name:
                         insert_data["账号名称"] = import_name
@@ -315,10 +314,10 @@ class Syncer:
                     if import_works:
                         insert_data["作品数"] = import_works
 
-                    # 如果直接提取了 sec_user_id，标记为已解析
+                    # 如果直接提取了 sec_user_id，标记为已就绪
                     if direct_sec_user_id:
                         insert_data["sec_user_id"] = direct_sec_user_id
-                        insert_data["已解析"] = True
+                        insert_data["解析状态"] = "已就绪"
                     self.db.insert_collection(insert_data)
                     result.success += 1
                     result.created += 1
@@ -335,9 +334,9 @@ class Syncer:
         """更新分享表，获取 sec_user_id"""
         result = SyncResult()
 
-        # 获取所有未获取 sec_user_id 的记录
+        # 获取待解析和解析失败的记录
         collections = self.db.get_all_collections()
-        to_process = [c for c in collections if not c.get("sec_user_id")]
+        to_process = [c for c in collections if c.get("解析状态") in ("待解析", "解析失败") and str(c.get("share_code", "")).strip()]
 
         result.total = len(to_process)
 
@@ -354,7 +353,7 @@ class Syncer:
                     result.failed += 1
                     result.errors.append(f"{share}: 无法提取 sec_user_id")
                     self.db.update_collection(collection["record_id"], {
-                        "同步错误": "无法提取 sec_user_id",
+                        "解析状态": "解析失败",
                     })
                     continue
 
@@ -378,8 +377,7 @@ class Syncer:
                     # 更新 sec_user_id
                     self.db.update_collection(collection["record_id"], {
                         "sec_user_id": sec_user_id,
-                        "已解析": True,
-                        "同步错误": None,
+                        "解析状态": "已就绪",
                     })
                     result.success += 1
 
@@ -387,7 +385,7 @@ class Syncer:
                 result.failed += 1
                 result.errors.append(f"{collection.get('share_code')}: {str(e)}")
                 self.db.update_collection(collection["record_id"], {
-                    "同步错误": str(e),
+                    "解析状态": "解析失败",
                 })
 
         return result
@@ -405,7 +403,7 @@ class Syncer:
         """同步到账号表"""
         result = SyncResult()
 
-        # 获取已有用户标识的记录；已解析动作反馈不参与筛选
+        # 获取「已就绪」状态的记录
         collections = self.db.get_all_collections()
         to_process = [c for c in collections if self.is_ready_for_account(c)]
 
@@ -425,7 +423,7 @@ class Syncer:
         for collection in to_process:
             try:
                 sec_user_id = collection["sec_user_id"]
-                platform = collection.get("平台") or "\u6296\u97f3"
+                platform = collection.get("平台") or "抖音"
 
                 # 检查账号表是否已存在
                 existing_account = self.db.get_account_by_sec_user_id(sec_user_id)
@@ -437,15 +435,15 @@ class Syncer:
                     new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
                     merged_tags = self.merge_tags(existing_tags, new_tags)
 
-                    # 先更新等级/标签（不碰 已获取信息）
+                    # 先更新等级/标签（不碰 获取状态）
                     self.db.update_account(existing_account["record_id"], {
                         "等级": new_level,
                         "标签": json.dumps(merged_tags),
                     })
                     account_id = existing_account["record_id"]
-                    need_fetch = not existing_account.get("已获取信息")
+                    need_fetch = existing_account.get("获取状态") != "已获取"
                 else:
-                    # 创建账号记录（已获取信息=False）
+                    # 创建账号记录（获取状态=待获取）
                     record_id = f"acc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{result.total}"
                     self.db.insert_account({
                         "record_id": record_id,
@@ -455,10 +453,13 @@ class Syncer:
                         "sec_user_id": sec_user_id,
                         "等级": collection.get("等级"),
                         "标签": collection.get("标签"),
-                        "已获取信息": False,
+                        "获取状态": "待获取",
                     })
                     account_id = record_id
                     need_fetch = True
+
+                # 标记分享表为已生成
+                self.db.update_collection(collection["record_id"], {"解析状态": "已生成"})
 
                 # 未获取信息的，调 API 补全
                 if need_fetch:
@@ -476,9 +477,10 @@ class Syncer:
                             "作品数": info.get("aweme_count", 0),
                             "签名": info.get("signature", ""),
                             "头像": info.get("avatar", ""),
-                            "已获取信息": True,
+                            "获取状态": "已获取",
                         })
                     else:
+                        self.db.update_account(account_id, {"获取状态": "获取失败"})
                         result.failed += 1
                         result.errors.append(f"{sec_user_id}: 无法获取账号信息")
                         continue

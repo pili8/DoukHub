@@ -41,8 +41,28 @@ def extract_detail_id(link: str) -> str:
     return match.group(1) if match else ""
 
 
-def _asset(kind: str, index: int, url: str, cover_url: str = "") -> dict:
-    return {"kind": kind, "index": index, "url": str(url or ""), "cover_url": str(cover_url or "")}
+def _asset(
+    kind: str,
+    index: int,
+    url: str,
+    cover_url: str = "",
+    size: str = "",
+    duration: str = "",
+    width: int = 0,
+    height: int = 0,
+    downloaded: bool = False,
+) -> dict:
+    return {
+        "kind": kind,
+        "index": index,
+        "url": str(url or ""),
+        "cover_url": str(cover_url or ""),
+        "size": str(size or ""),
+        "duration": str(duration or ""),
+        "width": int(width or 0),
+        "height": int(height or 0),
+        "downloaded": bool(downloaded),
+    }
 
 
 def normalize_assets(
@@ -70,12 +90,20 @@ def normalize_assets(
             url = str(item.get("url") or "")
             kind = str(item.get("kind") or default_kind)
             cover = str(item.get("cover_url") or "")
+            size = str(item.get("size") or "")
+            duration = str(item.get("duration") or "")
+            width = int(item.get("width") or 0)
+            height = int(item.get("height") or 0)
         else:
             url = str(item or "")
             kind = default_kind
             cover = ""
+            size = ""
+            duration = ""
+            width = 0
+            height = 0
         if url:
-            assets.append(_asset(kind, index, url, cover))
+            assets.append(_asset(kind, index, url, cover, size, duration, width, height))
             index += 1
     for kind, url in (
         ("music", music_url),

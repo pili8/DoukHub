@@ -21,9 +21,10 @@ class Database:
     def _init_database(self):
         """初始化数据库表结构
 
-        字段命名规范（v2）：
-        - 业务字段：中文，与飞书表 100% 一致（分享码/平台/等级/标签/已解析/...）
+        字段命名规范（v3）：
+        - 业务字段：中文（分享码/平台/等级/标签/解析状态/获取状态/...）
         - 系统字段：英文，本地专用不进飞书（record_id/is_deleted/deleted_at/synced/created_at）
+        - v3 变更：已就绪→解析状态(TEXT枚举), 已获取信息(BOOLEAN)→获取状态(TEXT枚举), 删除同步错误/获取错误
         """
         with self._connect() as conn:
             self._migrate_collection_cache_to_share_cache(conn)
@@ -36,9 +37,8 @@ class Database:
                     平台 TEXT,
                     等级 INTEGER,
                     标签 TEXT,
-sec_user_id TEXT,
-                    已解析 BOOLEAN DEFAULT 0,
-同步错误 TEXT,
+                    sec_user_id TEXT,
+                    解析状态 TEXT DEFAULT '待解析',
                     备注 TEXT,
                     粉丝数 INTEGER,
                     作品数 INTEGER,
@@ -69,8 +69,7 @@ sec_user_id TEXT,
                     作品数 INTEGER,
                     签名 TEXT,
                     头像 TEXT,
-                    已获取信息 BOOLEAN DEFAULT 0,
-                    获取错误 TEXT,
+                    获取状态 TEXT DEFAULT '待获取',
                     同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     is_deleted BOOLEAN DEFAULT 0,
@@ -127,6 +126,7 @@ sec_user_id TEXT,
                     status TEXT NOT NULL DEFAULT 'pending',
                     filter_json TEXT NOT NULL,
                     platform TEXT NOT NULL,
+                    preset_name TEXT,
                     process_pid INTEGER,
                     log_path TEXT,
                     started_at DATETIME,
@@ -214,6 +214,24 @@ sec_user_id TEXT,
                 )
             """)
 
+            # 表8：采集方案（预设）
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS collection_presets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    rating_min INTEGER NOT NULL DEFAULT 3,
+                    tags TEXT NOT NULL DEFAULT '',
+                    account_names TEXT NOT NULL DEFAULT '',
+                    platform TEXT NOT NULL DEFAULT 'douyin',
+                    mode TEXT NOT NULL DEFAULT 'incremental',
+                    folder_name TEXT NOT NULL DEFAULT '',
+                    name_format TEXT NOT NULL DEFAULT '',
+                    is_default INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # 兼容旧库：自动迁移字段名（账号标识→sec_user_id 等）
             # 必须在 CREATE INDEX 之前执行，因为索引依赖字段名
             self._migrate_legacy_columns(conn)
@@ -289,7 +307,7 @@ sec_user_id TEXT,
 
         v2 新增字段：
         - 三张同步表：is_deleted / deleted_at / synced（如缺失则添加）
-        - 旧 synced 字段首次添加时把现有记录全部标记为已解析
+        - 旧 synced 字段首次添加时把现有记录全部标记为已就绪
 
         v2 废弃字段（不主动删除，保留兼容）：
         - 最后更新时间（旧增量同步遗留，新方案不再使用）
@@ -300,13 +318,18 @@ sec_user_id TEXT,
                 ("账号标识", "sec_user_id"),
                 ("更新时间", "同步时间"),
                 ("分享码", "share_code"),
-                ("已同步", "已解析"),
+                ("已同步", "已就绪"),
+                ("已解析", "已就绪"),
+                # v3: 已就绪 → 解析状态
+                ("已就绪", "解析状态"),
             ],
             "account_cache": [
                 ("账号标识", "sec_user_id"),
                 ("更新错误", "备注"),
                 ("更新时间", "同步时间"),
                 ("已更新", "已获取信息"),
+                # v3: 已获取信息 → 获取状态
+                ("已获取信息", "获取状态"),
             ],
             "collection_history": [
                 ("账号标识", "sec_user_id"),
@@ -334,9 +357,17 @@ sec_user_id TEXT,
             "account_cache": [
                 ("启用", "BOOLEAN DEFAULT 1"),
                 ("采集类型", "TEXT DEFAULT '发布'"),
-                ("获取错误", "TEXT"),
                 ("last_collected_at", "DATETIME"),
                 ("collect_window_days", "INTEGER"),
+            ],
+            "collection_batches": [
+                ("preset_name", "TEXT"),
+            ],
+            "collection_presets": [
+                ("folder_name", "TEXT NOT NULL DEFAULT ''"),
+                ("name_format", "TEXT NOT NULL DEFAULT ''"),
+                ("account_created_after", "TEXT NOT NULL DEFAULT ''"),
+                ("skip_recent_days", "INTEGER NOT NULL DEFAULT 0"),
             ],
         }
         # 软删除字段（墓碑）：三张同步表都加上
@@ -357,15 +388,16 @@ sec_user_id TEXT,
             )
 
         # v2.1：删除 account_cache.昵称（与 账号名称 重复，统一用 账号名称）
+        # v3：删除 同步错误/获取错误（状态枚举已表达失败语义）
         drop_columns = {
-            "account_cache": ["昵称"],
-        "share_cache": ["昵称", "签名", "头像"],
+            "account_cache": ["昵称", "获取错误"],
+            "share_cache": ["昵称", "签名", "头像", "同步错误"],
         }
 
         # 执行 v1 业务字段重命名
         for table, renames in rename_map.items():
-            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
             for old, new in renames:
+                cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
                 if old in cols and new not in cols:
                     conn.execute(f'ALTER TABLE {table} RENAME COLUMN "{old}" TO "{new}"')
                 elif old in cols and new in cols:
@@ -374,8 +406,8 @@ sec_user_id TEXT,
 
         # 执行 v2 系统字段英文化重命名
         for table, renames in v2_renames.items():
-            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
             for old, new in renames:
+                cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
                 if old in cols and new not in cols:
                     conn.execute(f'ALTER TABLE {table} RENAME COLUMN "{old}" TO "{new}"')
 
@@ -395,9 +427,94 @@ sec_user_id TEXT,
             for col, ddl in additions:
                 if col not in cols:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
-                    # synced 字段首次添加时，把现有记录全部标记为已解析
+                    # synced 字段首次添加时，把现有记录全部标记为已就绪
                     if col == "synced":
                         conn.execute(f"UPDATE {table} SET synced = 1")
+
+        # 解析状态字段数据迁移：旧的 BOOLEAN 值（0/1/True/False）转为文本枚举
+        share_cols_info = {r[1]: r[2] for r in conn.execute("PRAGMA table_info(share_cache)").fetchall()}
+        if "解析状态" in share_cols_info:
+            # 先更新数据值
+            conn.execute("UPDATE share_cache SET 解析状态 = '已就绪' WHERE 解析状态 IN ('1', 'true', 'True', 1)")
+            conn.execute("UPDATE share_cache SET 解析状态 = '待解析' WHERE 解析状态 IS NULL OR 解析状态 IN ('0', 'false', 'False', 0) OR 解析状态 = ''")
+            # 如果列类型仍是 BOOLEAN，需要重建表改为 TEXT
+            col_type = (share_cols_info["解析状态"] or "").upper()
+            if "BOOL" in col_type:
+                conn.execute("ALTER TABLE share_cache RENAME TO share_cache_old_v3")
+                conn.execute("""
+                    CREATE TABLE share_cache (
+                        record_id TEXT PRIMARY KEY,
+                        share_code TEXT UNIQUE NOT NULL,
+                        平台 TEXT,
+                        等级 INTEGER,
+                        标签 TEXT,
+                        sec_user_id TEXT,
+                        解析状态 TEXT DEFAULT '待解析',
+                        备注 TEXT,
+                        粉丝数 INTEGER,
+                        作品数 INTEGER,
+                        账号名称 TEXT,
+                        同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        is_deleted BOOLEAN DEFAULT 0,
+                        deleted_at DATETIME,
+                        synced BOOLEAN DEFAULT 0,
+                        local_updated_at DATETIME
+                    )
+                """)
+                old_cols = [r[1] for r in conn.execute("PRAGMA table_info(share_cache_old_v3)").fetchall()]
+                new_cols = [r[1] for r in conn.execute("PRAGMA table_info(share_cache)").fetchall()]
+                common_cols = [c for c in new_cols if c in old_cols]
+                col_list = ", ".join(f'"{c}"' for c in common_cols)
+                conn.execute(f"INSERT INTO share_cache ({col_list}) SELECT {col_list} FROM share_cache_old_v3")
+                conn.execute("DROP TABLE share_cache_old_v3")
+
+        # 获取状态字段数据迁移：旧的 BOOLEAN 值转为文本枚举
+        acc_cols_info = {r[1]: r[2] for r in conn.execute("PRAGMA table_info(account_cache)").fetchall()}
+        if "获取状态" in acc_cols_info:
+            # 先更新数据值
+            conn.execute("UPDATE account_cache SET 获取状态 = '已获取' WHERE 获取状态 IN ('1', 'true', 'True', 1)")
+            conn.execute("UPDATE account_cache SET 获取状态 = '待获取' WHERE 获取状态 IS NULL OR 获取状态 IN ('0', 'false', 'False', 0) OR 获取状态 = ''")
+            # 如果旧表有获取错误字段且有值，把对应记录标记为'获取失败'
+            if "获取错误" in acc_cols_info:
+                conn.execute("UPDATE account_cache SET 获取状态 = '获取失败' WHERE 获取错误 IS NOT NULL AND 获取错误 != '' AND 获取状态 = '待获取'")
+            # 如果列类型仍是 BOOLEAN，需要重建表改为 TEXT
+            col_type = (acc_cols_info["获取状态"] or "").upper()
+            if "BOOL" in col_type:
+                conn.execute("ALTER TABLE account_cache RENAME TO account_cache_old_v3")
+                conn.execute("""
+                    CREATE TABLE account_cache (
+                        record_id TEXT PRIMARY KEY,
+                        账号名称 TEXT,
+                        平台 TEXT,
+                        链接 TEXT,
+                        sec_user_id TEXT UNIQUE NOT NULL,
+                        等级 INTEGER,
+                        标签 TEXT,
+                        启用 BOOLEAN DEFAULT 1,
+                        采集类型 TEXT DEFAULT '发布',
+                        备注 TEXT,
+                        粉丝数 INTEGER,
+                        作品数 INTEGER,
+                        签名 TEXT,
+                        头像 TEXT,
+                        获取状态 TEXT DEFAULT '待获取',
+                        同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        is_deleted BOOLEAN DEFAULT 0,
+                        deleted_at DATETIME,
+                        synced BOOLEAN DEFAULT 0,
+                        local_updated_at DATETIME,
+                        last_collected_at DATETIME,
+                        collect_window_days INTEGER
+                    )
+                """)
+                old_cols = [r[1] for r in conn.execute("PRAGMA table_info(account_cache_old_v3)").fetchall()]
+                new_cols = [r[1] for r in conn.execute("PRAGMA table_info(account_cache)").fetchall()]
+                common_cols = [c for c in new_cols if c in old_cols]
+                col_list = ", ".join(f'"{c}"' for c in common_cols)
+                conn.execute(f"INSERT INTO account_cache ({col_list}) SELECT {col_list} FROM account_cache_old_v3")
+                conn.execute("DROP TABLE account_cache_old_v3")
 
 
     def _connect(self) -> sqlite3.Connection:
@@ -511,6 +628,15 @@ sec_user_id TEXT,
             row = conn.execute("SELECT * FROM account_cache WHERE sec_user_id = ? AND is_deleted = 0", (sec_user_id,)).fetchone()
             return dict(row) if row else None
 
+    def has_deleted_account(self, sec_user_id: str) -> bool:
+        """检查是否存在被软删除的账号记录（用于判断是否应跳过重新生成）"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM account_cache WHERE sec_user_id = ? AND is_deleted = 1",
+                (sec_user_id,),
+            ).fetchone()
+            return row is not None
+
     def revive_account_if_deleted(self, sec_user_id: str) -> Optional[str]:
         """复活软删除的账号记录，返回 record_id（无软删除记录则返回 None）"""
         with self._connect() as conn:
@@ -595,16 +721,17 @@ sec_user_id TEXT,
         platform: str,
         log_path: str,
         items: list[dict],
+        preset_name: str = "",
     ) -> None:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO collection_batches
-                (id, status, filter_json, platform, log_path, total_accounts, created_at)
-                VALUES (?, 'pending', ?, ?, ?, ?, ?)
+                (id, status, filter_json, platform, preset_name, log_path, total_accounts, created_at)
+                VALUES (?, 'pending', ?, ?, ?, ?, ?, ?)
                 """,
-                (batch_id, filter_json, platform, log_path, len(items), now),
+                (batch_id, filter_json, platform, preset_name, log_path, len(items), now),
             )
             conn.executemany(
                 """
@@ -959,7 +1086,7 @@ sec_user_id TEXT,
             return [row["record_id"] for row in rows]
 
     def get_synced_active_ids(self, table: str) -> list[str]:
-        """获取已解析且未删除的 record_id 列表（删除检测专用）"""
+        """获取已就绪且未删除的 record_id 列表（删除检测专用）"""
         if table not in self._SYNC_TABLES:
             return []
         with self._connect() as conn:
@@ -976,7 +1103,7 @@ sec_user_id TEXT,
             return True
 
     def purge_tombstone(self, table: str, record_id: str) -> bool:
-        """清除已解析删除的墓碑"""
+        """清除已就绪删除的墓碑"""
         if table not in self._SYNC_TABLES:
             return False
         with self._connect() as conn:
@@ -1417,17 +1544,17 @@ sec_user_id TEXT,
         with self._connect() as conn:
             # 分享表
             stats["share_cache"] = {
-"total": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0").fetchone()[0],
-"resolved": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND 已解析=1").fetchone()[0],
-"not_synced": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND (已解析=0 OR 已解析 IS NULL)").fetchone()[0],
-"has_error": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND 同步错误 IS NOT NULL AND 同步错误 != ''").fetchone()[0],
+                "total": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0").fetchone()[0],
+                "resolved": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND 解析状态='已就绪'").fetchone()[0],
+                "not_synced": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND 解析状态 != '已就绪'").fetchone()[0],
+                "has_error": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND 解析状态 = '解析失败'").fetchone()[0],
             }
             # 账号表
             stats["account_cache"] = {
                 "total": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0").fetchone()[0],
                 "enabled": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0 AND 启用=1").fetchone()[0],
                 "disabled": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0 AND (启用=0 OR 启用 IS NULL)").fetchone()[0],
-                "not_fetched": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0 AND (已获取信息=0 OR 已获取信息 IS NULL)").fetchone()[0],
+                "not_fetched": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0 AND 获取状态 != '已获取'").fetchone()[0],
             }
             # Cookie表
             stats["cookie_cache"] = {
@@ -1486,3 +1613,98 @@ sec_user_id TEXT,
             )
             conn.commit()
             return cursor.rowcount
+
+    # ===== 采集方案（预设）=====
+
+    def list_collection_presets(self) -> list[dict]:
+        """返回所有采集方案，默认方案排首位，其余按创建时间排序。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM collection_presets ORDER BY is_default DESC, created_at ASC"
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_collection_preset(self, preset_id: int) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM collection_presets WHERE id = ?", (preset_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def create_collection_preset(self, data: dict) -> dict:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO collection_presets
+                    (name, rating_min, tags, account_names, platform, mode,
+                     folder_name, name_format, account_created_after, skip_recent_days,
+                     is_default, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    data.get("name", ""),
+                    int(data.get("rating_min", 3)),
+                    str(data.get("tags", "")),
+                    str(data.get("account_names", "")),
+                    data.get("platform", "douyin"),
+                    data.get("mode", "incremental"),
+                    str(data.get("folder_name", "")),
+                    str(data.get("name_format", "")),
+                    str(data.get("account_created_after", "")),
+                    int(data.get("skip_recent_days", 0)),
+                    1 if data.get("is_default") else 0,
+                    now, now,
+                ),
+            )
+            conn.commit()
+            return self.get_collection_preset(cursor.lastrowid)
+
+    def update_collection_preset(self, preset_id: int, data: dict) -> Optional[dict]:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fields = {
+            "name": data.get("name"),
+            "rating_min": int(data["rating_min"]) if "rating_min" in data else None,
+            "tags": data.get("tags"),
+            "account_names": data.get("account_names"),
+            "platform": data.get("platform"),
+            "mode": data.get("mode"),
+            "folder_name": data.get("folder_name"),
+            "name_format": data.get("name_format"),
+            "account_created_after": data.get("account_created_after"),
+            "skip_recent_days": int(data["skip_recent_days"]) if "skip_recent_days" in data else None,
+            "is_default": 1 if data.get("is_default") else None,
+            "updated_at": now,
+        }
+        valid = {k: v for k, v in fields.items() if v is not None}
+        if not valid:
+            return self.get_collection_preset(preset_id)
+        assignments = ", ".join([f'"{k}" = ?' for k in valid])
+        params = list(valid.values()) + [preset_id]
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE collection_presets SET {assignments} WHERE id = ?",
+                params,
+            )
+            conn.commit()
+        return self.get_collection_preset(preset_id)
+
+    def delete_collection_preset(self, preset_id: int) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM collection_presets WHERE id = ?", (preset_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def set_default_collection_preset(self, preset_id: int) -> bool:
+        """将指定方案设为默认，同时取消其他方案的默认标记。"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            conn.execute("UPDATE collection_presets SET is_default = 0")
+            cursor = conn.execute(
+                "UPDATE collection_presets SET is_default = 1, updated_at = ? WHERE id = ?",
+                (now, preset_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0

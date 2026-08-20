@@ -48,14 +48,20 @@ def test_import_records_skip_reason(tmp_path, monkeypatch):
     assert result.warnings == ['{"地址":""}: 缺少地址']
 
 
-def test_account_sync_ready_depends_on_sec_user_id(tmp_path, monkeypatch):
+def test_account_sync_ready_depends_on_status(tmp_path, monkeypatch):
     syncer = make_syncer(tmp_path, monkeypatch)
 
-    with_id = {"已解析": False, "sec_user_id": "sec001"}
-    without_id = {"已解析": True, "sec_user_id": ""}
+    ready = {"解析状态": "已就绪", "sec_user_id": "sec001"}
+    not_ready = {"解析状态": "待解析", "sec_user_id": "sec001"}
+    generated = {"解析状态": "已生成", "sec_user_id": "sec001"}
+    deleted = {"解析状态": "已删除", "sec_user_id": "sec001"}
+    failed = {"解析状态": "解析失败", "sec_user_id": "sec001"}
 
-    assert syncer.is_ready_for_account(with_id) is True
-    assert syncer.is_ready_for_account(without_id) is False
+    assert syncer.is_ready_for_account(ready) is True
+    assert syncer.is_ready_for_account(not_ready) is False
+    assert syncer.is_ready_for_account(generated) is False
+    assert syncer.is_ready_for_account(deleted) is False
+    assert syncer.is_ready_for_account(failed) is False
 
 
 def test_import_full_profile_merges_existing_sec_user_id(tmp_path, monkeypatch):

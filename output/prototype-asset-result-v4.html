@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>资产结果 · 展示与按钮优化 V4 — DoukHub</title>
+<style>
+:root{
+  --bg:#FBFAF7; --surface:#FFFFFF; --muted:#F5F2EC; --muted2:#EFEAE2;
+  --text:#1F1B17; --text2:#5C564E; --textm:#A39E96;
+  --border:#ECE7DF; --border2:#D9D3C8;
+  --accent:#0061A4; --accent-hover:#004F8A; --accent-soft:#E7F0F8;
+  --video:#0061A4; --video-soft:#E7F0F8;
+  --image:#0E7490; --image-soft:#E0F2F7;
+  --cover:#C2410C; --cover-soft:#FDEEE3;
+  --success:#16A34A; --success-soft:#ECFDF3;
+  --r-sm:6px; --r:8px; --r-lg:12px;
+  --shadow-sm:0 1px 2px rgba(31,27,23,.05);
+  --shadow-md:0 4px 14px rgba(31,27,23,.08);
+  --shadow-lg:0 10px 30px rgba(31,27,23,.14);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"SF Mono",ui-monospace,Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);font-family:var(--font);color:var(--text);padding:28px 20px 80px;display:flex;justify-content:center}
+.wrap{width:100%;max-width:880px;display:flex;flex-direction:column;gap:18px}
+
+/* ===== 说明条 ===== */
+.note{font-size:13px;color:var(--text2);background:var(--accent-soft);border:1px solid rgba(0,97,164,.25);border-radius:var(--r);padding:11px 14px;line-height:1.65}
+.note b{color:var(--accent)}
+.note .k{display:inline-block;font-size:11px;font-weight:700;color:#fff;background:var(--accent);border-radius:4px;padding:1px 6px;margin-right:4px;vertical-align:1px}
+
+/* ===== 卡片 ===== */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-sm)}
+.panel-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
+.panel-head .dot{width:8px;height:8px;border-radius:50%;background:var(--success);flex-shrink:0}
+.panel-head h2{font-size:15px;font-weight:700;letter-spacing:.2px}
+.panel-head .sub{font-size:12.5px;color:var(--textm);font-weight:500}
+.panel-head .spacer{margin-left:auto}
+.pill-done{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--success);background:var(--success-soft);padding:3px 9px;border-radius:999px}
+.pill-done svg{width:12px;height:12px}
+
+/* ===== 作品上下文条 ===== */
+.workbar{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#FCFBF9,#FFFFFF)}
+.cover-sm{width:46px;height:58px;border-radius:var(--r-sm);object-fit:cover;flex-shrink:0;cursor:zoom-in;border:1px solid var(--border)}
+.wmeta{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.wtop{display:flex;align-items:center;gap:8px;min-width:0}
+.aname{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:4px;flex-shrink:0}
+.badge.dy{background:#FBEBF1;color:#B0356B}
+.wstats{font-size:12px;color:var(--textm);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wstats b{color:var(--text2);font-weight:600}
+.wdesc{font-size:12.5px;color:var(--text2);line-height:1.5;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+.wdesc.open{-webkit-line-clamp:unset}
+.wdesc .more{color:var(--accent);font-weight:600;margin-left:4px}
+.wright{display:flex;align-items:center;flex-shrink:0}
+.btn-share{display:inline-flex;align-items:center;gap:5px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--accent);background:var(--surface);border:1.5px solid rgba(0,97,164,.4);border-radius:999px;cursor:pointer;transition:.15s;white-space:nowrap}
+.btn-share:hover{background:var(--accent-soft);border-color:var(--accent)}
+.btn-share svg{width:13px;height:13px}
+
+/* ===== 浏览控制行 ===== */
+.browse{display:flex;align-items:center;gap:12px;padding:9px 18px;border-bottom:1px solid var(--border)}
+.seg{display:flex;background:var(--muted);border-radius:999px;padding:3px;gap:0}
+.seg button{border:none;background:transparent;font:inherit;font-size:12.5px;font-weight:600;color:var(--text2);padding:5px 13px;border-radius:999px;cursor:pointer;display:flex;align-items:center;gap:6px;transition:.15s;white-space:nowrap}
+.seg button .n{font-size:11px;background:rgba(31,27,23,.08);color:var(--text2);padding:1px 6px;border-radius:999px}
+.seg button:hover{background:rgba(255,255,255,.7)}
+.seg button.active{background:var(--surface);color:var(--accent);box-shadow:var(--shadow-sm)}
+.seg button.active .n{background:var(--accent-soft);color:var(--accent)}
+.browse-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.viewhint{font-size:12px;color:var(--textm)}
+.iconbtn{width:32px;height:32px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--surface);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--textm);transition:.15s}
+.iconbtn:hover{border-color:var(--border2);background:var(--muted);color:var(--accent)}
+.iconbtn svg{width:15px;height:15px}
+
+/* ===== 资产区 ===== */
+.assets{padding:8px 12px 12px}
+
+/* 列表行 */
+.row{display:flex;align-items:center;gap:11px;padding:9px 9px;border-radius:var(--r);transition:.12s;position:relative;cursor:pointer}
+.row:hover{background:var(--muted)}
+.row.selected{background:var(--accent-soft)}
+.row input{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;flex-shrink:0}
+.thumb{width:48px;height:48px;border-radius:var(--r-sm);object-fit:cover;flex-shrink:0;background:var(--muted);position:relative}
+.thumb.vid::after{content:attr(data-dur);position:absolute;right:3px;bottom:3px;font-size:9.5px;font-weight:700;color:#fff;background:rgba(0,0,0,.68);padding:1px 5px;border-radius:4px;letter-spacing:.2px}
+.kind{display:inline-flex;align-items:center;font-size:11px;font-weight:700;padding:2.5px 8px;border-radius:999px;flex-shrink:0;letter-spacing:.2px}
+.kind.video{background:var(--video-soft);color:var(--video)}
+.kind.image{background:var(--image-soft);color:var(--image)}
+.kind.cover{background:var(--cover-soft);color:var(--cover)}
+.info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.info .name{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.info .meta{font-size:11.5px;color:var(--textm);display:flex;align-items:center;gap:7px;font-family:var(--mono)}
+.info .url{font-size:11px;color:var(--textm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.55}
+.done{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--success);flex-shrink:0}
+.done svg{width:13px;height:13px}
+.ops{display:flex;gap:4px;opacity:0;transform:translateX(4px);transition:.15s}
+.row:hover .ops{opacity:1;transform:none}
+.ops button{width:29px;height:29px;border:none;border-radius:var(--r-sm);background:var(--surface);border:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);transition:.12s}
+.ops button:hover{border-color:rgba(0,97,164,.45);color:var(--accent);background:var(--accent-soft)}
+.ops button.dl{color:var(--accent);border-color:rgba(0,97,164,.3)}
+.ops svg{width:13px;height:13px}
+
+/* 网格 */
+.assets.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px}
+.cell{position:relative;aspect-ratio:3/4;border-radius:var(--r);overflow:hidden;border:2px solid transparent;background:var(--muted);cursor:pointer;transition:.15s}
+.cell img{width:100%;height:100%;object-fit:cover;display:block}
+.cell .shade{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(transparent,rgba(0,0,0,.72));padding:22px 7px 6px;display:flex;flex-direction:column;gap:2px}
+.cell .kname{font-size:11px;font-weight:700;color:#fff}
+.cell .kmeta{font-size:9.5px;color:rgba(255,255,255,.8);font-family:var(--mono)}
+.cell:hover{border-color:var(--border2)}
+.cell.selected{border-color:var(--accent)}
+.cell .tick{position:absolute;top:6px;left:6px;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;animation:pop .25s ease;box-shadow:0 2px 6px rgba(0,97,164,.4)}
+.cell .done2{position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:50%;background:var(--success);color:#fff;display:flex;align-items:center;justify-content:center}
+.cell .done2 svg{width:11px;height:11px}
+@keyframes pop{0%{transform:scale(.7)}60%{transform:scale(1.18)}100%{transform:scale(1)}}
+
+/* ===== 底部下载栏（sticky） ===== */
+.dlbar{position:sticky;bottom:0;display:flex;align-items:center;gap:12px;padding:11px 18px;background:var(--surface);border-top:1px solid var(--border);border-radius:0 0 var(--r-lg) var(--r-lg);box-shadow:0 -6px 18px rgba(31,27,23,.06);z-index:5;flex-wrap:wrap}
+.sel-ctl{display:flex;align-items:center;gap:8px}
+.sel-ctl label{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--text2);cursor:pointer;user-select:none}
+.sel-ctl input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+.sel-count{font-size:12.5px;color:var(--textm);font-weight:500}
+.sel-count b{color:var(--accent);font-size:13px}
+.sel-count.empty b{color:var(--textm)}
+.clear{font-size:12px;color:var(--textm);border:none;background:none;cursor:pointer;padding:3px 6px;border-radius:4px;text-decoration:underline;text-underline-offset:2px;transition:.12s}
+.clear:hover{color:var(--accent)}
+.dlbar .spacer{margin-left:auto}
+.dlseg{display:flex;background:var(--muted);border-radius:999px;padding:3px;flex-shrink:0}
+.dlseg button{border:none;background:transparent;font:inherit;font-size:12px;font-weight:600;color:var(--text2);padding:4px 12px;border-radius:999px;cursor:pointer;transition:.15s;display:flex;align-items:center;gap:5px}
+.dlseg button.active{background:var(--surface);color:var(--accent);box-shadow:var(--shadow-sm)}
+.dlseg button svg{width:12px;height:12px}
+.btn-dl{display:flex;align-items:center;gap:7px;font:inherit;font-size:13px;font-weight:600;padding:8px 20px;border-radius:var(--r);cursor:pointer;transition:.2s;border:1px solid transparent;background:var(--muted);color:var(--textm);flex-shrink:0}
+.btn-dl svg{width:15px;height:15px}
+.btn-dl.ready{background:var(--accent);color:#fff;box-shadow:0 2px 10px rgba(0,97,164,.28)}
+.btn-dl.ready:hover{background:var(--accent-hover)}
+.btn-dl:active{transform:scale(.97)}
+
+/* lightbox */
+.lb{position:fixed;inset:0;background:rgba(20,17,14,.88);display:none;align-items:center;justify-content:center;z-index:99;cursor:zoom-out}
+.lb img{max-width:88vw;max-height:88vh;border-radius:var(--r-lg)}
+
+/* toast */
+.toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%) translateY(12px);background:var(--text);color:#fff;font-size:13px;padding:10px 18px;border-radius:999px;opacity:0;pointer-events:none;transition:.25s;z-index:100;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:8px}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.ok{background:var(--success)}
+.toast .dot2{width:7px;height:7px;border-radius:50%;background:currentColor}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <span class="k">V4</span><b>本版优化</b>：① 下载动作收敛到底部固定<b>下载栏</b>（全选 + 已选计数 + 下载方式 + 主下载按钮），消除顶部按钮与浮动条的重复；② 作品信息降级为一行<b>上下文条</b>，把空间还给资产；③ 资产行增强<b>元信息</b>（时长 / 分辨率 / 大小）与<b>「已下载」状态</b>；④ 行内操作 hover 强化、语义图标；⑤ 下载方式（本地 / 浏览器）<b>内联</b>进下载栏，少一次弹窗。<br>按钮逻辑均映射现有函数：<b>downloadAllSelected / toggleAssetView / selectAssetsByKind / chooseDl</b>。下方均可点击体验。
+  </div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <span class="dot"></span><h2>资产结果</h2><span class="sub">8 个资产 · 1 个作品</span>
+      <span class="spacer"></span>
+      <span class="pill-done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg>已下载 2</span>
+    </div>
+
+    <!-- 作品上下文条 -->
+    <div class="workbar">
+      <img class="cover-sm" src="https://picsum.photos/seed/dk1/92/116" alt="cover">
+      <div class="wmeta">
+        <div class="wtop">
+          <span class="aname">你的姨姨</span>
+          <span class="badge dy">抖音</span>
+        </div>
+        <div class="wstats">
+          <span>赞 <b>2.4w</b></span><span>藏 <b>9806</b></span><span>评 <b>1832</b></span><span>转 <b>3211</b></span><span>· 2026-08-17</span>
+        </div>
+        <div class="wdesc" id="wdesc" onclick="this.classList.toggle('open')">#夏日辣妹穿搭 #户外长裙穿搭 夏天的快乐就是穿漂亮裙子出门晒太阳☀️ 同款链接在评论区～<span class="more">展开</span></div>
+      </div>
+      <div class="wright">
+        <button class="btn-share" title="将此账号录入分享表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>录入分享表</button>
+      </div>
+    </div>
+
+    <!-- 浏览控制行 -->
+    <div class="browse">
+      <div class="seg" id="seg">
+        <button class="active" data-k="all">全部 <span class="n">8</span></button>
+        <button data-k="video">视频 <span class="n">1</span></button>
+        <button data-k="image">图片 <span class="n">5</span></button>
+        <button data-k="cover">封面 <span class="n">2</span></button>
+      </div>
+      <div class="browse-right">
+        <span class="viewhint" id="viewhint">列表</span>
+        <button class="iconbtn" id="viewBtn" title="切换列表 / 网格视图">
+          <svg id="viewIco" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 资产区（JS 渲染） -->
+    <div class="assets" id="assets"></div>
+
+    <!-- 底部下载栏 -->
+    <div class="dlbar">
+      <div class="sel-ctl">
+        <label><input type="checkbox" id="allCb"> 全选</label>
+        <span class="sel-count empty" id="selCount">已选 <b>0</b> / 8</span>
+        <button class="clear" id="clearBtn" style="display:none" onclick="clearSel()">清空</button>
+      </div>
+      <span class="spacer"></span>
+      <div class="dlseg" id="dlseg">
+        <button class="active" data-m="local" title="保存到本机目录"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>本地</button>
+        <button data-m="browser" title="通过浏览器另存为"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>浏览器</button>
+      </div>
+      <button class="btn-dl" id="dlBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span id="dlLabel">选择资产以下载</span>
+      </button>
+    </div>
+  </section>
+</div>
+
+<div class="lb" id="lb" onclick="this.style.display='none'"><img id="lbImg" src="" alt="preview"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const ASSETS = [
+  {k:'video', n:'视频',  meta:'00:32 · 1080P · 12.4 MB',  url:'https://v.douyin.com/abc/video/7301...',   seed:'v1', dur:'00:32', downloaded:false},
+  {k:'image', n:'图片 1',meta:'1280×1707 · 2.1 MB',     url:'https://p3.douyinpic.com/img/7301a...',        seed:'i1', downloaded:true},
+  {k:'image', n:'图片 2',meta:'1280×1707 · 1.9 MB',     url:'https://p3.douyinpic.com/img/7301b...',        seed:'i2', downloaded:false},
+  {k:'image', n:'图片 3',meta:'1280×1707 · 2.3 MB',     url:'https://p3.douyinpic.com/img/7301c...',        seed:'i3', downloaded:false},
+  {k:'image', n:'图片 4',meta:'1080×1440 · 1.6 MB',     url:'https://p3.douyinpic.com/img/7301d...',        seed:'i4', downloaded:false},
+  {k:'image', n:'图片 5',meta:'1080×1440 · 1.8 MB',     url:'https://p3.douyinpic.com/img/7301e...',        seed:'i5', downloaded:false},
+  {k:'cover', n:'静态封面',meta:'720×960 · 0.8 MB',     url:'https://p3.douyinpic.com/img/cover1...',       seed:'c1', downloaded:true},
+  {k:'cover', n:'动态封面',meta:'720×960 · 2.4 MB',     url:'https://p3.douyinpic.com/img/cover2...',       seed:'c2', downloaded:false},
+];
+const KIND_TXT = {video:'视频', image:'图片', cover:'封面'};
+const ICONS = {
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+  open:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+  dl:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg>',
+};
+const img = s => `https://picsum.photos/seed/${s}/200/240`;
+const box = document.getElementById('assets');
+let grid = false, filter = 'all', sel = new Set(), dlMode = 'local';
+
+function visible(){ return ASSETS.filter(a => filter==='all' || a.k===filter); }
+function toast(msg, ok){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show' + (ok ? ' ok' : '');
+  clearTimeout(t._t); t._t = setTimeout(()=> t.className='toast', 2200);
+}
+
+function render(){
+  const list = visible();
+  if(grid){
+    box.className = 'assets grid';
+    box.innerHTML = list.map(a=>`<div class="cell ${sel.has(a.n)?'selected':''}" data-n="${a.n}" data-seed="${a.seed}">
+      ${sel.has(a.n)?'<span class="tick">'+(list.indexOf(a)+1)+'</span>':''}
+      ${a.downloaded?'<span class="done2">'+ICONS.check+'</span>':''}
+      <img src="${img(a.seed)}" alt="">
+      <div class="shade"><span class="kname">${a.n}</span><span class="kmeta">${a.meta}</span></div>
+    </div>`).join('');
+    box.querySelectorAll('.cell').forEach(c=>{
+      c.onclick = ()=> toggle(c.dataset.n);
+      c.ondblclick = ()=>{ lbImg.src = img(c.dataset.seed); lb.style.display='flex'; };
+    });
+  }else{
+    box.className = 'assets';
+    box.innerHTML = list.map(a=>`<div class="row ${sel.has(a.n)?'selected':''}" data-n="${a.n}">
+      <input type="checkbox" ${sel.has(a.n)?'checked':''}>
+      <img class="thumb ${a.k==='video'?'vid':''}" data-dur="${a.dur||''}" src="${img(a.seed)}" alt="">
+      <span class="kind ${a.k}">${KIND_TXT[a.k]}</span>
+      <div class="info"><span class="name">${a.n}</span><span class="meta">${a.meta}</span></div>
+      ${a.downloaded?'<span class="done">'+ICONS.check+'已下载</span>':''}
+      <div class="ops">
+        <button title="复制链接" onclick="event.stopPropagation();copyUrl('${a.n}')">${ICONS.copy}</button>
+        <button title="打开原图" onclick="event.stopPropagation();openUrl('${a.n}')">${ICONS.open}</button>
+        <button class="dl" title="单项下载" onclick="event.stopPropagation();dlOne('${a.n}')">${ICONS.dl}</button>
+      </div>
+    </div>`).join('');
+    box.querySelectorAll('.row').forEach(r=>{
+      r.onclick = e => { if(e.target.tagName==='INPUT'||e.target.closest('.ops')) return; toggle(r.dataset.n); };
+      const cb = r.querySelector('input');
+      cb.onchange = e => { e.stopPropagation(); toggle(r.dataset.n); };
+      r.querySelector('.thumb').ondblclick = e => { e.stopPropagation(); lbImg.src = img(ASSETS.find(a=>a.n===r.dataset.n).seed); lb.style.display='flex'; };
+    });
+  }
+  update();
+}
+
+function toggle(n){ sel.has(n) ? sel.delete(n) : sel.add(n); render(); }
+function clearSel(){ sel.clear(); render(); }
+function copyUrl(n){ const a = ASSETS.find(x=>x.n===n); toast('已复制链接：' + a.url.slice(0,28) + '…'); }
+function openUrl(n){ toast('在新标签打开：' + n); }
+function dlOne(n){ toast('开始下载「' + n + '」→ ' + (dlMode==='local'?'本机目录':'浏览器另存'), true); }
+
+function update(){
+  const total = ASSETS.length, v = visible().length;
+  const count = sel.size;
+  const sc = document.getElementById('selCount');
+  sc.innerHTML = '已选 <b>' + count + '</b> / ' + total;
+  sc.classList.toggle('empty', count===0);
+  document.getElementById('clearBtn').style.display = count>0 ? '' : 'none';
+
+  // 全选 = 当前筛选下是否全选中
+  const allCb = document.getElementById('allCb');
+  const visSel = visible().every(a => sel.has(a.n));
+  allCb.checked = v>0 && visSel;
+  allCb.indeterminate = !visSel && visible().some(a=>sel.has(a.n));
+
+  const btn = document.getElementById('dlBtn'), lbl = document.getElementById('dlLabel');
+  if(count>0){
+    btn.classList.add('ready');
+    btn.innerHTML = ICONS.dl + '<span>' + count + ' 项下载</span>';
+  }else{
+    btn.classList.remove('ready');
+    btn.innerHTML = ICONS.dl + '<span>选择资产以下载</span>';
+  }
+}
+
+document.getElementById('allCb').onclick = function(){
+  const list = visible();
+  const visSel = list.every(a=>sel.has(a.n));
+  list.forEach(a => visSel ? sel.delete(a.n) : sel.add(a.n));
+  render();
+};
+document.getElementById('dlBtn').onclick = function(){
+  if(sel.size===0){ toast('请先勾选要下载的资产'); return; }
+  const doneCount = [...sel].filter(n=>ASSETS.find(a=>a.n===n).downloaded).length;
+  const suffix = doneCount>0 ? '（其中 '+doneCount+' 项已下载，将重新下载）' : '';
+  toast('开始下载 ' + sel.size + ' 项 → ' + (dlMode==='local'?'本机目录':'浏览器另存') + suffix, true);
+};
+document.getElementById('viewBtn').onclick = ()=>{
+  grid = !grid;
+  document.getElementById('viewhint').textContent = grid ? '网格' : '列表';
+  document.getElementById('viewIco').innerHTML = grid
+    ? '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>'
+    : '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>';
+  render();
+};
+document.getElementById('seg').querySelectorAll('button').forEach(b=>{
+  b.onclick = ()=>{
+    document.getElementById('seg').querySelectorAll('button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); filter = b.dataset.k; render();
+  };
+});
+document.getElementById('dlseg').querySelectorAll('button').forEach(b=>{
+  b.onclick = ()=>{
+    document.getElementById('dlseg').querySelectorAll('button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); dlMode = b.dataset.m;
+  };
+});
+
+render();
+</script>
+</body>
+</html>

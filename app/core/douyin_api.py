@@ -140,33 +140,52 @@ def _parse_raw_detail(detail: dict, cookie: str = "") -> dict:
     static_cover = _pick_url((video.get("cover") or {}).get("url_list"))
     dynamic_cover = _pick_url((video.get("dynamic_cover") or {}).get("url_list"))
 
-    # Build downloads list — structured items with kind + cover_url
+    # Build downloads list — structured items with kind + cover_url + media metadata
     downloads: list[dict] = []
     if "图集" in work_type or "实况" in work_type:
         for img in images:
             url = _pick_url(img.get("url_list"))
             if url:
+                img_width = int(img.get("width") or 0)
+                img_height = int(img.get("height") or 0)
                 # For live photos, each image may have a video (motion);
                 # otherwise it's just a static image
                 img_video = img.get("video") or {}
                 if "实况" in work_type and img_video:
-                    motion_url = _pick_url((img_video.get("play_addr") or {}).get("url_list"))
+                    play_addr = img_video.get("play_addr") or {}
+                    motion_url = _pick_url(play_addr.get("url_list"))
                     if motion_url:
-                        downloads.append({"url": motion_url, "kind": "live_photo", "cover_url": url})
+                        downloads.append({
+                            "url": motion_url, "kind": "live_photo", "cover_url": url,
+                            "duration": str(play_addr.get("duration") or ""),
+                            "width": img_width, "height": img_height,
+                        })
                         continue
-                downloads.append({"url": url, "kind": "image", "cover_url": url})
+                downloads.append({
+                    "url": url, "kind": "image", "cover_url": url,
+                    "width": img_width, "height": img_height,
+                })
         # Fallback: if live photo but no per-image video, use the main video play_addr
         if "实况" in work_type and not any(d["kind"] == "live_photo" for d in downloads):
             play_addr = video.get("play_addr") or {}
             vurl = _pick_url(play_addr.get("url_list"))
             if vurl:
                 cover = _pick_url((video.get("cover") or {}).get("url_list")) or static_cover
-                downloads.append({"url": vurl, "kind": "live_photo", "cover_url": cover or vurl})
+                downloads.append({
+                    "url": vurl, "kind": "live_photo", "cover_url": cover or vurl,
+                    "duration": str(play_addr.get("duration") or ""),
+                    "width": int(video.get("width") or 0), "height": int(video.get("height") or 0),
+                })
     elif detail.get("video"):
         play_addr = video.get("play_addr") or {}
         vurl = _pick_url(play_addr.get("url_list"))
         if vurl:
-            downloads.append({"url": vurl, "kind": "video", "cover_url": static_cover or vurl})
+            downloads.append({
+                "url": vurl, "kind": "video", "cover_url": static_cover or vurl,
+                "duration": str(play_addr.get("duration") or video.get("duration") or ""),
+                "width": int(video.get("width") or 0), "height": int(video.get("height") or 0),
+                "size": str(play_addr.get("data_size") or ""),
+            })
 
     # Music
     music_obj = detail.get("music") or {}

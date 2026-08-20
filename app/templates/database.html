@@ -95,7 +95,7 @@
                 <div class="stats-sub">
 <span class="ok">已解析 ${coll.resolved || 0}</span>
 <span class="warn">未解析 ${coll.not_synced || 0}</span>
-${coll.has_error ? `<span class="err">有错误 ${coll.has_error}</span>` : ''}
+${coll.has_error ? `<span class="err">解析失败 ${coll.has_error}</span>` : ''}
                 </div>
             </div>`;
             const acc = s.account_cache || {};

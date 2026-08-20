@@ -2,10 +2,7 @@
 {% block title %}云端同步 - DoukHub{% endblock %}
 {% block content %}
 <style>
-.sync-log-box { max-height: 400px; overflow-y: auto; background: #0f172a; color: #cbd5e1; border-radius: var(--radius); padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; border: 1px solid #1e293b; }
-.sync-log-box .log-ok { color: #34d399; }
-.sync-log-box .log-err { color: #f87171; }
-.sync-log-box .log-info { color: #60a5fa; }
+/* .sync-log-box 已删除，统一走全局 .workflow-log（token 浅色，跟随主题） */
 .sync-stats-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; text-align: center; margin-top: 12px; }
 .sync-stat-card { padding:10px; background:var(--bg-muted); border-radius:var(--radius-sm); border:1px solid var(--border-default); }
 .sync-stat-card .num { font-size:20px; font-weight:700; }
@@ -15,10 +12,7 @@
 .history-header:hover { background: var(--bg-hover); }
 .history-detail { max-height: 0; overflow: hidden; transition: max-height 0.3s; }
 .history-detail.expanded { max-height: 500px; }
-.history-log { background: #0f172a; color: #cbd5e1; padding: 10px 14px; font-family: var(--font-mono); font-size: 11px; line-height: 1.6; max-height: 400px; overflow-y: auto; }
-.history-log .log-ok { color: #34d399; }
-.history-log .log-err { color: #f87171; }
-.history-log .log-info { color: #60a5fa; }
+/* .history-log 样式已统一走全局 .workflow-log（token 浅色，跟随主题） */
 .status-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
 .status-done { background: var(--success-light); color: var(--success); }
 .status-failed { background: var(--danger-light); color: var(--danger); }
@@ -66,7 +60,7 @@
             <div class="sync-stat-card"><div class="num" id="stat-success" style="color:var(--success);">0</div><div class="label">成功</div></div>
             <div class="sync-stat-card"><div class="num" id="stat-failed" style="color:var(--danger);">0</div><div class="label">失败</div></div>
         </div>
-        <div class="sync-log-box" id="exec-log" style="margin-top:12px;"></div>
+        <div class="workflow-log" id="exec-log" style="margin-top:12px;"></div>
     </div>
 </div>
 
@@ -84,7 +78,7 @@
             <span><span class="status-badge status-{{ h.status }}">{{ h.status }}</span> 成功 {{ h.success }} / 失败 {{ h.failed }}</span>
             <span style="color:var(--text-muted);">{{ h.created_at }}</span>
         </div>
-        <div class="history-detail"><div class="history-log" data-log="{{ h.log_json }}"></div></div>
+        <div class="history-detail"><div class="workflow-log history-log" data-log="{{ h.log_json }}"></div></div>
     </div>
     {% endfor %}
     {% else %}

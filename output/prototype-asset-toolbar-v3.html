@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>资产结果工具栏 · 设计稿 V3 — DoukHub</title>
+<style>
+/* DoukHub 设计语言：暖纸面 + 蓝色主色。仅重排呈现，按钮 id/onclick/逻辑不变 */
+:root{
+  --bg:#FBFAF7; --surface:#FFFFFF; --muted:#F5F2EC;
+  --text:#1F1B17; --text2:#5C564E; --textm:#A39E96;
+  --border:#ECE7DF; --border2:#D9D3C8;
+  --accent:#0061A4; --accent-hover:#004F8A; --accent-soft:#E7F0F8;
+  --success:#16A34A; --success-soft:#ECFDF3;
+  --r-sm:6px; --r:8px; --r-lg:12px;
+  --shadow-sm:0 1px 2px rgba(31,27,23,.04);
+  --shadow-lg:0 8px 24px rgba(31,27,23,.12);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"SF Mono",Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);font-family:var(--font);color:var(--text);padding:28px;display:flex;justify-content:center}
+.wrap{width:100%;max-width:880px;display:flex;flex-direction:column;gap:20px}
+.note{font-size:13px;color:var(--text2);background:var(--accent-soft);border:1px solid rgba(0,97,164,.25);border-radius:var(--r);padding:10px 14px;line-height:1.6}
+.note b{color:var(--accent)}
+
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-sm);overflow:hidden}
+.panel-tag{font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--textm);padding:10px 16px 0}
+.panel-body{padding:8px 16px 16px}
+
+/* ================= 新工具栏 V3 ================= */
+/* 结构：一行。左块（计数→全选→筛选组，筛选组做成内嵌胶囊组）｜右块（下载主按钮｜视图切换）
+   所有 class 沿用现网：toolbar-btn / kind-filter / aux-filter-btn / primary / view-toggle / toolbar-count(-selected) */
+.work-asset-toolbar{
+  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+  padding:8px 10px;
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+}
+/* 左块 */
+.tb-left{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.tb-right{display:flex;align-items:center;gap:8px;margin-left:auto;flex-shrink:0}
+
+/* 资产计数：从纯文本升级为带图标的信息单元 */
+.toolbar-count{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:12px;font-weight:600;color:var(--textm);
+  background:var(--muted);border-radius:999px;
+  padding:4px 11px;white-space:nowrap;
+}
+.toolbar-count svg{width:13px;height:13px}
+/* 勾选进度：数字选中后变蓝并显示 3/8 */
+.toolbar-count .progress-hint{color:var(--accent);font-weight:700;display:none}
+.toolbar-count.has-sel .progress-hint{display:inline}
+
+/* 按钮基础（同现网视觉体系，微调呼吸感） */
+.toolbar-btn{
+  display:inline-flex;align-items:center;gap:5px;
+  font:inherit;font-size:12.5px;font-weight:500;color:var(--text2);
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:999px;padding:5px 12px;cursor:pointer;
+  transition:all .15s ease;white-space:nowrap;
+}
+.toolbar-btn:hover{border-color:var(--border2);background:var(--muted)}
+.toolbar-btn:active{transform:scale(.96)}
+.toolbar-btn svg{width:14px;height:14px}
+
+/* 类型筛选组：胶囊拼组（连体感），仍可整组换行 */
+.tb-kinds{display:inline-flex;align-items:center;gap:0;background:var(--muted);border-radius:999px;padding:3px}
+.tb-kinds .toolbar-btn{background:transparent;border:none;border-radius:999px;padding:4px 12px}
+.tb-kinds .toolbar-btn:hover{background:rgba(255,255,255,.7)}
+.tb-kinds .toolbar-btn.kind-filter{
+  color:var(--accent);font-weight:600;
+  background:var(--surface);box-shadow:var(--shadow-sm),0 0 0 1px rgba(0,97,164,.28) inset;
+}
+.tb-kinds .toolbar-btn.kind-filter:hover{background:var(--accent-soft)}
+.tb-kinds .toolbar-btn.kind-filter .kind-count{font-weight:700;margin-left:1px}
+.tb-kinds .toolbar-btn.aux-filter-btn{color:var(--textm);font-size:12px}
+
+/* 主按钮：保持蓝色实心，加强落点感 */
+.toolbar-btn.primary{
+  background:var(--accent);border-color:var(--accent);color:#fff;
+  font-weight:600;border-radius:var(--r);padding:6px 16px;
+  box-shadow:0 1px 3px rgba(0,97,164,.3);
+}
+.toolbar-btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.toolbar-count-selected{font-weight:700;color:#fff;margin-left:1px}
+.toolbar-btn.primary .toolbar-count-selected{color:#fff}
+
+/* 视图切换：方角小方块，弱化为图标按钮 */
+.toolbar-btn.view-toggle{width:32px;height:32px;padding:0;justify-content:center;border-radius:var(--r-sm);color:var(--textm)}
+.toolbar-btn.view-toggle:hover{color:var(--accent);border-color:rgba(0,97,164,.4);background:var(--accent-soft)}
+.toolbar-btn.view-toggle.is-grid{color:var(--accent)}
+
+/* 勾选进度线（纯展示，不新增按钮） */
+.tb-progress{height:2.5px;background:var(--muted);position:relative;margin:0 10px 0}
+.tb-progress .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),#4DA3FF);transition:width .25s ease;border-radius:0 3px 3px 0}
+
+/* ================= 资产列表（沿用现网交互） ================= */
+.assets{margin-top:2px}
+.row{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:var(--r);transition:.12s}
+.row:hover{background:var(--muted)}
+.row.selected{background:var(--accent-soft)}
+.row input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex-shrink:0}
+.thumb{width:46px;height:46px;border-radius:var(--r-sm);object-fit:cover;cursor:zoom-in;flex-shrink:0;background:var(--muted)}
+.row .kind{font-size:12.5px;font-weight:600;width:62px;flex-shrink:0;color:var(--text2)}
+.row .url{flex:1;font-family:var(--mono);font-size:11.5px;color:var(--textm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .ops{display:none;gap:4px}
+.row:hover .ops{display:flex}
+.ops button,.ops a{width:27px;height:27px;border:none;border-radius:var(--r-sm);background:var(--surface);border:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);text-decoration:none;font-size:12px}
+.ops button:hover{border-color:rgba(0,97,164,.4);color:var(--accent)}
+
+.lb{position:fixed;inset:0;background:rgba(20,17,14,.85);display:none;align-items:center;justify-content:center;z-index:99;cursor:zoom-out}
+.lb img{max-width:88vw;max-height:88vh;border-radius:var(--r-lg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="note"><b>V3 设计稿</b>：按钮功能、点击逻辑、显示条件全部沿用现网，仅改呈现——① 计数做成信息胶囊并内嵌「已选 3/8」；② 类型筛选收进连体胶囊组，激活态实底浮起；③ 下载主按钮 + 视图切换靠右分区；④ 底部 2.5px 勾选进度线。下方按钮均可点，逻辑接通。</div>
+
+  <section class="panel">
+    <div class="panel-tag">资产结果 · 工具栏 V3</div>
+    <div class="panel-body">
+      <div class="work-asset-toolbar">
+        <div class="tb-left">
+          <span class="toolbar-count" id="tbCount">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+            8 个资产 <span class="progress-hint" id="hint">已选 3/8</span>
+          </span>
+          <button type="button" class="toolbar-btn" onclick="toggleAll()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> 全选</button>
+          <div class="tb-kinds">
+            <button type="button" class="toolbar-btn kind-filter" data-k="video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg> 视频<b class="kind-count">1</b></button>
+            <button type="button" class="toolbar-btn" data-k="image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> 图片(7)</button>
+            <button type="button" class="toolbar-btn aux-filter-btn" data-k="cover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l4-4 5 5"/></svg> 封面(2)</button>
+          </div>
+        </div>
+        <div class="tb-right">
+          <button type="button" class="toolbar-btn primary" onclick="alert('下载选中 → downloadSelectedAssets（逻辑同现网）')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 下载选中<span class="toolbar-count-selected" id="dlCount">3</span></button>
+          <button type="button" class="toolbar-btn view-toggle" id="viewBtn" title="切换列表/网格视图" onclick="alert('视图切换 → toggleAssetView（逻辑同现网）')"><svg id="viewIco" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>
+        </div>
+      </div>
+      <div class="tb-progress"><div class="bar" id="bar"></div></div>
+      <div class="assets" id="assets"></div>
+    </div>
+  </section>
+</div>
+
+<div class="lb" id="lb" onclick="this.style.display='none'"><img id="lbImg" src="" alt="preview"></div>
+
+<script>
+const ASSETS=[
+ {k:'video',n:'视频 1',seed:'v1',url:'https://v.douyin.com/abc/video/7301...'},
+ {k:'image',n:'图片 1',seed:'i1',url:'https://p3.douyinpic.com/img/7301a...'},
+ {k:'image',n:'图片 2',seed:'i2',url:'https://p3.douyinpic.com/img/7301b...'},
+ {k:'image',n:'图片 3',seed:'i3',url:'https://p3.douyinpic.com/img/7301c...'},
+ {k:'image',n:'图片 4',seed:'i4',url:'https://p3.douyinpic.com/img/7301d...'},
+];
+const img=s=>`https://picsum.photos/seed/${s}/100/100`;
+const sel=new Set([1,2,3]);
+const TOTAL=8; // 模拟含折叠封面的总数
+const box=document.getElementById('assets');
+function update(){
+  document.getElementById('dlCount').textContent=sel.size;
+  document.getElementById('hint').textContent=`已选 ${sel.size}/${TOTAL}`;
+  document.getElementById('tbCount').classList.toggle('has-sel',sel.size>0);
+  document.getElementById('bar').style.width=(sel.size/TOTAL*100)+'%';
+}
+function render(){
+  box.innerHTML=ASSETS.map((a,i)=>`<div class="row ${sel.has(i)?'selected':''}" data-i="${i}">
+    <input type="checkbox" ${sel.has(i)?'checked':''}>
+    <img class="thumb" src="${img(a.seed)}" alt="">
+    <span class="kind">${a.n}</span><span class="url">${a.url}</span>
+    <div class="ops"><button title="复制链接">⧉</button><a title="打开">↗</a><button title="下载此项">⬇</button></div>
+  </div>`).join('');
+  box.querySelectorAll('.row').forEach(r=>{
+    const i=+r.dataset.i;
+    r.querySelector('input').onchange=e=>{ e.target.checked?sel.add(i):sel.delete(i); r.classList.toggle('selected',sel.has(i)); update(); };
+    r.querySelector('.thumb').ondblclick=()=>{ document.getElementById('lbImg').src=img(ASSETS[i].seed); document.getElementById('lb').style.display='flex'; };
+  });
+  update();
+}
+function toggleAll(){
+  const all=ASSETS.every((_,i)=>sel.has(i));
+  ASSETS.forEach((_,i)=>all?sel.delete(i):sel.add(i)); render();
+}
+document.querySelectorAll('.tb-kinds .toolbar-btn').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.tb-kinds .toolbar-btn').forEach(x=>{x.classList.remove('kind-filter')});
+    b.classList.add('kind-filter');
+    sel.clear(); ASSETS.forEach((a,i)=>{ if(a.k===b.dataset.k) sel.add(i); }); render();
+  };
+});
+render();
+</script>
+</body>
+</html>

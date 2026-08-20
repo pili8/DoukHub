@@ -6,7 +6,7 @@ import secrets
 import socket
 import httpx
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 from urllib.parse import quote
@@ -80,6 +80,16 @@ def get_database() -> Database:
     if database is None:
         database = Database()
     return database
+
+
+def _parse_preset_date(value: str) -> date | None:
+    """将 'YYYY-MM-DD' 字符串转为 date，空或无效返回 None。"""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except (ValueError, TypeError):
+        return None
 
 
 def get_collection_batch_manager() -> CollectionBatchManager:
@@ -255,7 +265,13 @@ def detect_platform(link: str) -> str:
 
 def _extract_single_work_links(text: str) -> list[tuple[str, str]]:
     result: list[tuple[str, str]] = []
+    seen: set[str] = set()
     for link in single_work.URL.findall(text or ""):
+        # 标准化：去掉尾部斜杠和查询参数用于去重比较
+        normalized = link.rstrip("/").split("?")[0]
+        if normalized in seen:
+            continue
+        seen.add(normalized)
         platform = single_work.detect_single_platform(link)
         if platform:
             result.append((link, platform))
@@ -283,30 +299,27 @@ def _is_unsafe_filename_template(template: str) -> bool:
 
 
 def _sync_workflow_stats(db: Database) -> dict[str, int]:
-    """用 SQL COUNT 替代全量加载到内存,避免阻塞 async 事件循环"""
-    with db._connect() as conn:
-        collections_total = conn.execute(
-            "SELECT COUNT(*) FROM share_cache WHERE is_deleted = 0"
-        ).fetchone()[0]
-        pending_resolve = conn.execute(
-            "SELECT COUNT(*) FROM share_cache WHERE is_deleted = 0 AND (sec_user_id IS NULL OR sec_user_id = '') AND share_code IS NOT NULL AND TRIM(share_code) != ''"
-        ).fetchone()[0]
-        ready_accounts = conn.execute(
-            "SELECT COUNT(*) FROM share_cache WHERE is_deleted = 0 AND sec_user_id IS NOT NULL AND sec_user_id != ''"
-        ).fetchone()[0]
-        accounts_total = conn.execute(
-            "SELECT COUNT(*) FROM account_cache WHERE is_deleted = 0"
-        ).fetchone()[0]
-        pending_refresh = conn.execute(
-            "SELECT COUNT(*) FROM account_cache WHERE is_deleted = 0 AND sec_user_id IS NOT NULL AND sec_user_id != '' AND COALESCE(已获取信息, 0) = 0"
-        ).fetchone()[0]
-        cookies = conn.execute(
-            "SELECT COUNT(*) FROM cookie_cache WHERE 启用 = 1 AND 状态 = '正常'"
-        ).fetchone()[0]
-        # ready_to_sync: 有 sec_user_id 但不在 account_cache 中
-        ready_to_sync = conn.execute(
-            "SELECT COUNT(*) FROM share_cache s WHERE s.is_deleted = 0 AND s.sec_user_id IS NOT NULL AND s.sec_user_id != '' AND NOT EXISTS (SELECT 1 FROM account_cache a WHERE a.sec_user_id = s.sec_user_id AND a.is_deleted = 0)"
-        ).fetchone()[0]
+    """用高级 API 统计，兼容 mock 数据库"""
+    collections = db.get_all_collections()
+    accounts = db.get_all_accounts()
+    cookies = db.get_enabled_cookies()
+    collections_total = len(collections)
+    pending_resolve = sum(
+        1 for c in collections
+        if c.get("解析状态") in ("待解析", "解析失败")
+        and str(c.get("share_code", "")).strip()
+    )
+    ready_accounts = sum(1 for c in collections if c.get("解析状态") == "已就绪")
+    accounts_total = len(accounts)
+    account_sec_ids = {a.get("sec_user_id") for a in accounts if a.get("sec_user_id")}
+    ready_to_sync = sum(
+        1 for c in collections
+        if c.get("sec_user_id") and c["sec_user_id"] not in account_sec_ids
+    )
+    pending_refresh = sum(
+        1 for a in accounts
+        if a.get("sec_user_id") and a.get("获取状态") in ("待获取", "获取失败")
+    )
     return {
         "collections_total": collections_total,
         "pending_resolve": pending_resolve,
@@ -314,7 +327,7 @@ def _sync_workflow_stats(db: Database) -> dict[str, int]:
         "ready_to_sync": ready_to_sync,
         "accounts_total": accounts_total,
         "pending_refresh": pending_refresh,
-        "cookies": cookies,
+        "cookies": len(cookies),
     }
 
 
@@ -928,7 +941,7 @@ async def api_sync():
                     yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ [{i+1}/{len(entries)}] {account.name or sec_user_id}'})}\n\n"
                     
                     # 更新分享表状态
-                    s._update_collection_status(record_id, "已解析", "", sec_user_id)
+                    s._update_collection_status(record_id, "已就绪", "", sec_user_id)  # 旧 syncer 兼容
                     
                     # 让出控制权，避免阻塞
                     await asyncio.sleep(0)
@@ -1085,10 +1098,10 @@ async def _run_update_collection(task):
         tm.update(task.task_id, status="failed", error="TTD 服务未运行")
         return
     collections = s.db.get_all_collections()
-    to_process = [c for c in collections if not c.get("sec_user_id") and str(c.get("share_code", "")).strip()]
+    to_process = [c for c in collections if c.get("解析状态") in ("待解析", "解析失败") and str(c.get("share_code", "")).strip()]
     tm.update(task.task_id, total=len(to_process))
     if not to_process:
-        tm.add_log(task.task_id, "没有需要解析的记录（所有分享记录已获取 sec_user_id）", "info")
+        tm.add_log(task.task_id, "没有需要解析的记录（所有分享记录解析状态为已就绪/已生成/已删除）", "info")
         tm.add_log(task.task_id, "完成: 0 条", "ok")
         return
     tm.add_log(task.task_id, f"需要处理 {len(to_process)} 条记录", "info")
@@ -1110,7 +1123,7 @@ async def _run_update_collection(task):
                     reason = "TTD 返回空(服务不可用或超时)"
                 else:
                     reason = f"URL 无法提取 sec_user_id: {resolved_url[:120]}"
-                s.db.update_collection(collection["record_id"], {"同步错误": reason})
+                s.db.update_collection(collection["record_id"], {"解析状态": "解析失败"})
                 tm.add_log(task.task_id, f"X {share}: {reason}", "error")
                 tm.update(task.task_id, success=success, failed=failed)
                 continue
@@ -1125,14 +1138,14 @@ async def _run_update_collection(task):
                 success += 1
                 tm.add_log(task.task_id, "OK 合并重复记录", "ok")
             else:
-                s.db.update_collection(collection["record_id"], {"sec_user_id": sec_user_id, "已解析": True, "同步错误": None})
+                s.db.update_collection(collection["record_id"], {"sec_user_id": sec_user_id, "解析状态": "已就绪"})
                 success += 1
                 tm.add_log(task.task_id, f"OK {share}: {sec_user_id}", "ok")
             tm.update(task.task_id, success=success, failed=failed)
             await asyncio.sleep(0.3)
         except Exception as e:
             failed += 1
-            s.db.update_collection(collection["record_id"], {"同步错误": str(e)})
+            s.db.update_collection(collection["record_id"], {"解析状态": "解析失败"})
             tm.add_log(task.task_id, f"X {share}: {e}", "error")
             tm.update(task.task_id, success=success, failed=failed)
     tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed}", "info")
@@ -1200,53 +1213,48 @@ async def _run_sync_account(task):
         sec_user_id = collection["sec_user_id"]
         platform = collection.get("平台") or "抖音"
         existing_account = existing_accounts_map.get(sec_user_id)
-        # 跳过 API 调用的条件：账号表已有 且 已获取信息=是
-        skip_api = existing_account and existing_account.get("已获取信息")
+        # 跳过 API 调用的条件：账号表已有 且 获取状态=已获取
+        skip_api = existing_account and existing_account.get("获取状态") == "已获取"
         tm.add_log(task.task_id, f"[{i+1}/{len(to_process)}] {sec_user_id}", "info")
         try:
             if existing_account:
-                # 账号已存在:合并等级标签（无论是否调API都执行）
+                # 账号已存在:合并等级标签备注（无论是否调API都执行）
                 new_level = s.merge_level(existing_account.get("等级"), collection.get("等级"))
                 existing_tags = json.loads(existing_account.get("标签", "[]")) if existing_account.get("标签") else []
                 new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
                 merged_tags = s.merge_tags(existing_tags, new_tags)
+                # 备注合并：账号表已有备注则保留（用户可能已修改），否则用分享表的
+                merged_note = existing_account.get("备注") or collection.get("备注") or ""
                 s.db.update_account(existing_account["record_id"], {
                     "等级": new_level,
                     "标签": json.dumps(merged_tags),
+                    "备注": merged_note,
                 })
+                # 标记为已生成
+                s.db.update_collection(collection["record_id"], {"解析状态": "已生成"})
                 account_id = existing_account["record_id"]
                 if skip_api:
                     # 已获取过信息:只合并数据,不重复调API
                     skipped += 1
-                    tm.add_log(task.task_id, f"SKIP {sec_user_id}: 已获取信息,仅合并等级标签", "info")
+                    tm.add_log(task.task_id, f"SKIP {sec_user_id}: 获取状态=已获取,仅合并等级标签备注", "info")
                     tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
                     continue
             else:
-                # 新账号:先复活软删除记录(如有),再插入
-                revived_id = db.revive_account_if_deleted(sec_user_id)
-                if revived_id:
-                    s.db.update_account(revived_id, {
-                        "账号名称": "",
-                        "平台": platform,
-                        "链接": build_profile_url(sec_user_id, platform),
-                        "等级": collection.get("等级"),
-                        "标签": collection.get("标签"),
-                        "已获取信息": False,
-                    })
-                    account_id = revived_id
-                else:
-                    record_id = f"acc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{i}"
-                    s.db.insert_account({
-                        "record_id": record_id,
-                        "账号名称": "",
-                        "平台": platform,
-                        "链接": build_profile_url(sec_user_id, platform),
-                        "sec_user_id": sec_user_id,
-                        "等级": collection.get("等级"),
-                        "标签": collection.get("标签"),
-                        "已获取信息": False,
-                    })
-                    account_id = record_id
+                record_id = f"acc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{i}"
+                s.db.insert_account({
+                    "record_id": record_id,
+                    "账号名称": "",
+                    "平台": platform,
+                    "链接": build_profile_url(sec_user_id, platform),
+                    "sec_user_id": sec_user_id,
+                    "等级": collection.get("等级"),
+                    "标签": collection.get("标签"),
+                    "备注": collection.get("备注") or "",
+                    "获取状态": "待获取",
+                })
+                # 标记为已生成
+                s.db.update_collection(collection["record_id"], {"解析状态": "已生成"})
+                account_id = record_id
             # 获取账号详情
             if not ttd_available or not cookie_list:
                 skipped += 1
@@ -1259,25 +1267,23 @@ async def _run_sync_account(task):
             if not info or not info.get("nickname"):
                 failed += 1
                 reason = info.get("_error") if info else "TTD 返回空"
-                s.db.update_account(account_id, {"获取错误": reason})
-                s.db.update_collection(collection["record_id"], {"同步错误": reason})
+                s.db.update_account(account_id, {"获取状态": "获取失败"})
                 tm.add_log(task.task_id, f"X {sec_user_id}: {reason}", "error")
                 tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
                 continue
-            s.db.update_account(account_id, {
-                "账号名称": info.get("nickname", ""),
-                "粉丝数": info.get("follower_count", 0),
-                "作品数": info.get("aweme_count", 0),
-                "签名": info.get("signature", ""),
-                "头像": info.get("avatar", ""),
-                "已获取信息": True,
-                "获取错误": None,
-            })
-            # 更新内存缓存
-            existing_accounts_map[sec_user_id] = {
-                **(existing_account or {}),
-                "账号名称": info.get("nickname", ""),
-                "已获取信息": True,
+                s.db.update_account(account_id, {
+                    "账号名称": info.get("nickname", ""),
+                    "粉丝数": info.get("follower_count", 0),
+                    "作品数": info.get("aweme_count", 0),
+                    "签名": info.get("signature", ""),
+                    "头像": info.get("avatar", ""),
+                    "获取状态": "已获取",
+                })
+                # 更新内存缓存
+                existing_accounts_map[sec_user_id] = {
+                    **(existing_account or {}),
+                    "账号名称": info.get("nickname", ""),
+                    "获取状态": "已获取",
             }
             success += 1
             tm.add_log(task.task_id, f"OK 新增/更新账号: {info.get('nickname')}", "ok")
@@ -1340,7 +1346,7 @@ async def _run_refresh_accounts(task):
     db = get_database()
     tm.add_log(task.task_id, "开始获取账号资料", "info")
     accounts = db.get_all_accounts()
-    to_fetch = [a for a in accounts if a.get("sec_user_id") and not a.get("已获取信息")]
+    to_fetch = [a for a in accounts if a.get("sec_user_id") and a.get("获取状态") in ("待获取", "获取失败")]
     tm.update(task.task_id, total=len(to_fetch))
     if not to_fetch:
         tm.add_log(task.task_id, "没有需要获取的账号", "info")
@@ -1390,15 +1396,14 @@ async def _run_refresh_accounts(task):
                     "作品数": info.get("aweme_count", 0),
                     "签名": info.get("signature", ""),
                     "头像": info.get("avatar", ""),
-                    "已获取信息": True,
-                    "获取错误": None,
+                    "获取状态": "已获取",
                 })
                 success += 1
                 tm.add_log(task.task_id, f"OK {nickname} | 粉丝 {info.get('follower_count', 0)} | 作品 {info.get('aweme_count', 0)}", "ok")
             else:
                 failed += 1
                 reason = info.get("_error", "无法获取资料") if info else "TTD 返回空"
-                db.update_account(account.get("record_id", ""), {"获取错误": reason})
+                db.update_account(account.get("record_id", ""), {"获取状态": "获取失败"})
                 tm.add_log(task.task_id, f"X {old_name}: {reason}", "error")
             tm.update(task.task_id, success=success, failed=failed)
             await asyncio.sleep(0.5)
@@ -1456,6 +1461,7 @@ class CollectionBatchRequest(BaseModel):
     account_names: str = ""
     mode: Literal["incremental", "full"] = "incremental"
     platform: Literal["douyin", "tiktok", "all"] = "douyin"
+    preset_id: int | None = None
 
 
 class CollectionRetryRequest(BaseModel):
@@ -1888,6 +1894,13 @@ async def api_database_delete_record(table_name: str, record_id: str):
             success = db.delete_collection(record_id)
         elif table_name == "account_cache":
             success = db.delete_account(record_id)
+            # 联动：把分享表中对应对 sec_user_id 的记录标记为「已删除」
+            if success:
+                acc = db.get_account_by_id(record_id)
+                if acc and acc.get("sec_user_id"):
+                    share_row = db.get_collection_by_sec_user_id(acc["sec_user_id"])
+                    if share_row:
+                        db.update_collection(share_row["record_id"], {"解析状态": "已删除"})
         elif table_name == "cookie_cache":
             success = db.delete_cookie(record_id)
         
@@ -2919,6 +2932,102 @@ async def api_proxy_download(url: str, filename: str = "download"):
     )
 
 
+class QuickAddShareRequest(BaseModel):
+    sec_user_id: str
+    platform: str = "抖音"
+    account_name: str = ""
+    rating: int = 3
+    tags: list[str] = []
+    source_link: str = ""
+    note: str = "从单作品采集录入"
+
+
+@app.post("/api/collection/quick-add-share")
+async def api_quick_add_share(request: QuickAddShareRequest):
+    """从单作品采集快捷录入分享表（share_cache）"""
+    if not request.sec_user_id:
+        return JSONResponse({"success": False, "message": "缺少 sec_user_id"}, status_code=400)
+    db = get_database()
+    import json as _json
+    from datetime import datetime as _dt
+
+    # 检查是否已存在（按 sec_user_id 去重）
+    existing = db.get_collection_by_sec_user_id(request.sec_user_id)
+
+    if existing:
+        # 已存在：合并等级（取高的）和标签
+        old_rating = existing.get("等级", 3) or 3
+        merged_rating = max(old_rating, request.rating)
+        old_tags_str = existing.get("标签", "[]") or "[]"
+        try:
+            old_tags = _json.loads(old_tags_str) if old_tags_str else []
+        except (ValueError, TypeError):
+            old_tags = []
+        merged_tags = list(set(old_tags + request.tags))
+        db.update_collection(existing["record_id"], {
+            "等级": merged_rating,
+            "标签": _json.dumps(merged_tags, ensure_ascii=False),
+        })
+        return {
+            "success": True,
+            "message": "已更新现有分享表记录（合并等级和标签）",
+            "action": "updated",
+        }
+
+    # 新增
+    record_id = f"rec_{_dt.now().strftime('%Y%m%d%H%M%S')}"
+    insert_data = {
+        "record_id": record_id,
+        "share_code": request.sec_user_id,
+        "平台": request.platform,
+        "等级": request.rating,
+        "标签": _json.dumps(request.tags, ensure_ascii=False),
+        "sec_user_id": request.sec_user_id,
+        "解析状态": "已就绪",
+        "账号名称": request.account_name,
+        "备注": request.note,
+    }
+    try:
+        db.insert_collection(insert_data)
+    except Exception as e:
+        return JSONResponse(
+            {"success": False, "message": f"录入失败（可能已存在）: {e}"},
+            status_code=409,
+        )
+    return {
+        "success": True,
+        "message": "已录入分享表，可前往「生成账号表」获取详情",
+        "action": "created",
+    }
+
+
+@app.post("/api/collection/works/history/{history_id}/open-dir")
+async def api_open_history_dir(history_id: int):
+    """打开下载历史的保存目录"""
+    db = get_database()
+    row = db.get_single_work_history(history_id)
+    if not row:
+        return {"success": False, "message": "记录不存在"}
+    target_dir = row.get("target_dir") or ""
+    if not target_dir:
+        return {"success": False, "message": "该记录无保存目录"}
+    import subprocess
+    import sys
+    import os
+    if not os.path.isdir(target_dir):
+        return {"success": False, "message": f"目录不存在: {target_dir}"}
+    try:
+        if sys.platform == "win32":
+            os.startfile(target_dir)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", target_dir])
+        else:
+            subprocess.Popen(["xdg-open", target_dir])
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
 @app.get("/api/collection/works/history")
 async def api_list_single_work_history(limit: int = 50):
     db = get_database()
@@ -2985,23 +3094,225 @@ async def api_retry_single_work_history(history_id: int, request: SingleWorkRetr
     return {"success": result["status"] == "success", "results": [result]}
 
 
+# ========== 采集方案（预设）==========
+
+class CollectionPresetRequest(BaseModel):
+    name: str
+    rating_min: int = 3
+    tags: str = ""
+    account_names: str = ""
+    platform: Literal["douyin", "tiktok", "all"] = "douyin"
+    mode: Literal["incremental", "full"] = "incremental"
+    folder_name: str = ""
+    name_format: str = ""
+    account_created_after: str = ""
+    skip_recent_days: int = 0
+    is_default: bool = False
+
+
+@app.get("/api/collection/presets")
+async def api_list_collection_presets():
+    presets = get_database().list_collection_presets()
+    # 如果没有方案，自动初始化默认方案
+    if not presets:
+        db = get_database()
+        db.create_collection_preset({
+            "name": "日常 4星+（增量）",
+            "rating_min": 4,
+            "tags": "",
+            "account_names": "",
+            "platform": "douyin",
+            "mode": "incremental",
+            "is_default": True,
+        })
+        db.create_collection_preset({
+            "name": "日常 3星+（增量）",
+            "rating_min": 3,
+            "platform": "douyin",
+            "mode": "incremental",
+        })
+        db.create_collection_preset({
+            "name": "TikTok 全部（增量）",
+            "rating_min": 3,
+            "platform": "tiktok",
+            "mode": "incremental",
+        })
+        db.create_collection_preset({
+            "name": "连通性测试",
+            "rating_min": 4,
+            "tags": "",
+            "account_names": "",
+            "platform": "douyin",
+            "mode": "incremental",
+        })
+        presets = db.list_collection_presets()
+    return {"presets": presets}
+
+
+@app.post("/api/collection/presets")
+async def api_create_collection_preset(request: CollectionPresetRequest):
+    preset = get_database().create_collection_preset(request.model_dump())
+    return {"success": True, "preset": preset}
+
+
+@app.put("/api/collection/presets/{preset_id}")
+async def api_update_collection_preset(preset_id: int, request: CollectionPresetRequest):
+    preset = get_database().update_collection_preset(preset_id, request.model_dump())
+    if not preset:
+        return JSONResponse({"success": False, "message": "方案不存在"}, status_code=404)
+    return {"success": True, "preset": preset}
+
+
+@app.delete("/api/collection/presets/{preset_id}")
+async def api_delete_collection_preset(preset_id: int):
+    preset = get_database().get_collection_preset(preset_id)
+    if preset and preset.get("is_default"):
+        return JSONResponse({"success": False, "message": "不能删除默认方案"}, status_code=400)
+    ok = get_database().delete_collection_preset(preset_id)
+    return {"success": ok}
+
+
+@app.post("/api/collection/presets/{preset_id}/default")
+async def api_set_default_collection_preset(preset_id: int):
+    ok = get_database().set_default_collection_preset(preset_id)
+    return {"success": ok}
+
+
+@app.get("/api/collection/defaults")
+async def api_get_collection_defaults():
+    """获取增量采集的全局默认设置"""
+    return {"defaults": config.collection_defaults}
+
+
+@app.put("/api/collection/defaults")
+async def api_save_collection_defaults(request: Request):
+    """保存增量采集的全局默认设置"""
+    data = await request.json()
+    folder_name = str(data.get("folder_name") or "").strip()
+    name_format = str(data.get("name_format") or "").strip()
+    config._data["collection_defaults"] = {
+        "folder_name": folder_name,
+        "name_format": name_format,
+    }
+    config.save()
+    return {"success": True, "defaults": config.collection_defaults}
+
+
+@app.post("/api/collection/presets/{preset_id}/preview")
+async def api_preview_collection_preset(preset_id: str):
+    """根据方案 ID 预览采集范围统计。"""
+    db = get_database()
+    # preset_id 可以是 "new"（未保存的新方案），此时不做 DB 查询
+    if preset_id == "new":
+        return JSONResponse(
+            {"success": False, "message": "新方案尚未保存，请先保存后再预览"},
+            status_code=400,
+        )
+    try:
+        pid = int(preset_id)
+    except ValueError:
+        return JSONResponse({"success": False, "message": "无效的方案 ID"}, status_code=400)
+    preset = db.get_collection_preset(pid)
+    if not preset:
+        return JSONResponse({"success": False, "message": "方案不存在"}, status_code=404)
+
+    accounts = db.get_all_accounts()
+    platforms = (
+        ("douyin", "tiktok") if preset["platform"] == "all" else (preset["platform"],)
+    )
+    totals = {
+        "total_accounts": 0,
+        "incremental_accounts": 0,
+        "first_run_accounts": 0,
+        "skipped_accounts": 0,
+    }
+    for platform in platforms:
+        planned = plan_collection(
+            accounts=accounts,
+            rating_min=preset["rating_min"],
+            tags=preset["tags"].split(",") if preset["tags"] else [],
+            account_names=preset.get("account_names", ""),
+            platform=platform,
+            mode=preset["mode"],
+            created_after=_parse_preset_date(preset.get("account_created_after", "")),
+            skip_recent_days=int(preset.get("skip_recent_days", 0)),
+        )
+        if not planned:
+            continue
+        skipped = sum(item.status == "skipped" for item in planned)
+        first_run = sum(
+            item.status == "pending" and item.earliest == "" for item in planned
+        )
+        incremental = sum(
+            item.status == "pending" and item.earliest != "" for item in planned
+        )
+        totals["total_accounts"] += len(planned)
+        totals["incremental_accounts"] += incremental
+        totals["first_run_accounts"] += first_run
+        totals["skipped_accounts"] += skipped
+
+    if totals["total_accounts"] == 0:
+        return JSONResponse(
+            {"success": False, "message": "没有符合条件的账号"},
+            status_code=400,
+        )
+    return {"success": True, **totals}
+
+
 # ========== 采集批次 ==========
 
 @app.post("/api/collection/batches")
 async def api_start_collection_batch(request: CollectionBatchRequest):
     db = get_database()
     manager = get_collection_batch_manager()
+    # 如果指定了 preset_id，从方案中读取参数覆盖请求字段
+    if request.preset_id is not None:
+        preset = db.get_collection_preset(request.preset_id)
+        if not preset:
+            return JSONResponse({"success": False, "message": "方案不存在"}, status_code=404)
+        rating_min = preset["rating_min"]
+        tags = preset["tags"].split(",") if preset["tags"] else []
+        account_names = preset.get("account_names", "")
+        platform = preset["platform"]
+        mode = preset["mode"]
+        preset_name = preset["name"]
+        folder_name = preset.get("folder_name", "")
+        name_format = preset.get("name_format", "")
+        account_created_after = preset.get("account_created_after", "")
+        skip_recent_days = int(preset.get("skip_recent_days", 0))
+    else:
+        rating_min = request.rating_min
+        tags = request.tags
+        account_names = request.account_names
+        platform = request.platform
+        mode = request.mode
+        preset_name = ""
+        folder_name = ""
+        name_format = ""
+        account_created_after = ""
+        skip_recent_days = 0
+    # 方案未设值时使用全局默认
+    defaults = config.collection_defaults
+    if not folder_name:
+        folder_name = defaults.get("folder_name", "Download")
+    if not name_format:
+        name_format = defaults.get("name_format", "create_time type nickname desc")
     platforms = (
-        ("douyin", "tiktok") if request.platform == "all" else (request.platform,)
+        ("douyin", "tiktok") if platform == "all" else (platform,)
     )
     try:
         batches = await manager.start(
             accounts=db.get_all_accounts(),
-            rating_min=request.rating_min,
-            tags=request.tags,
-            account_names=request.account_names,
+            rating_min=rating_min,
+            tags=tags,
+            account_names=account_names,
             platforms=platforms,
-            mode=request.mode,
+            mode=mode,
+            preset_name=preset_name,
+            folder_name=folder_name,
+            name_format=name_format,
+            account_created_after=account_created_after,
+            skip_recent_days=skip_recent_days,
         )
         return {"success": True, "batches": batches}
     except ValueError as error:

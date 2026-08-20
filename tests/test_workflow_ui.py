@@ -125,8 +125,8 @@ def test_account_status_distinguishes_empty_source_from_idle_source(
         app_main,
         "get_database",
         lambda: SyncOverviewFakeDatabase(
-            collections=[{"share_code": "a", "sec_user_id": "sec_old"}],
-            accounts=[{"sec_user_id": "sec_old", "已获取信息": True}],
+            collections=[{"share_code": "a", "sec_user_id": "sec_old", "解析状态": "已生成"}],
+            accounts=[{"sec_user_id": "sec_old", "获取状态": "已获取"}],
         ),
     )
     client, *_ = app_env
@@ -239,16 +239,16 @@ def test_sync_workflow_stats_count_ready_and_pending_work():
     class FakeDatabase:
         def get_all_collections(self):
             return [
-                {"share_code": "a", "sec_user_id": ""},
-                {"share_code": "b", "sec_user_id": "sec1"},
-                {"share_code": "", "sec_user_id": ""},
+                {"share_code": "a", "sec_user_id": "", "解析状态": "待解析"},
+                {"share_code": "b", "sec_user_id": "sec1", "解析状态": "已生成"},
+                {"share_code": "", "sec_user_id": "", "解析状态": "待解析"},
             ]
 
         def get_all_accounts(self):
             return [
-                {"sec_user_id": "sec1", "已获取信息": False},
-                {"sec_user_id": "sec2", "已获取信息": True},
-                {"sec_user_id": "", "已获取信息": False},
+                {"sec_user_id": "sec1", "获取状态": "待获取"},
+                {"sec_user_id": "sec2", "获取状态": "已获取"},
+                {"sec_user_id": "", "获取状态": "待获取"},
             ]
 
         def get_enabled_cookies(self):
@@ -258,7 +258,7 @@ def test_sync_workflow_stats_count_ready_and_pending_work():
 
     assert stats == {
         "pending_resolve": 1,
-        "ready_accounts": 1,
+        "ready_accounts": 0,
         "collections_total": 3,
         "ready_to_sync": 0,
         "accounts_total": 3,
@@ -273,19 +273,19 @@ def test_sync_workflow_stats_separate_resolved_from_existing_accounts():
     class FakeDatabase:
         def get_all_collections(self):
             return [
-                {"share_code": "new", "sec_user_id": "sec_new"},
-                {"share_code": "old", "sec_user_id": "sec_old"},
+                {"share_code": "new", "sec_user_id": "sec_new", "解析状态": "已生成"},
+                {"share_code": "old", "sec_user_id": "sec_old", "解析状态": "已生成"},
             ]
 
         def get_all_accounts(self):
-            return [{"sec_user_id": "sec_old", "已获取信息": True}]
+            return [{"sec_user_id": "sec_old", "获取状态": "已获取"}]
 
         def get_enabled_cookies(self):
             return []
 
     stats = _sync_workflow_stats(FakeDatabase())
 
-    assert stats["ready_accounts"] == 2
+    assert stats["ready_accounts"] == 0
     assert stats["ready_to_sync"] == 1
 
 
@@ -323,20 +323,20 @@ class SyncOverviewFakeDatabase:
             ['id="sync-all-btn"', "处理账号数据"],
         ),
         (
-            [{"share_code": "a", "sec_user_id": ""}],
+            [{"share_code": "a", "sec_user_id": "", "解析状态": "待解析"}],
             [],
             ['id="sync-all-btn"', "继续处理", "待解析 1 条"],
             ["去导入分享表"],
         ),
         (
-            [{"share_code": "a", "sec_user_id": "sec_new"}],
+            [{"share_code": "a", "sec_user_id": "sec_new", "解析状态": "已生成"}],
             [],
             ['id="sync-all-btn"', "生成待处理账号", "待生成 1 条"],
             ["去导入分享表"],
         ),
         (
-            [{"share_code": "a", "sec_user_id": "sec_old"}],
-            [{"sec_user_id": "sec_old", "已获取信息": True}],
+            [{"share_code": "a", "sec_user_id": "sec_old", "解析状态": "已生成"}],
+            [{"sec_user_id": "sec_old", "获取状态": "已获取"}],
             ["暂无可处理数据", 'id="sync-all-btn"', "disabled"],
             ["去导入分享表", ">继续处理</button>"],
         ),

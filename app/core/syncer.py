@@ -31,7 +31,7 @@ ACCOUNT_FIELD_MAP = {
     "签名": "signature",
     "头像": "avatar",
     "同步时间": "synced_at",
-    "已获取信息": "info_fetched",
+    "获取状态": "info_fetched",
 }
 
 # 分享表字段名（只读取必要信息，不反写）
@@ -288,7 +288,7 @@ class Syncer:
                         logger.info(f"  新增账号: {account.name or sec_user_id}")
 
                     # 更新分享表状态（包含 sec_user_id）
-                    self._update_collection_status(record_id, "已解析", "", sec_user_id)
+                    self._update_collection_status(record_id, "已就绪", "", sec_user_id)  # 旧逻辑，保留兼容
 
                 except Exception as e:
                     self._update_collection_status(record_id, "失败", str(e))
