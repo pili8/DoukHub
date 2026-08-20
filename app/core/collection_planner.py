@@ -165,6 +165,7 @@ def write_ttd_accounts(
     planned: list[PlannedAccount],
     folder_name: str = "",
     name_format: str = "",
+    cookie: str = "",
 ) -> list[dict]:
     key = "accounts_urls" if platform == "douyin" else "accounts_urls_tiktok"
     entries = [
@@ -181,7 +182,7 @@ def write_ttd_accounts(
     ]
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     if settings_path.exists():
-        with settings_path.open("r", encoding="utf-8") as file:
+        with settings_path.open("r", encoding="utf-8-sig") as file:
             settings = json.load(file)
     else:
         settings = {}
@@ -191,6 +192,12 @@ def write_ttd_accounts(
         settings["folder_name"] = folder_name
     if name_format:
         settings["name_format"] = name_format
+    # 写入 Cookie（仅在传入非空值时覆写）
+    if cookie:
+        if platform == "douyin":
+            settings["cookie"] = cookie
+        else:
+            settings["cookie_tiktok"] = cookie
 
     temporary = settings_path.with_name(f"{settings_path.name}.doukhub.tmp")
     with temporary.open("w", encoding="utf-8") as file:

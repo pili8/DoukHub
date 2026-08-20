@@ -148,6 +148,17 @@ class CollectionBatchManager:
         with path.open("r", encoding="utf-8", errors="replace") as file:
             return [line.rstrip("\r\n") for line in file][-max_lines:]
 
+    def _pick_cookie(self, platform: str) -> str:
+        """从数据库选取一个有效 Cookie。platform 为 douyin/tiktok。"""
+        expected = "抖音" if platform == "douyin" else "TikTok"
+        cookies = self.db.get_enabled_cookies()
+        candidates = [c for c in cookies if c.get("平台") == expected]
+        if not candidates:
+            candidates = [c for c in cookies if c.get("平台") == expected and c.get("启用")]
+        if not candidates:
+            return ""
+        return str(candidates[0].get("Cookie", ""))
+
     def recover_interrupted_batches(self) -> None:
         for batch in self.db.list_active_collection_batches():
             process_pid = batch.get("process_pid")
@@ -340,6 +351,7 @@ class CollectionBatchManager:
                 planned_items,
                 folder_name=folder_name,
                 name_format=name_format,
+                cookie=self._pick_cookie(batch["platform"]),
             )
         except Exception as error:
             for item in pending:

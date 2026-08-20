@@ -80,7 +80,7 @@ async def run_platform(platform: str) -> int:
     from src.application.main_terminal import TikTok
     from src.custom import suspend
 
-    with (root / "Volume" / "settings.json").open("r", encoding="utf-8") as file:
+    with (root / "Volume" / "settings.json").open("r", encoding="utf-8-sig") as file:
         settings = json.load(file)
     key = "accounts_urls" if platform == "douyin" else "accounts_urls_tiktok"
     accounts = [

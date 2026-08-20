@@ -260,7 +260,7 @@
 
 <!-- ===== 方案设置弹窗（左右分栏） ===== -->
 <div class="dh-modal-overlay" id="preset-manager-modal">
-    <div class="dh-modal-box" style="max-width:720px;">
+    <div class="dh-modal-box" style="max-width:720px;max-height:90vh;overflow-y:auto;">
         <div class="dh-modal-header">
             <h3><i data-lucide="layers"></i> <span>方案设置</span></h3>
             <button class="dh-modal-close" onclick="closePresetManager()"><i data-lucide="x"></i></button>
@@ -609,6 +609,8 @@ async function refreshCollectionBatches() {
         } else {
             activeBatchId = null;
             document.getElementById('running-panel').style.display = 'none';
+            var toggleEl = document.getElementById('run-detail-toggle');
+            if (toggleEl) delete toggleEl.dataset.batchId;
         }
     } catch (e) { /* 静默 */ }
 }
@@ -638,6 +640,15 @@ async function showRunningDetail(batchId) {
 
         document.getElementById('running-panel').style.display = 'block';
         document.getElementById('running-platform-tag').textContent = formatPlatform(batch.platform);
+        // 面板首次显示时重置展开状态
+        var toggleEl = document.getElementById('run-detail-toggle');
+        if (toggleEl && !toggleEl.dataset.batchId) {
+            toggleEl.classList.remove('open');
+            document.getElementById('run-detail-body').classList.remove('open');
+            var label = toggleEl.querySelector('span');
+            if (label) label.textContent = '展开账号明细与日志';
+        }
+        if (toggleEl) toggleEl.dataset.batchId = batchId;
         var presetTag = document.getElementById('running-preset-tag');
         if (batch.preset_name) {
             presetTag.textContent = batch.preset_name;
@@ -675,6 +686,9 @@ async function showRunningDetail(batchId) {
             '</div>';
 
         // 展开详情（账号明细 + 日志）
+        // 保留 details 展开状态，避免轮询时折叠
+        var oldDetails = document.querySelector('#run-detail-body details');
+        var logOpen = oldDetails ? oldDetails.hasAttribute('open') : false;
         var rows = items.map(function(item) {
             return '<tr>' +
                 '<td>' + escapeHtml(item.account_name || item.sec_user_id) + '</td>' +
@@ -688,14 +702,19 @@ async function showRunningDetail(batchId) {
                 '<table><thead><tr><th>账号</th><th>状态</th><th>上次采集</th><th>信息</th></tr></thead>' +
                 '<tbody>' + rows + '</tbody></table>' +
             '</div>' +
-            '<details><summary class="text-muted" style="cursor:pointer;font-size:12px;">批次日志</summary>' +
+            '<details' + (logOpen ? ' open' : '') + '><summary class="text-muted" style="cursor:pointer;font-size:12px;">批次日志</summary>' +
             '<pre class="workflow-log" style="margin-top:8px;max-height:240px;">' + escapeHtml(log.join('\n')) + '</pre></details>';
     } catch (e) { /* 静默 */ }
 }
 
 function toggleRunDetail() {
-    document.getElementById('run-detail-toggle').classList.toggle('open');
-    document.getElementById('run-detail-body').classList.toggle('open');
+    var toggle = document.getElementById('run-detail-toggle');
+    var body = document.getElementById('run-detail-body');
+    var opened = toggle.classList.toggle('open');
+    body.classList.toggle('open', opened);
+    var label = toggle.querySelector('span');
+    if (label) label.textContent = opened ? '折叠账号明细与日志' : '展开账号明细与日志';
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
 }
 
 // ===== 取消运行中批次 =====
