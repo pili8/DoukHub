@@ -54,12 +54,7 @@
   .sched-table table td::before { content: attr(data-label); color: var(--dh-text-muted, var(--text-muted)); font-weight: 500; flex-shrink: 0; }
   .sched-table table td:last-child { justify-content: flex-end; gap: 6px; padding-top: 6px; border-top: 1px solid var(--dh-border, var(--border-default)); margin-top: 4px; }
   .sched-table table td:last-child::before { display: none; }
-  /* 目录选择器弹窗:窄屏按钮换行 */
-  #preset-dir-modal .btn-group { flex-wrap: wrap; }
-  #preset-dir-modal .btn-group .btn { flex: 1 1 calc(50% - 4px); min-width: 120px; }
-  /* 文件名模板弹窗:窄屏可拖字段换行 */
-  #preset-template-modal .template-field-row { flex-wrap: wrap; }
-  /* 全局默认设置:窄屏紧凑 */
+  /* 保存方案底部操作栏:窄屏紧凑 */
   .preset-form-footer { flex-wrap: wrap; gap: 6px; }
   .preset-form-footer .btn { flex: 1 1 auto; min-width: 80px; justify-content: center; }
 }
@@ -144,14 +139,62 @@
         </div>
     </div>
 
-    <div id="running-detail-container"></div>
+    <!-- 总体进度 -->
+    <div class="run-meta">
+        <span>批次进度</span>
+        <span>已处理 <b id="run-done-count">0</b> / <b id="run-total-count">0</b> · <b class="pct" id="run-progress-pct">0%</b></span>
+    </div>
+    <div class="progress-bar-container">
+        <div class="progress-bar" id="run-progress-bar" style="width:0%"></div>
+    </div>
+    <div class="run-current" style="justify-content:space-between">
+        <span><span class="pulse"></span>当前账号 <b class="name" id="run-current-account">-</b> · <span id="run-current-step">-</span></span>
+        <span style="color:var(--dh-text-muted)">已运行 <b id="run-elapsed" style="color:var(--dh-text)">-</b></span>
+    </div>
 
-    <!-- 展开详情 -->
-    <button class="run-detail-toggle" id="run-detail-toggle" onclick="toggleRunDetail()" style="margin-top:14px;">
-        <i data-lucide="chevron-down"></i>
-        <span>展开账号明细与日志</span>
-    </button>
-    <div class="run-detail-body" id="run-detail-body"></div>
+    <!-- 统计条（沿用 preview-stats-bar 横排样式） -->
+    <div class="preview-stats-bar run-stats-bar">
+        <div class="preview-stat-item total"><span class="preview-stat-num" id="run-stat-total">0</span><span class="preview-stat-label">账号总数</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item succ"><span class="preview-stat-num" id="run-stat-succ">0</span><span class="preview-stat-label">成功</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item fail"><span class="preview-stat-num" id="run-stat-fail">0</span><span class="preview-stat-label">失败</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item skip"><span class="preview-stat-num" id="run-stat-skip">0</span><span class="preview-stat-label">跳过</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item remain"><span class="preview-stat-num" id="run-stat-remain">0</span><span class="preview-stat-label">待处理</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item run-time"><span class="preview-stat-num" id="run-stat-time">-</span><span class="preview-stat-label">已运行</span></div>
+    </div>
+
+    <!-- 展开详情（账号明细 + 流式日志，一次折叠收展） -->
+    <div class="run-detail-toggle-row" id="run-detail-toggle" onclick="toggleRunDetail()" role="button" tabindex="0">
+        <span class="run-detail-toggle-label">
+            <i data-lucide="chevron-down" class="run-toggle-chev"></i>
+            <span id="run-toggle-text">展开账号明细与日志</span>
+        </span>
+        <span class="run-detail-toggle-hint">账号处理结果 · 实时记录</span>
+    </div>
+    <div class="run-detail-body" id="run-detail-body">
+        <div class="table-scroll run-detail-table-wrap">
+            <table class="run-detail-table">
+                <thead>
+                    <tr>
+                        <th>账号</th>
+                        <th>状态</th>
+                        <th>上次采集</th>
+                        <th>信息</th>
+                    </tr>
+                </thead>
+                <tbody id="run-account-table"></tbody>
+            </table>
+        </div>
+        <div class="run-log-section">
+            <span class="run-log-section-title">实时记录</span>
+            <span class="run-log-count" id="run-log-count"></span>
+        </div>
+        <div class="workflow-log run-log-view" id="run-log-view"></div>
+    </div>
 </div>
 
 <!-- ===== 批次历史 ===== -->
@@ -167,8 +210,8 @@
     <div class="batch-filter-bar">
         <select id="history-platform-filter" onchange="renderBatchHistory()">
             <option value="">全部平台</option>
-            <option value="douyin">抖音</option>
-            <option value="tiktok">TikTok</option>
+            <option value="douyin">douyin</option>
+            <option value="tiktok">tiktok</option>
         </select>
         <select id="history-status-filter" onchange="renderBatchHistory()">
             <option value="">全部状态</option>
@@ -260,7 +303,7 @@
 
 <!-- ===== 方案设置弹窗（左右分栏） ===== -->
 <div class="dh-modal-overlay" id="preset-manager-modal">
-    <div class="dh-modal-box" style="max-width:720px;max-height:90vh;overflow-y:auto;">
+    <div class="dh-modal-box dh-modal-box-preset">
         <div class="dh-modal-header">
             <h3><i data-lucide="layers"></i> <span>方案设置</span></h3>
             <button class="dh-modal-close" onclick="closePresetManager()"><i data-lucide="x"></i></button>
@@ -272,7 +315,13 @@
 
             <!-- 右：参数编辑表单 -->
             <div class="preset-modal-right">
-                <h4 id="preset-form-title" style="font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:6px;"></h4>
+                <div class="preset-right-head">
+                    <h4 id="preset-form-title" style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;"></h4>
+                    <div class="preset-right-ops">
+                        <button type="button" class="btn btn-secondary btn-sm" id="preset-default-btn" onclick="markPresetDefault()"><i data-lucide="star"></i> 设为默认</button>
+                        <button type="button" class="btn btn-danger btn-sm" id="preset-delete-btn" onclick="deleteCurrentPreset()"><i data-lucide="trash-2"></i> 删除</button>
+                    </div>
+                </div>
                 <div class="workflow-form-grid">
                     <div class="form-group" style="grid-column:1 / -1;">
                         <label>方案名称</label>
@@ -292,8 +341,8 @@
                         <label>平台 / 采集模式</label>
                         <div style="display:flex;gap:8px;">
                             <select id="preset-platform-input" style="flex:1;">
-                                <option value="douyin">抖音</option>
-                                <option value="tiktok">TikTok</option>
+                                <option value="douyin">douyin</option>
+                                <option value="tiktok">tiktok</option>
                                 <option value="all">全部</option>
                             </select>
                             <select id="preset-mode-input" style="flex:1;">
@@ -319,129 +368,27 @@
                     <div class="form-group">
                         <label>跳过最近 N 天采过的</label>
                         <input type="number" id="preset-skip-recent-input" min="0" max="365" placeholder="0" style="width:100%;">
-                        <small>填 0 或留空为不跳过</small>
+                        <small>按账号上次成功采集时间计算</small>
                     </div>
                 </div>
 
-                <!-- 采集设置（文件存储 / 文件名格式） -->
-                <div class="preset-section-divider" style="margin:16px 0 10px;font-size:12px;font-weight:600;color:var(--text-muted, var(--text-secondary, #888));display:flex;align-items:center;gap:6px;">
-                    <i data-lucide="settings-2" style="width:14px;height:14px;"></i>
-                    <span>采集设置</span>
-                    <small style="font-weight:400;margin-left:4px;">留空使用全局默认</small>
-                </div>
-                <div class="workflow-form-grid">
-                    <div class="form-group" style="grid-column:1 / -1;">
-                        <label>保存目录</label>
-                        <div class="input-btn">
-                            <input type="text" id="preset-folder-name-input" placeholder="留空使用全局默认">
-                            <button type="button" class="btn btn-secondary" onclick="openPresetDirDialog()" title="选择目录"><i data-lucide="folder-open"></i></button>
-                        </div>
-                        <small>文件保存的文件夹路径（相对于 TTD 根目录或绝对路径）</small>
-                    </div>
-                    <div class="form-group" style="grid-column:1 / -1;">
-                        <label><i data-lucide="tag"></i> 文件名模板 <span class="pv" id="preset-template-preview" style="font-weight:400;color:var(--text-muted);font-size:11px;"></span></label>
-                        <div class="input-btn">
-                            <input type="text" id="preset-name-format-input" placeholder="如: create_time type nickname desc" readonly style="cursor:pointer;" onclick="openPresetTemplateModal()">
-                            <button type="button" class="btn btn-secondary" onclick="openPresetTemplateModal()" title="管理模板"><i data-lucide="settings-2"></i></button>
-                        </div>
-                        <small>拖拽排列变量，留空使用全局默认</small>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 全局默认设置（可折叠） -->
-        <div style="border-top:1px solid var(--border-default);padding:12px 16px;">
-            <div style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-size:12px;font-weight:600;color:var(--text-muted, var(--text-secondary, #888));" onclick="toggleGlobalDefaults()">
-                <i data-lucide="globe" style="width:14px;height:14px;"></i>
-                <span>全局默认设置</span>
-                <i data-lucide="chevron-down" id="global-defaults-chevron" style="width:14px;height:14px;transition:transform .2s;margin-left:auto;"></i>
-            </div>
-            <div id="global-defaults-body" style="display:none;padding-top:12px;">
-                <div class="workflow-form-grid">
-                    <div class="form-group" style="grid-column:1 / -1;">
-                        <label>默认保存目录</label>
-                        <div class="input-btn">
-                            <input type="text" id="global-folder-name-input" placeholder="如: Download">
-                            <button type="button" class="btn btn-secondary" onclick="openGlobalDirDialog()" title="选择目录"><i data-lucide="folder-open"></i></button>
-                        </div>
-                        <small>所有方案留空时使用的默认文件夹路径</small>
-                    </div>
-                    <div class="form-group" style="grid-column:1 / -1;">
-                        <label><i data-lucide="tag"></i> 默认文件名模板</label>
-                        <div class="input-btn">
-                            <input type="text" id="global-name-format-input" placeholder="如: create_time type nickname desc" readonly style="cursor:pointer;" onclick="openGlobalTemplateModal()">
-                            <button type="button" class="btn btn-secondary" onclick="openGlobalTemplateModal()" title="编辑模板"><i data-lucide="settings-2"></i></button>
-                        </div>
-                        <small>所有方案留空时使用的默认文件名格式</small>
-                    </div>
-                </div>
-                <div class="btn-group" style="justify-content:flex-end;margin-top:8px;">
-                    <button type="button" class="btn btn-primary btn-sm" onclick="saveGlobalDefaults()">
-                        <i data-lucide="save"></i> 保存全局默认
-                    </button>
+                <!-- 存储统一入口提示 -->
+                <div class="preset-store-note">
+                    <i data-lucide="folder" style="width:13px;height:13px;flex-shrink:0;"></i>
+                    <span>保存目录与文件名模板为全局统一配置，见</span>
+                    <a href="/settings" target="_blank">设置 → 下载设置</a>
                 </div>
             </div>
         </div>
 
         <!-- 底部操作栏 -->
         <div class="preset-form-footer">
-            <button class="btn btn-danger btn-sm" id="preset-delete-btn" onclick="deleteCurrentPreset()" style="margin-right:auto;">
-                <i data-lucide="trash-2"></i> 删除方案
+            <button class="btn btn-secondary" onclick="closePresetManager()">
+                <i data-lucide="x"></i> 取消
             </button>
-            <button class="btn btn-secondary btn-sm" onclick="markPresetDefault()">
-                <i data-lucide="star"></i> 设为默认
+            <button class="btn btn-primary" onclick="applyPresetAndClose()">
+                <i data-lucide="check"></i> 保存方案
             </button>
-            <button class="btn btn-primary btn-sm" onclick="applyPresetAndClose()">
-                <i data-lucide="check"></i> 应用
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- ===== 目录选择器弹窗（增量采集） ===== -->
-<div id="preset-dir-modal" style="display:none;position:fixed;inset:0;z-index:1001;align-items:center;justify-content:center;background:rgba(0,0,0,.45);">
-    <div class="workflow-panel" style="width:min(560px,92vw);max-height:80vh;display:flex;flex-direction:column;margin-bottom:0;">
-        <div class="workflow-header"><div class="workflow-title"><i data-lucide="folder-open"></i><span>选择目录</span></div></div>
-        <div class="form-group"><label>当前目录</label><input type="text" id="preset-dir-current" readonly></div>
-        <div id="preset-dir-list" style="overflow:auto;flex:1;min-height:160px;"></div>
-        <div class="btn-group" style="justify-content:flex-end;margin-top:12px;">
-            <button type="button" class="btn btn-secondary" onclick="goPresetDirParent()">上一级</button>
-            <button type="button" class="btn btn-secondary" onclick="closePresetDirDialog()">取消</button>
-            <button type="button" class="btn btn-secondary" onclick="clearPresetDir()">使用全局默认</button>
-            <button type="button" class="btn btn-primary" onclick="choosePresetDir()">使用此目录</button>
-        </div>
-    </div>
-</div>
-
-<!-- ===== 文件名模板管理弹窗（增量采集，拖拽交互） ===== -->
-<div id="preset-template-modal" style="display:none;position:fixed;inset:0;z-index:1001;align-items:center;justify-content:center;background:rgba(0,0,0,.45);">
-    <div class="workflow-panel" style="width:min(640px,92vw);max-height:85vh;display:flex;flex-direction:column;margin-bottom:0;">
-        <div class="workflow-header"><div class="workflow-title"><i data-lucide="settings-2"></i><span>文件名模板</span></div></div>
-        <div style="overflow:auto;flex:1;padding:0 16px;">
-            <div class="form-group" style="margin-top:12px;">
-                <label>可拖字段（拖入或点击追加）</label>
-                <div class="template-field-row" id="preset-template-fields">
-                    <span class="template-part" draggable="true" onclick="appendPresetField('create_time')" ondragstart="dragPresetField(event,'create_time')">发布时间</span>
-                    <span class="template-part" draggable="true" onclick="appendPresetField('type')" ondragstart="dragPresetField(event,'type')">作品类型</span>
-                    <span class="template-part" draggable="true" onclick="appendPresetField('nickname')" ondragstart="dragPresetField(event,'nickname')">账号昵称</span>
-                    <span class="template-part" draggable="true" onclick="appendPresetField('desc')" ondragstart="dragPresetField(event,'desc')">作品描述</span>
-                    <span class="template-part" draggable="true" onclick="appendPresetField('id')" ondragstart="dragPresetField(event,'id')">作品ID</span>
-                    <span class="template-part" draggable="true" onclick="appendPresetField('uid')" ondragstart="dragPresetField(event,'uid')">账号UID</span>
-                    <span class="template-part" draggable="true" onclick="appendPresetField('mark')" ondragstart="dragPresetField(event,'mark')">账号标识</span>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>分隔文本</label>
-                <div style="display:flex;gap:8px;"><input type="text" id="preset-template-separator" placeholder="如 空格、下划线" style="flex:1;"><button type="button" class="btn btn-secondary" onclick="appendPresetSeparator()">添加</button></div>
-            </div>
-            <div class="form-group"><label>已排序字段</label><div class="template-part-list" id="preset-template-parts" ondragover="event.preventDefault()" ondrop="dropPresetTemplatePart(event,-1)"></div></div>
-            <div class="form-group"><label>实时预览</label><div id="preset-template-live-preview" class="text-muted" style="padding:8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);"></div></div>
-        </div>
-        <div class="btn-group" style="justify-content:flex-end;padding:12px 16px;">
-            <button type="button" class="btn btn-secondary" onclick="closePresetTemplateModal()">取消</button>
-            <button type="button" class="btn btn-secondary" onclick="clearPresetTemplate()">使用全局默认</button>
-            <button type="button" class="btn btn-primary" onclick="usePresetTemplate()">使用此模板</button>
         </div>
     </div>
 </div>
@@ -484,7 +431,7 @@ var previewTimer = null;
 
 // ===== 工具函数 =====
 function formatPlatform(value) {
-    return { douyin: '抖音', tiktok: 'TikTok' }[value] || value || '-';
+    return value || '-';
 }
 function formatBatchStatus(value) {
     return {
@@ -631,6 +578,8 @@ function updateCollectionStatus(batches) {
 }
 
 // ===== 运行中批次详情 =====
+var runDetailOpen = false;   // 记录"账号明细与日志"是否展开
+var runLogCount = 0;         // 上次已渲染的日志行数（流式增量追加）
 async function showRunningDetail(batchId) {
     try {
         var data = await apiCall('/api/collection/batches/' + batchId, 'GET');
@@ -638,13 +587,20 @@ async function showRunningDetail(batchId) {
         var items = data.items || [];
         var log = data.log || [];
 
+        // 切换新批次时清空旧日志与明细，重置增量计数
+        var logViewEl = document.getElementById('run-log-view');
+        if (batchId !== (showRunningDetail._currentBatchId || null)) {
+            showRunningDetail._currentBatchId = batchId;
+            runLogCount = 0;
+            if (logViewEl) logViewEl.innerHTML = '';
+        }
+
         document.getElementById('running-panel').style.display = 'block';
         document.getElementById('running-platform-tag').textContent = formatPlatform(batch.platform);
         // 面板首次显示时重置展开状态
         var toggleEl = document.getElementById('run-detail-toggle');
         if (toggleEl && !toggleEl.dataset.batchId) {
-            toggleEl.classList.remove('open');
-            document.getElementById('run-detail-body').classList.remove('open');
+            runDetailOpen = false;
             var label = toggleEl.querySelector('span');
             if (label) label.textContent = '展开账号明细与日志';
         }
@@ -658,62 +614,146 @@ async function showRunningDetail(batchId) {
         }
 
         var runningItem = items.find(i => i.status === 'running');
-        var currentIdx = items.findIndex(i => i.status === 'running');
-        if (currentIdx < 0) currentIdx = items.findIndex(i => i.status === 'pending');
-        if (currentIdx < 0) currentIdx = items.length;
-        var progress = items.length ? Math.round(items.filter(i => !['pending', 'running'].includes(i.status)).length / items.length * 100) : 0;
+        var queuedCount = items.filter(i => ['pending', 'running'].includes(i.status)).length;
+        var doneCount = items.length - queuedCount;
+        var progress = items.length ? Math.round(doneCount / items.length * 100) : 0;
         var elapsed = batchElapsedSeconds(batch);
+        var total = items.length;
 
-        var container = document.getElementById('running-detail-container');
-        container.innerHTML =
-            '<div class="run-status-bar">' +
-                '<div class="run-progress-wrap">' +
-                    '<div class="run-current-account">' +
-                        (runningItem ? '当前账号 <span class="account-name">' + escapeHtml(runningItem.account_name || '') + '</span> · ' : '') +
-                        currentIdx + ' / ' + items.length +
-                    '</div>' +
-                    '<div class="progress-bar-container"><div class="progress-bar" style="width:' + progress + '%"></div></div>' +
-                    '<div class="workflow-progress-meta" style="margin-top:4px;">' +
-                        '<span>已运行 ' + formatDuration(elapsed) + '</span>' +
-                        '<span>' + progress + '%</span>' +
-                    '</div>' +
-                '</div>' +
-            '</div>' +
-            '<div class="stat-cards" style="margin-top:14px;">' +
-                '<div class="stat-card success"><span class="stat-value">' + (batch.success_accounts || 0) + '</span><span class="stat-label">成功</span></div>' +
-                '<div class="stat-card fail"><span class="stat-value">' + (batch.failed_accounts || 0) + '</span><span class="stat-label">失败</span></div>' +
-                '<div class="stat-card time"><span class="stat-value" style="font-size:22px;">' + formatDuration(elapsed) + '</span><span class="stat-label">已运行</span></div>' +
-            '</div>';
+        // 总体进度 + 统计条
+        document.getElementById('run-total-count').textContent = total;
+        document.getElementById('run-done-count').textContent = doneCount;
+        document.getElementById('run-progress-pct').textContent = progress + '%';
+        document.getElementById('run-progress-bar').style.width = progress + '%';
+        document.getElementById('run-current-account').textContent = runningItem ? (runningItem.account_name || runningItem.sec_user_id || '-') : '-';
+        document.getElementById('run-current-step').textContent = runningItem ? (runningItem.message || '处理中') : (doneCount === 0 ? '等待开始' : '收尾中');
+        document.getElementById('run-elapsed').textContent = formatDuration(elapsed);
+        document.getElementById('run-stat-total').textContent = total;
+        document.getElementById('run-stat-succ').textContent = batch.success_accounts || 0;
+        document.getElementById('run-stat-fail').textContent = batch.failed_accounts || 0;
+        document.getElementById('run-stat-skip').textContent = batch.skipped_accounts || 0;
+        document.getElementById('run-stat-remain').textContent = queuedCount;
+        document.getElementById('run-stat-time').textContent = formatDuration(elapsed);
 
-        // 展开详情（账号明细 + 日志）
-        // 保留 details 展开状态，避免轮询时折叠
-        var oldDetails = document.querySelector('#run-detail-body details');
-        var logOpen = oldDetails ? oldDetails.hasAttribute('open') : false;
-        var rows = items.map(function(item) {
-            return '<tr>' +
-                '<td>' + escapeHtml(item.account_name || item.sec_user_id) + '</td>' +
-                '<td><span class="workflow-status ' + item.status + '">' + formatBatchStatus(item.status) + '</span></td>' +
-                '<td>' + formatDateTime(item.last_collected_at) + '</td>' +
-                '<td>' + escapeHtml(item.message || '') + '</td>' +
-            '</tr>';
+        // 展开详情（账号明细 + 流式日志，一次折叠收展）
+        var works = data.works || {};
+        var rows = items.map(function(item, idx) {
+            var isCur = item.status === 'running';
+            var mini = '';
+            if (isCur) {
+                mini = '<span class="text-muted" style="font-size:11px;">' + escapeHtml(item.message || '处理中') + '</span>';
+            } else if (item.status !== 'pending') {
+                mini = '<span class="workflow-status ' + (item.status === 'success' || item.status === 'completed' ? 'success' : (item.status === 'failed' ? 'failed' : 'warning')) + '">' + formatBatchStatus(item.status) + '</span>';
+            } else {
+                mini = '<span class="workflow-status pending">等待中</span>';
+            }
+            var msg = item.status === 'failed' || item.status === 'error'
+                ? '<span style="color:var(--dh-danger);font-size:12px;">' + escapeHtml(item.message || '解析失败') + '</span>'
+                : '<span class="text-muted" style="font-size:12px;">' + escapeHtml(item.message || '') + '</span>';
+            if (isCur) msg = '<span style="color:var(--dh-accent);font-size:12px;">' + escapeHtml(item.message || '采集进行中') + '</span>';
+            // 账号作品明细（从日志聚合）
+            var accName = item.account_name || item.sec_user_id || '';
+            var w = works[accName];
+            var worksHtml = '';
+            var worksSummary = '';
+            if (w && w.total > 0) {
+                worksSummary = '<span class="cell-works-count">' + w.total + ' 个作品</span>';
+                var itemsHtml = '';
+                [['video', '视频'], ['image', '图集'], ['live', '实况']].forEach(function(kv) {
+                    var list = w[kv[0]] || [];
+                    if (list.length) {
+                        itemsHtml += '<div class="run-works-group"><span class="run-works-kind">' + kv[1] + ' ' + list.length + '</span><ul class="run-works-list">' +
+                            list.map(function(t) { return '<li>' + escapeHtml(t) + '</li>'; }).join('') +
+                            '</ul></div>';
+                    }
+                });
+                worksHtml = '<div class="run-works-box">' + itemsHtml + '</div>';
+            }
+            var canExpand = !!(worksHtml);
+            // 有作品 → 文件夹图标 + 作品数标签（醒目，不只是一个灰箭头）
+            var expandCell = canExpand
+                ? '<span class="run-expand-btn" data-idx="' + idx + '" onclick="toggleRunWorks(this)" title="展开作品明细"><i data-lucide="folder-open"></i></span><span class="run-expand-tag">' + w.total + '</span>'
+                : '<span class="run-expand-btn is-empty"></span>';
+            return '<tr' + (isCur ? ' class="active-row"' : '') + ' data-idx="' + idx + '">' +
+                '<td class="run-account-name">' + expandCell + ' ' + escapeHtml(accName) + '</td>' +
+                '<td>' + mini + '</td>' +
+                '<td class="cell-time">' + worksSummary + formatDateTime(item.last_collected_at) + '</td>' +
+                '<td>' + msg + '</td>' +
+            '</tr>' +
+            (canExpand ? '<tr class="run-works-row" data-idx="' + idx + '" style="display:none;"><td colspan="4" class="run-works-td">' + worksHtml + '</td></tr>' : '');
         }).join('');
-        document.getElementById('run-detail-body').innerHTML =
-            '<div class="table-scroll" style="margin-bottom:12px;">' +
-                '<table><thead><tr><th>账号</th><th>状态</th><th>上次采集</th><th>信息</th></tr></thead>' +
-                '<tbody>' + rows + '</tbody></table>' +
-            '</div>' +
-            '<details' + (logOpen ? ' open' : '') + '><summary class="text-muted" style="cursor:pointer;font-size:12px;">批次日志</summary>' +
-            '<pre class="workflow-log" style="margin-top:8px;max-height:240px;">' + escapeHtml(log.join('\n')) + '</pre></details>';
+
+        // 账号明细表（首次渲染时输出到 body）
+        document.getElementById('run-account-table').innerHTML = rows;
+
+        // 流式日志：增量追加 + 动态保留最近 500 行（防 DOM 膨胀，完整记录在后端日志文件）
+        var LOG_KEEP_MAX = 500;
+        if (log.length > runLogCount) {
+            var logView = document.getElementById('run-log-view');
+            var frag = document.createDocumentFragment();
+            for (var i = runLogCount; i < log.length; i++) {
+                var line = log[i] || '';
+                // 后端已按 "level\tmessage" 分类；若无 \t 则原样作为 info 显示
+                var level = 'log-info';
+                var message = line;
+                var tabIdx = line.indexOf('\t');
+                if (tabIdx > 0) {
+                    var rawLevel = line.slice(0, tabIdx);
+                    if (rawLevel === 'ok') level = 'log-ok';
+                    else if (rawLevel === 'err') level = 'log-err';
+                    message = line.slice(tabIdx + 1);
+                }
+                var div = document.createElement('div');
+                div.className = level;
+                div.textContent = message;
+                frag.appendChild(div);
+            }
+            runLogCount = log.length;
+            // 动态裁剪：保留最近 LOG_KEEP_MAX 个 div
+            var all = logView.querySelectorAll('div');
+            while (all.length > LOG_KEEP_MAX) {
+                logView.removeChild(all[0]);
+                all = logView.querySelectorAll('div');
+            }
+            logView.appendChild(frag);
+            // 行数指示（动态保留中）
+            var shownCount = logView.querySelectorAll('div').length;
+            var totalCount = log.length;
+            var badge = document.getElementById('run-log-count');
+            if (badge) {
+                badge.textContent = totalCount > LOG_KEEP_MAX
+                    ? '显示最近 ' + shownCount + ' / 共 ' + totalCount + ' 行'
+                    : '共 ' + totalCount + ' 行';
+            }
+            logView.scrollTop = logView.scrollHeight;
+        }
     } catch (e) { /* 静默 */ }
 }
 
 function toggleRunDetail() {
+    runDetailOpen = !runDetailOpen;
     var toggle = document.getElementById('run-detail-toggle');
     var body = document.getElementById('run-detail-body');
-    var opened = toggle.classList.toggle('open');
+    var opened = runDetailOpen;
+    toggle.classList.toggle('open', opened);
     body.classList.toggle('open', opened);
-    var label = toggle.querySelector('span');
+    var label = document.getElementById('run-toggle-text');
     if (label) label.textContent = opened ? '折叠账号明细与日志' : '展开账号明细与日志';
+    // 切换展开状态后立即按最新内容重渲染
+    if (activeBatchId) showRunningDetail(activeBatchId);
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+}
+
+// ===== 账号行展开作品明细 =====
+function toggleRunWorks(btn) {
+    var idx = btn.dataset.idx;
+    var row = document.querySelector('.run-works-row[data-idx="' + idx + '"]');
+    if (!row) return;
+    var opened = row.style.display !== 'none';
+    row.style.display = opened ? 'none' : '';
+    btn.classList.toggle('open', !opened);
+    // 文件夹图标展开态: 置为已打开(半透明/旋转), 收起态恢复
+    btn.style.opacity = opened ? '1' : '0.6';
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
 }
 
@@ -885,9 +925,8 @@ function selectPresetForEdit(presetId) {
     var accountsInput = document.getElementById('preset-accounts-input');
     var platformInput = document.getElementById('preset-platform-input');
     var modeInput = document.getElementById('preset-mode-input');
-    var folderNameInput = document.getElementById('preset-folder-name-input');
-    var nameFormatInput = document.getElementById('preset-name-format-input');
     var deleteBtn = document.getElementById('preset-delete-btn');
+    var defaultBtn = document.getElementById('preset-default-btn');
     var ratingCheckboxes = document.querySelectorAll('input[name="preset-rating"]');
 
     if (presetId === null) {
@@ -898,30 +937,27 @@ function selectPresetForEdit(presetId) {
         accountsInput.value = '';
         platformInput.value = 'douyin';
         modeInput.value = 'incremental';
-        folderNameInput.value = '';
-        nameFormatInput.value = '';
         document.getElementById('preset-created-after-input').value = '';
         document.getElementById('preset-skip-recent-input').value = '';
         ratingCheckboxes.forEach(cb => { cb.checked = (cb.value === '4' || cb.value === '3'); });
         deleteBtn.style.display = 'none';
+        defaultBtn.style.display = 'none';
     } else {
         var p = presets.find(x => x.id === presetId);
         if (!p) return;
-        var star = p.is_default ? '<i data-lucide="star" class="default-star"></i>' : '<i data-lucide="settings-2" style="font-size:15px;color:var(--accent);"></i>';
-        var badge = p.is_default ? '<span class="tag" style="margin-left:4px;">默认</span>' : '';
-        titleEl.innerHTML = star + '<span>' + escapeHtml(p.name) + '</span>' + badge;
+        var badge = p.is_default ? '<span class="tag" style="margin-left:4px;color:var(--accent);border-color:var(--accent);">默认</span>' : '';
+        titleEl.innerHTML = '<span>' + escapeHtml(p.name) + '</span>' + badge;
         nameInput.value = p.name;
         tagsInput.value = p.tags || '';
         accountsInput.value = p.account_names || '';
         platformInput.value = p.platform;
         modeInput.value = p.mode;
-        folderNameInput.value = p.folder_name || '';
-        nameFormatInput.value = p.name_format || '';
         document.getElementById('preset-created-after-input').value = p.account_created_after || '';
         document.getElementById('preset-skip-recent-input').value = p.skip_recent_days || 0;
         // rating_min → 勾选 >= rating_min 的所有等级
         ratingCheckboxes.forEach(cb => { cb.checked = parseInt(cb.value) >= p.rating_min; });
         deleteBtn.style.display = p.is_default ? 'none' : 'inline-flex';
+        defaultBtn.style.display = p.is_default ? 'none' : 'inline-flex';
     }
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
 }
@@ -936,8 +972,6 @@ function getPresetFormData() {
         account_names: document.getElementById('preset-accounts-input').value.trim(),
         platform: document.getElementById('preset-platform-input').value,
         mode: document.getElementById('preset-mode-input').value,
-        folder_name: document.getElementById('preset-folder-name-input').value.trim(),
-        name_format: document.getElementById('preset-name-format-input').value.trim(),
         account_created_after: document.getElementById('preset-created-after-input').value.trim(),
         skip_recent_days: parseInt(document.getElementById('preset-skip-recent-input').value) || 0,
         is_default: false,
@@ -984,228 +1018,6 @@ async function markPresetDefault() {
         selectPresetForEdit(currentPresetId);
     }
 }
-
-// ===== 文件名模板拖拽（增量采集版） =====
-var presetTemplateParts = [];
-var presetDraggedIndex = null;
-// TTD 变量标签映射
-var PRESET_FIELD_LABELS = {
-    create_time: '发布时间', type: '作品类型', nickname: '账号昵称',
-    desc: '作品描述', id: '作品ID', uid: '账号UID', mark: '账号标识'
-};
-
-function parsePresetTemplate(str) {
-    if (!str) return [];
-    return str.split(' ').filter(Boolean).map(function(token) {
-        return { type: 'field', value: token };
-    });
-}
-
-function presetTemplatePartsToString() {
-    return presetTemplateParts.map(function(p) {
-        return p.type === 'field' ? p.value : p.value;
-    }).join(' ');
-}
-
-function renderPresetTemplateBuilder() {
-    var container = document.getElementById('preset-template-parts');
-    container.innerHTML = presetTemplateParts.map(function(part, index) {
-        var label = part.type === 'field' ? (PRESET_FIELD_LABELS[part.value] || part.value) : '"' + escapeHtml(part.value) + '"';
-        var icon = part.type === 'field' ? 'code' : 'minus';
-        return '<span class="template-part" draggable="true" ondragstart="dragPresetTemplatePart(event,' + index + ')" ondragover="event.preventDefault()" ondrop="dropPresetTemplatePart(event,' + index + ',event.stopPropagation())">' +
-            '<i data-lucide="' + icon + '"></i> ' + escapeHtml(label) +
-            ' <a href="javascript:void(0)" onclick="removePresetTemplatePart(' + index + ')" style="margin-left:4px;">×</a></span>';
-    }).join('');
-    document.getElementById('preset-template-live-preview').textContent = presetTemplatePartsToString() || '(空)';
-    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-}
-
-function dragPresetField(event, key) {
-    event.dataTransfer.setData('text/plain', JSON.stringify({type: 'field', value: key}));
-}
-
-function dragPresetTemplatePart(event, index) {
-    presetDraggedIndex = index;
-    event.dataTransfer.setData('text/plain', JSON.stringify({type: 'move', index: index}));
-}
-
-function dropPresetTemplatePart(event, index, stopPropagation) {
-    event.preventDefault();
-    if (stopPropagation) event.stopPropagation();
-    var raw = event.dataTransfer.getData('text/plain');
-    if (!raw) return;
-    var data; try { data = JSON.parse(raw); } catch(e) { return; }
-    if (!data) return;
-    if (data.type === 'move') {
-        var from = data.index, to = index < 0 ? presetTemplateParts.length : index;
-        if (from === to) return;
-        var item = presetTemplateParts.splice(from, 1)[0];
-        presetTemplateParts.splice(to, 0, item);
-    } else if (data.type === 'field') {
-        presetTemplateParts.splice(index < 0 ? presetTemplateParts.length : index, 0, {type: 'field', value: data.value});
-    } else if (data.type === 'text') {
-        presetTemplateParts.splice(index < 0 ? presetTemplateParts.length : index, 0, {type: 'text', value: data.value});
-    }
-    renderPresetTemplateBuilder();
-}
-
-function appendPresetField(key) { presetTemplateParts.push({type: 'field', value: key}); renderPresetTemplateBuilder(); }
-function appendPresetSeparator() {
-    var v = document.getElementById('preset-template-separator').value;
-    if (!v) return;
-    presetTemplateParts.push({type: 'text', value: v});
-    document.getElementById('preset-template-separator').value = '';
-    renderPresetTemplateBuilder();
-}
-function removePresetTemplatePart(index) { presetTemplateParts.splice(index, 1); renderPresetTemplateBuilder(); }
-
-function openPresetTemplateModal() {
-    var currentVal = document.getElementById('preset-name-format-input').value.trim();
-    presetTemplateParts = currentVal ? parsePresetTemplate(currentVal) : [];
-    renderPresetTemplateBuilder();
-    document.getElementById('preset-template-modal').style.display = 'flex';
-    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-}
-
-function closePresetTemplateModal() { document.getElementById('preset-template-modal').style.display = 'none'; }
-
-function usePresetTemplate() {
-    var template = presetTemplatePartsToString();
-    document.getElementById('preset-name-format-input').value = template;
-    document.getElementById('preset-template-preview').textContent = template ? '预览: ' + template : '';
-    closePresetTemplateModal();
-}
-
-function clearPresetTemplate() {
-    document.getElementById('preset-name-format-input').value = '';
-    document.getElementById('preset-template-preview').textContent = '';
-    presetTemplateParts = [];
-    closePresetTemplateModal();
-}
-
-// ===== 目录选择器（增量采集版） =====
-var presetDirCurrent = '', presetDirEntries = [], presetDirParent = '';
-
-async function openPresetDirDialog() {
-    var currentPath = document.getElementById('preset-folder-name-input').value || '';
-    await loadPresetDirs(currentPath);
-    document.getElementById('preset-dir-modal').style.display = 'flex';
-}
-
-async function loadPresetDirs(path) {
-    var data = await apiCall('/api/browse-dir?path=' + encodeURIComponent(path || ''), 'GET');
-    presetDirCurrent = data.current || '';
-    presetDirParent = data.parent || '';
-    presetDirEntries = data.dirs || [];
-    document.getElementById('preset-dir-current').value = presetDirCurrent || '此电脑';
-    renderPresetDirs();
-}
-
-function renderPresetDirs() {
-    var list = document.getElementById('preset-dir-list');
-    if (!presetDirEntries.length) { list.innerHTML = '<div class="text-muted" style="padding:12px;">没有子目录</div>'; return; }
-    list.innerHTML = presetDirEntries.map(function(dir) {
-        var name = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
-        return '<div style="padding:6px 10px;cursor:pointer;border-radius:4px;" onclick="enterPresetDir(\'' + escapeHtml(dir).replace(/'/g, "\\'") + '\')" onmouseover="this.style.background=\'var(--bg-hover, rgba(0,0,0,0.04))\'" onmouseout="this.style.background=\'transparent\'">' +
-            '<i data-lucide="folder" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;"></i>' + escapeHtml(name) + '</div>';
-    }).join('');
-    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-}
-
-async function enterPresetDir(path) { await loadPresetDirs(path); }
-async function goPresetDirParent() { if (presetDirParent && presetDirParent !== presetDirCurrent) await loadPresetDirs(presetDirParent); }
-function closePresetDirDialog() { document.getElementById('preset-dir-modal').style.display = 'none'; }
-function choosePresetDir() { if (presetDirCurrent) document.getElementById('preset-folder-name-input').value = presetDirCurrent; closePresetDirDialog(); }
-function clearPresetDir() { document.getElementById('preset-folder-name-input').value = ''; closePresetDirDialog(); }
-
-// ===== 全局默认设置 =====
-var globalTemplateParts = [];
-var _dirTargetGlobal = false;  // 目录选择器目标：false=方案, true=全局
-var _templateTargetGlobal = false;
-
-function toggleGlobalDefaults() {
-    var body = document.getElementById('global-defaults-body');
-    var chevron = document.getElementById('global-defaults-chevron');
-    body.style.display = body.style.display === 'none' ? 'block' : 'none';
-    chevron.style.transform = body.style.display === 'none' ? 'none' : 'rotate(180deg)';
-    if (body.style.display === 'block') loadGlobalDefaults();
-}
-
-async function loadGlobalDefaults() {
-    try {
-        var data = await apiCall('/api/collection/defaults', 'GET');
-        var d = data.defaults || {};
-        document.getElementById('global-folder-name-input').value = d.folder_name || '';
-        document.getElementById('global-name-format-input').value = d.name_format || '';
-    } catch(e) { /* 静默 */ }
-}
-
-async function saveGlobalDefaults() {
-    var folderName = document.getElementById('global-folder-name-input').value.trim();
-    var nameFormat = document.getElementById('global-name-format-input').value.trim();
-    try {
-        var data = await apiCall('/api/collection/defaults', 'PUT', {
-            folder_name: folderName,
-            name_format: nameFormat,
-        });
-        if (data.success) showToast('全局默认设置已保存', 'success');
-    } catch(e) { showToast(e.message || '保存失败', 'error'); }
-}
-
-// 全局目录选择器（复用 preset-dir-modal）
-function openGlobalDirDialog() {
-    _dirTargetGlobal = true;
-    var currentPath = document.getElementById('global-folder-name-input').value || '';
-    loadPresetDirs(currentPath).then(function() {
-        document.getElementById('preset-dir-modal').style.display = 'flex';
-    });
-}
-// 覆写 choosePresetDir 和 clearPresetDir 以支持全局模式
-var _origChoosePresetDir = choosePresetDir;
-var _origClearPresetDir = clearPresetDir;
-choosePresetDir = function() {
-    var targetId = _dirTargetGlobal ? 'global-folder-name-input' : 'preset-folder-name-input';
-    if (presetDirCurrent) document.getElementById(targetId).value = presetDirCurrent;
-    closePresetDirDialog();
-    _dirTargetGlobal = false;
-};
-clearPresetDir = function() {
-    var targetId = _dirTargetGlobal ? 'global-folder-name-input' : 'preset-folder-name-input';
-    document.getElementById(targetId).value = '';
-    closePresetDirDialog();
-    _dirTargetGlobal = false;
-};
-
-// 全局模板编辑器（复用 preset-template-modal）
-function openGlobalTemplateModal() {
-    _templateTargetGlobal = true;
-    var currentVal = document.getElementById('global-name-format-input').value.trim();
-    presetTemplateParts = currentVal ? parsePresetTemplate(currentVal) : [];
-    renderPresetTemplateBuilder();
-    document.getElementById('preset-template-modal').style.display = 'flex';
-    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-}
-// 覆写 usePresetTemplate 和 clearPresetTemplate 以支持全局模式
-var _origUsePresetTemplate = usePresetTemplate;
-var _origClearPresetTemplate = clearPresetTemplate;
-usePresetTemplate = function() {
-    var template = presetTemplatePartsToString();
-    var targetId = _templateTargetGlobal ? 'global-name-format-input' : 'preset-name-format-input';
-    var previewId = _templateTargetGlobal ? null : 'preset-template-preview';
-    document.getElementById(targetId).value = template;
-    if (previewId) document.getElementById(previewId).textContent = template ? '预览: ' + template : '';
-    closePresetTemplateModal();
-    _templateTargetGlobal = false;
-};
-clearPresetTemplate = function() {
-    var targetId = _templateTargetGlobal ? 'global-name-format-input' : 'preset-name-format-input';
-    var previewId = _templateTargetGlobal ? null : 'preset-template-preview';
-    document.getElementById(targetId).value = '';
-    if (previewId) document.getElementById(previewId).textContent = '';
-    presetTemplateParts = [];
-    closePresetTemplateModal();
-    _templateTargetGlobal = false;
-};
 
 // ===== 定时任务 =====
 function showAddTask() { document.getElementById('task-modal').style.display = 'flex'; }

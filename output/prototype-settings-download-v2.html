@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>全局设置页 · 原型 v2（折叠卡片）</title>
+<style>
+:root {
+  --dh-background:#FBFAF7; --dh-surface:#FFFFFF; --dh-surface-muted:#F5F2EC;
+  --dh-accent:#0061A4; --dh-accent-hover:#004F8A; --dh-accent-soft:#E7F0F8;
+  --dh-border:#ECE7DF; --dh-border-strong:#D9D3C8;
+  --dh-text:#1F1B17; --dh-text-secondary:#5C564E; --dh-text-muted:#A39E96;
+  --dh-danger:#C2410C; --dh-danger-soft:#FEF1EB;
+  --dh-warning:#B45309; --dh-warning-soft:#FEF3C7;
+  --dh-success:#16A34A; --dh-success-soft:#ECFDF3;
+  --dh-radius-sm:6px; --dh-radius:8px; --dh-radius-lg:12px;
+  --dh-shadow-sm:0 1px 2px rgba(31,27,23,.04); --dh-shadow-lg:0 8px 24px rgba(31,27,23,.12);
+  --dh-font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --dh-mono:"SF Mono","Fira Code",Menlo,Consolas,monospace;
+  --radius-full:9999px;
+}
+[data-theme="dark"] {
+  --dh-background:#17130F; --dh-surface:#211C17; --dh-surface-muted:#2A241D;
+  --dh-accent:#4DA3FF; --dh-accent-hover:#6FB5FF; --dh-accent-soft:rgba(77,163,255,.16);
+  --dh-border:#3D352C; --dh-border-strong:#4F463A;
+  --dh-text:#F7F3EC; --dh-text-secondary:#D2C9BE; --dh-text-muted:#9C9387;
+  --dh-danger:#FF8A66; --dh-danger-soft:rgba(255,138,102,.14);
+  --dh-warning:#FFC24D; --dh-warning-soft:rgba(255,194,77,.14);
+  --dh-success:#7BD88F; --dh-success-soft:rgba(123,216,143,.14);
+  --dh-shadow-sm:0 1px 2px rgba(0,0,0,.3); --dh-shadow-lg:0 8px 24px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--dh-font);background:var(--dh-background);color:var(--dh-text);font-size:14px;line-height:1.55}
+button{font-family:inherit;cursor:pointer}
+input,select{font-family:inherit}
+
+.demo-topbar{display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:52px;background:var(--dh-surface);border-bottom:1px solid var(--dh-border);position:sticky;top:0;z-index:40}
+.demo-brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+.demo-brand .logo{width:24px;height:24px;border-radius:6px;background:var(--dh-accent);color:#fff;display:grid;place-items:center;font-size:13px}
+.demo-topbar-right{display:flex;align-items:center;gap:10px}
+.demo-badge{font-size:11px;color:var(--dh-accent);background:var(--dh-accent-soft);border:1px solid var(--dh-border);padding:2px 10px;border-radius:var(--radius-full)}
+.theme-toggle{height:30px;padding:0 12px;font-size:12px;border:1px solid var(--dh-border);border-radius:var(--radius-full);background:var(--dh-surface-muted);color:var(--dh-text-secondary)}
+.theme-toggle:hover{background:var(--dh-border)}
+
+.page{max-width:900px;margin:0 auto;padding:20px 24px 60px}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.page-title{font-size:22px;font-weight:700}
+.page-sub{font-size:12.5px;color:var(--dh-text-secondary);margin-top:4px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;font-size:13px;font-weight:500;border-radius:var(--dh-radius-sm);border:1px solid transparent;transition:background .15s,border-color .15s,color .15s;white-space:nowrap}
+.btn-sm{height:28px;padding:0 10px;font-size:12px}
+.btn-primary{background:var(--dh-accent);color:#fff}
+.btn-primary:hover{background:var(--dh-accent-hover)}
+.btn-secondary{background:var(--dh-surface);color:var(--dh-text);border-color:var(--dh-border)}
+.btn-secondary:hover{background:var(--dh-surface-muted)}
+
+/* 折叠卡片 */
+.card{background:var(--dh-surface);border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);margin-bottom:14px;overflow:hidden}
+.card-head{display:flex;align-items:center;gap:8px;width:100%;padding:14px 18px;background:none;border:none;font-size:14px;font-weight:600;color:var(--dh-text);text-align:left}
+.card-head:hover{background:var(--dh-surface-muted)}
+.card-head .ic{width:24px;height:24px;border-radius:6px;background:var(--dh-accent-soft);color:var(--dh-accent);display:grid;place-items:center;font-size:12px;font-style:normal}
+.card-head .chev{margin-left:auto;font-size:10px;color:var(--dh-text-muted);transition:transform .15s}
+.card.open .card-head .chev{transform:rotate(90deg)}
+.card-body{padding:2px 18px 18px;border-top:1px solid var(--dh-border)}
+.card:not(.open) .card-body{display:none}
+/* 默认展开下载设置卡片 */
+.card.download.open .card-body{display:block}
+
+.form-group{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.form-group:last-child{margin-bottom:0}
+.form-label{font-size:12.5px;font-weight:600;color:var(--dh-text-secondary)}
+.form-hint{font-size:11px;color:var(--dh-text-muted)}
+.input{height:34px;padding:0 10px;font-size:13px;border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);background:var(--dh-surface);color:var(--dh-text);outline:none;transition:border-color .15s,box-shadow .15s;width:100%}
+.input:focus{border-color:var(--dh-accent);box-shadow:0 0 0 2px var(--dh-accent-soft)}
+.input::placeholder{color:var(--dh-text-muted)}
+.input-btn{display:flex;gap:8px}
+.input-btn .input{flex:1;min-width:0}
+
+/* 目录结构预览 */
+.structure{margin-top:12px;padding:12px 14px;background:var(--dh-surface-muted);border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);font-family:var(--dh-mono);font-size:12px;line-height:1.8;color:var(--dh-text-secondary)}
+.structure .dep{color:var(--dh-text-muted)}
+.structure b{color:var(--dh-text);font-weight:600}
+.structure .note{color:var(--dh-accent)}
+
+/* 模板编辑器 */
+.template-fields{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.tpl-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:4px 10px;border:1px solid var(--dh-border-strong);border-radius:var(--radius-full);background:var(--dh-surface)}
+.tpl-chip[data-added]{background:var(--dh-accent-soft);border-color:var(--dh-accent);color:var(--dh-accent);font-weight:600}
+.tpl-chip .x{color:var(--dh-text-muted);font-size:10px;cursor:pointer}
+.tpl-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);background:var(--dh-surface-muted);margin-bottom:8px;font-size:12.5px;color:var(--dh-text-secondary)}
+.tpl-row .grip{color:var(--dh-text-muted);cursor:grab}
+.tpl-row .val{font-weight:600;color:var(--dh-text);flex:1}
+.tpl-row .demo{color:var(--dh-text-muted)}
+.tpl-row button{border:none;background:none;color:var(--dh-text-muted);font-size:12px}
+.tpl-row button:hover{color:var(--dh-danger)}
+.tpl-preview{padding:10px 12px;border:1px dashed var(--dh-border-strong);border-radius:var(--dh-radius-sm);font-family:var(--dh-mono);font-size:12px;color:var(--dh-text-secondary);background:var(--dh-surface)}
+
+.seg-row{display:flex;gap:8px}
+.seg-row .input{flex:1}
+
+.toast{position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:200;padding:8px 16px;font-size:13px;background:var(--dh-surface);border:1px solid var(--dh-border);box-shadow:var(--dh-shadow-lg);border-radius:var(--radius-full);color:var(--dh-text);display:none;animation:fadein .2s ease}
+@keyframes fadein{from{opacity:0;transform:translate(-50%,-6px)}to{opacity:1;transform:translate(-50%,0)}}
+
+@media (max-width:600px){.seg-row{flex-direction:column}}
+</style>
+</head>
+<body>
+
+<div class="demo-topbar">
+  <div class="demo-brand"><span class="logo">D</span> DoukHub</div>
+  <div class="demo-topbar-right">
+    <span class="demo-badge">原型 · 设置页（折叠卡片）</span>
+    <button class="theme-toggle" onclick="toggleTheme()">🌓 明暗切换</button>
+  </div>
+</div>
+
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">设置</h1>
+      <div class="page-sub">服务、存储与同步偏好</div>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-secondary btn-sm">↻ 重启</button>
+      <button class="btn btn-secondary btn-sm">⏻ 退出</button>
+      <button class="btn btn-primary" onclick="toast('设置已保存（示意）')">✓ 保存设置</button>
+    </div>
+  </div>
+
+  <!-- 卡片：配置路径 -->
+  <div class="card open">
+    <button class="card-head" onclick="toggleCard(this)">
+      <span class="ic">📄</span> 配置路径
+      <span class="chev">▶</span>
+    </button>
+    <div class="card-body">
+      <div style="padding:10px;background:var(--dh-surface-muted);border-radius:var(--dh-radius-sm);font-family:var(--dh-mono);font-size:13px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--dh-border)">
+        <span>~/.doukhub/config.json</span>
+        <button class="btn btn-secondary btn-sm">⧉ 复制</button>
+      </div>
+      <div class="form-hint" style="margin-top:6px">配置存储在用户目录，更新 DoukHub 不会被覆盖</div>
+    </div>
+  </div>
+
+  <!-- 卡片：云端（飞书） -->
+  <div class="card">
+    <button class="card-head" onclick="toggleCard(this)">
+      <span class="ic">☁</span> 云端配置（飞书）
+      <span class="chev">▶</span>
+    </button>
+    <div class="card-body">
+      <div class="form-group"><label class="form-label">App ID</label><input class="input" value="cli_xxxx"></div>
+      <div class="form-group"><label class="form-label">App Secret</label><input class="input" type="password" value="********"></div>
+      <div class="form-group"><label class="form-label">多维表格 App Token</label><input class="input" placeholder="从表格 URL 中获取"></div>
+      <div class="form-group"><label class="form-label">分享表 Table ID</label><input class="input" placeholder="原始数据源表"></div>
+      <div class="form-group"><label class="form-label">账号表 Table ID</label><input class="input" placeholder="同步后的账号信息表"></div>
+      <div class="form-group"><label class="form-label">Cookie 表 Table ID</label><input class="input" placeholder="Cookie 池表（可选）"></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm">⚡ 测试连接</button>
+        <button class="btn btn-secondary btn-sm">🔧 一键建表字段</button>
+        <button class="btn btn-secondary btn-sm">分享</button>
+        <button class="btn btn-secondary btn-sm">账号</button>
+        <button class="btn btn-secondary btn-sm">Cookie</button>
+        <span class="form-hint" style="color:var(--dh-success)">● 连接正常</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 卡片：下载设置（默认展开） -->
+  <div class="card download open">
+    <button class="card-head" onclick="toggleCard(this)">
+      <span class="ic">📁</span> 下载设置
+      <span class="chev">▶</span>
+    </button>
+    <div class="card-body">
+      <div class="form-group">
+        <label class="form-label">下载根目录</label>
+        <div class="input-btn">
+          <input class="input" value="E:\DoukHub\Download">
+          <button class="btn btn-secondary" onclick="toast('目录浏览（示意）')">📂 浏览</button>
+        </div>
+        <div class="form-hint">默认：DoukHub 文件夹下的 Download 目录</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">文件名模板</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <span class="tpl-chip" data-added onclick="toast('已加入模板（示意）')">时间 <span class="x">✕</span></span>
+          <span class="tpl-chip" data-added>类型 <span class="x">✕</span></span>
+          <span class="tpl-chip" data-added>账号昵称 <span class="x">✕</span></span>
+          <span class="tpl-chip" data-added>作品描述 <span class="x">✕</span></span>
+          <span class="tpl-chip" onclick="toast('点击添加：合集（示意）')">合集</span>
+          <span class="tpl-chip" onclick="toast('点击添加：平台（示意）')">平台</span>
+          <span class="tpl-chip" onclick="toast('点击添加：作者ID（示意）')">作者ID</span>
+        </div>
+        <div class="tpl-row">
+          <span class="grip">⠿</span>
+          <span class="val">create_time type nickname desc</span>
+          <button onclick="toast('删除该模板（示意）')">✕</button>
+        </div>
+        <div class="tpl-preview">2026-08-20_14-30 视频 竞品A 高管专访抢先看.mp4</div>
+        <div class="form-hint" style="margin-top:6px">点击上方字段添加、拖动排序；预览即时更新</div>
+      </div>
+
+      <div class="form-group">
+        <div class="form-label" style="margin-bottom:6px">自动目录层级（无需配置）</div>
+        <div class="structure">
+          E:\DoukHub\Download\<br>
+          &nbsp;&nbsp;├─ <b>douyin</b>\ &nbsp;<span class="dep">（平台自动创建）</span><br>
+          &nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└─ <b>竞品A</b>\ &nbsp;<span class="dep">（账号·按昵称/ID）</span><br>
+          &nbsp;&nbsp;├─ <b>tiktok</b>\<br>
+          &nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└─ <b>KOL-B</b>\<br>
+          &nbsp;&nbsp;├─ <b>xhs</b>\<br>
+          &nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└─ <b>设计师小C</b>\
+          <div style="margin-top:6px"><span class="note">同一账号永远落在同一位置，方案交叉不产生重复下载</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 卡片：服务 -->
+  <div class="card">
+    <button class="card-head" onclick="toggleCard(this)">
+      <span class="ic">🖥</span> 服务
+      <span class="chev">▶</span>
+    </button>
+    <div class="card-body">
+      <div class="form-group"><label class="form-label">TTD 路径</label><input class="input" value="./TikTokDownloader"></div>
+      <div class="form-group"><label class="form-label">XHS 路径</label><input class="input" value="./XHS-Downloader"></div>
+      <div class="seg-row" style="gap:16px">
+        <div class="form-group" style="flex:1"><label class="form-label">TTD 端口</label><input class="input" value="5555"></div>
+        <div class="form-group" style="flex:1"><label class="form-label">XHS 端口</label><input class="input" value="5556"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 卡片：Cookie -->
+  <div class="card">
+    <button class="card-head" onclick="toggleCard(this)">
+      <span class="ic">🍪</span> Cookie 轮换
+      <span class="chev">▶</span>
+    </button>
+    <div class="card-body">
+      <div class="form-group"><label class="form-label">轮换模式</label><select class="input"><option>随机</option><option>顺序</option></select></div>
+      <div class="form-group"><label class="form-label">单个 Cookie 使用次数上限</label><input class="input" type="number" value="10"></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function toggleTheme(){var h=document.documentElement;h.setAttribute('data-theme',h.getAttribute('data-theme')==='dark'?'light':'dark')}
+function toggleCard(btn){btn.closest('.card').classList.toggle('open')}
+var toastTimer=null;
+function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(function(){t.style.display='none'},1800)}
+</script>
+</body>
+</html>

@@ -1,6 +1,118 @@
 {% extends "base.html" %}
 {% block title %}设置 - DoukHub{% endblock %}
 {% block content %}
+<style>
+/* 设置页:折叠卡片。卡片用白色表面(--surface-raised)，与米色页面背景(--dh-background)形成层次 */
+.settings-card { background: var(--surface-raised, var(--bg-input)); border: 1px solid var(--border-default); border-radius: var(--radius-lg); margin-bottom: 14px; overflow: hidden; box-shadow: var(--shadow-sm); }
+.settings-card-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 13px 18px; background: none; border: none;
+  font-size: 14px; font-weight: 600; color: var(--text-primary);
+  text-align: left; cursor: pointer; font-family: inherit;
+  transition: background .12s;
+}
+.settings-card-head:hover { background: var(--menu-hover, var(--bg-hover)); }
+.settings-card-head svg[data-lucide] { width: 16px; height: 16px; color: var(--accent); flex-shrink: 0; }
+.settings-card-head .card-title { flex: 1; }
+.settings-card-head .card-arrow { margin-left: auto; color: var(--text-muted); transition: transform .15s; }
+.settings-card.open .settings-card-head .card-arrow svg[data-lucide] { transform: rotate(180deg); }
+.settings-card-body { padding: 4px 18px 18px; border-top: 1px solid var(--border-default); }
+.settings-card:not(.open) .settings-card-body { display: none; }
+/* 文件名模板字段 chips */
+.tpl-fields { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
+.tpl-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; padding: 4px 11px;
+  border: 1px solid var(--border-strong, var(--border-default)); border-radius: 9999px;
+  background: var(--surface-overlay, var(--bg-input)); color: var(--text-secondary); cursor: pointer;
+  transition: all .12s;
+}
+.tpl-chip:hover { border-color: var(--accent); color: var(--accent); }
+.tpl-chip[data-added] { background: var(--dh-accent-soft, var(--accent-active, #E7F0F8)); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.tpl-chip .x { color: var(--text-muted); font-size: 11px; cursor: pointer; }
+.tpl-chip .x:hover { color: var(--danger); }
+.tpl-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.tpl-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  background: var(--bg-muted); font-size: 12.5px; color: var(--text-secondary);
+}
+.tpl-row .grip { color: var(--text-muted); cursor: grab; display: flex; }
+.tpl-row .grip svg[data-lucide] { width: 14px; height: 14px; }
+.tpl-row .val { font-weight: 600; color: var(--text-primary); flex: 1; }
+.tpl-row .demo { color: var(--text-muted); font-family: var(--font-mono); font-size: 11.5px; }
+.tpl-row button { border: none; background: none; color: var(--text-muted); cursor: pointer; display: flex; padding: 2px; }
+.tpl-row button:hover { color: var(--danger); }
+.tpl-row button svg[data-lucide] { width: 14px; height: 14px; }
+.tpl-empty { padding: 8px 12px; font-size: 12px; color: var(--text-muted); border: 1px dashed var(--border-strong, var(--border-default)); border-radius: var(--radius-sm); }
+.tpl-preview {
+  padding: 10px 12px; border: 1px dashed var(--border-strong, var(--border-default)); border-radius: var(--radius-sm);
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); background: var(--surface-overlay, var(--bg-muted));
+  word-break: break-all;
+}
+/* 目录结构预览 */
+.structure {
+  margin-top: 4px; padding: 12px 14px; background: var(--bg-muted);
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.9; color: var(--text-secondary);
+  overflow-x: auto; white-space: nowrap;
+}
+.structure b { color: var(--text-primary); font-weight: 600; }
+.structure .dep { color: var(--text-muted); }
+.structure .note { color: var(--accent); }
+
+/* ===== 经典开关（最朴素版：灰底→蓝底 + 白色圆钮，仅开关本体可点，置于行尾） ===== */
+.switch-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; min-height: 30px;
+}
+.switch-label { font-size: 13px; color: var(--text-primary); user-select: none; line-height: 1.35; }
+.switch-item {
+  position: relative; display: inline-block; flex-shrink: 0;
+  width: 44px; height: 24px; cursor: pointer;
+}
+.switch-item input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; margin: 0;
+  width: 44px; height: 24px; border-radius: 12px;
+  background: #E0E0E0;
+  position: relative; cursor: pointer;
+  transition: background .2s;
+}
+.switch-item input[type="checkbox"]:checked {
+  background: var(--dh-accent, #0061A4);
+}
+.switch-item input[type="checkbox"]::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff;
+  transition: transform .2s;
+}
+.switch-item input[type="checkbox"]:checked::after {
+  transform: translateX(20px);
+}
+.switch-item input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--dh-accent-soft, #E7F0F8); outline-offset: 2px;
+}
+
+/* ===== 设置页按钮配色分层（组内主按钮蓝色、次级中性灰） ===== */
+.settings-actions {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.settings-actions .btn-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.settings-actions .btn-secondary {
+  background: var(--surface-raised, #fff); color: var(--text-secondary);
+  border: 1px solid var(--border-strong, var(--border-default));
+}
+.settings-actions .btn-secondary:hover {
+  border-color: var(--accent); color: var(--accent); background: var(--dh-accent-soft, #E7F0F8);
+}
+.settings-actions .btn-primary {
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+}
+.settings-actions .btn-primary:hover { background: var(--accent-hover, #004F8A); }
+.size-settings { min-height: 30px; padding: 0 12px; font-size: 12px; }
+</style>
+
 <form onsubmit="saveSettings(event)">
     <div class="page-head">
         <div>
@@ -14,187 +126,364 @@
         </div>
     </div>
 
-    <div class="card">
-        <h3><i data-lucide="file-text"></i> 配置文件路径</h3>
-        <div style="padding:10px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:13px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border-default);">
-            <span>{{ config_path }}</span>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText('{{ config_path }}');showToast('已复制')"><i data-lucide="copy"></i></button>
-        </div>
-        <small style="color:var(--text-muted);margin-top:6px;display:block;">配置存储在用户目录, 更新 DoukHub 不会被覆盖</small>
-    </div>
-
-    <div class="card">
-        <h3><i data-lucide="cloud"></i> 云端配置（飞书）</h3>
-        <div class="form-group">
-            <label>App ID</label>
-            <input type="text" name="feishu.app_id" value="{{ config.feishu.app_id or '' }}">
-        </div>
-        <div class="form-group">
-            <label>App Secret</label>
-            <input type="password" name="feishu.app_secret" value="{{ config.feishu.app_secret or '' }}">
-        </div>
-        <div class="form-group">
-            <label>多维表格 App Token</label>
-            <input type="text" name="feishu.app_token" value="{{ config.feishu.app_token or '' }}" placeholder="从表格 URL 中获取">
-        </div>
-        <div class="form-group">
-            <label>分享表 Table ID</label>
-            <input type="text" name="feishu.collection_table_id" value="{{ config.feishu.collection_table_id or '' }}" placeholder="原始数据源表">
-        </div>
-        <div class="form-group">
-            <label>账号表 Table ID</label>
-            <input type="text" name="feishu.account_table_id" value="{{ config.feishu.account_table_id or '' }}" placeholder="同步后的账号信息表">
-        </div>
-        <div class="form-group">
-            <label>Cookie 表 Table ID</label>
-            <input type="text" name="feishu.cookie_table_id" value="{{ config.feishu.cookie_table_id or '' }}" placeholder="Cookie 池表（可选）">
-        </div>
-        <div class="btn-group" style="align-items:center;">
-            <button type="button" class="btn btn-secondary" onclick="testFeishu()"><i data-lucide="plug-zap"></i> 测试连接</button>
-            <button type="button" class="btn btn-secondary" onclick="ensureFields('all')"><i data-lucide="wrench"></i> 一键创建所有表字段</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('collection')">分享表</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('account')">账号表</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="ensureFields('cookie')">Cookie表</button>
-            <span id="feishu-status"></span>
-        </div>
-    </div>
-
-    <div class="card">
-        <h3><i data-lucide="folder"></i> 下载设置</h3>
-        <div class="form-group">
-            <label>下载路径</label>
-            <div style="display:flex;gap:8px;">
-                <input type="text" name="local.download_path" id="download_path" value="{{ config.local.download_path or '' }}" style="flex:1;">
-                <button type="button" class="btn btn-secondary" onclick="openDirBrowser()"><i data-lucide="folder-open"></i> 浏览</button>
+    <!-- 卡片:配置路径 -->
+    <div class="card settings-card open">
+        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
+            <i data-lucide="file-text"></i><span class="card-title">配置路径</span>
+            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="settings-card-body">
+            <div style="padding:10px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:13px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border-default);">
+                <span>{{ config_path }}</span>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText('{{ config_path }}');showToast('已复制')"><i data-lucide="copy"></i></button>
             </div>
-            <small>默认: DoukHub 文件夹下的 Download 目录</small>
+            <small style="color:var(--text-muted);margin-top:6px;display:block;">配置存储在用户目录, 更新 DoukHub 不会被覆盖</small>
         </div>
-        <div id="dir-browser" style="display:none;max-height:300px;overflow-y:auto;border:1px solid var(--border-default);border-radius:var(--radius);padding:12px;margin-bottom:16px;background:var(--bg-muted);">
-            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                <span id="dir-current" style="font-weight:600;font-size:13px;"></span>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="closeDirBrowser()">关闭</button>
+    </div>
+
+    <!-- 卡片:云端配置 -->
+    <div class="card settings-card">
+        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
+            <i data-lucide="cloud"></i><span class="card-title">云端配置</span>
+            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="settings-card-body">
+            <div class="form-group">
+                <label>App ID</label>
+                <input type="text" name="feishu.app_id" value="{{ config.feishu.app_id or '' }}">
             </div>
-            <div id="dir-list"></div>
-        </div>
-        <div class="form-group">
-            <label>存储格式</label>
-            <select name="local.storage_format">
-                <option value="xlsx" {{ 'selected' if config.local.storage_format == 'xlsx' }}>XLSX</option>
-                <option value="csv" {{ 'selected' if config.local.storage_format == 'csv' }}>CSV</option>
-                <option value="sql" {{ 'selected' if config.local.storage_format == 'sql' }}>SQL (SQLite)</option>
-            </select>
-        </div>
-    </div>
-
-    <div class="card">
-        <h3><i data-lucide="cpu"></i> Downloader 服务</h3>
-        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">路径留空则默认使用 DoukHub 文件夹内的 TikTokDownloader 和 XHS-Downloader</p>
-        <div class="form-group">
-            <label>TikTokDownloader 路径</label>
-            <input type="text" name="downloader.tiktok_downloader_path" value="{{ config.downloader.tiktok_downloader_path or '' }}" placeholder="留空则使用 ./TikTokDownloader">
-        </div>
-        <div class="form-group">
-            <label>XHS-Downloader 路径</label>
-            <input type="text" name="downloader.xhs_downloader_path" value="{{ config.downloader.xhs_downloader_path or '' }}" placeholder="留空则使用 ./XHS-Downloader">
-        </div>
-        <div class="form-group">
-            <button type="button" class="btn btn-secondary" onclick="updateAll()"><i data-lucide="rotate-cw"></i> 一键更新所有 Downloader</button>
-            <span id="update-status"></span>
-        </div>
-        <div class="form-group">
-            <label>TTD 端口</label>
-            <input type="number" name="downloader.ttd_port" value="{{ config.downloader.ttd_port or 5555 }}">
-        </div>
-        <div class="form-group">
-            <label>XHS 端口</label>
-            <input type="number" name="downloader.xhs_port" value="{{ config.downloader.xhs_port or 5556 }}">
-        </div>
-        <div class="form-group">
-            <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
-                <input type="checkbox" name="downloader.auto_start_services" {{ 'checked' if config.downloader.auto_start_services != false }}>
-                启动 DoukHub 时自动启动 Downloader 服务
-            </label>
-        </div>
-        <div class="form-group">
-            <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
-                <input type="checkbox" name="downloader.keep_services_alive" {{ 'checked' if config.downloader.keep_services_alive != false }}>
-                持续保持 TTD / 小红书在线（心跳检查 + 自动重启）
-            </label>
-        </div>
-    </div>
-
-    <div class="card">
-        <h3><i data-lucide="cookie"></i> Cookie 轮换</h3>
-        <div class="form-group">
-            <label>轮换模式</label>
-            <select name="cookie.rotation_mode">
-                <option value="random" {{ 'selected' if config.cookie.rotation_mode == 'random' }}>随机</option>
-                <option value="sequential" {{ 'selected' if config.cookie.rotation_mode == 'sequential' }}>顺序</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>单个 Cookie 使用次数上限</label>
-            <input type="number" name="cookie.usage_limit" value="{{ config.cookie.usage_limit or 10 }}">
-        </div>
-    </div>
-
-    <div class="card">
-        <h3><i data-lucide="zap"></i> 采集设置</h3>
-        <div class="form-group">
-            <label>并发采集账号数</label>
-            <input type="number" name="concurrent_accounts" value="{{ config.concurrent_accounts or 3 }}" min="1" max="10">
-        </div>
-    </div>
-
-    <div class="card">
-        <h3><i data-lucide="webhook"></i> API 请求模式</h3>
-        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">允许其他设备（手机、平板等）通过 HTTP API 调用 DoukHub 进行解析或下载</p>
-        <div class="form-group">
-            <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
-                <input type="checkbox" name="api.enabled" {{ 'checked' if config.api.enabled }}>
-                启用 API 接口
-            </label>
-        </div>
-        <div class="form-group">
-            <label>API Key</label>
-            <div style="display:flex;gap:8px;align-items:center;">
-                <input type="text" id="api-key-display" value="{{ config.api.api_key or '' }}" readonly placeholder="点击下方按钮生成" style="flex:1;font-family:var(--font-mono);font-size:13px;">
-                <button type="button" class="btn btn-secondary" onclick="copyApiKey()"><i data-lucide="copy"></i> 复制</button>
-                <button type="button" class="btn btn-secondary" onclick="regenerateApiKey()"><i data-lucide="refresh-cw"></i> 重新生成</button>
+            <div class="form-group">
+                <label>App Secret</label>
+                <input type="password" name="feishu.app_secret" value="{{ config.feishu.app_secret or '' }}">
             </div>
-            <small>其他设备调用时需在 Header 中传入: <code style="background:var(--bg-muted);padding:2px 6px;border-radius:3px;">X-API-Key: &lt;密钥&gt;</code></small>
-        </div>
-        <div class="form-group">
-            <label>API 接口列表</label>
-            <div style="font-family:var(--font-mono);font-size:12px;background:var(--bg-muted);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border-default);line-height:1.8;">
-                <strong>POST</strong> /api/v1/works/resolve &nbsp;— 解析链接，返回下载地址 JSON<br>
-                <strong>POST</strong> /api/v1/works/download &nbsp;— 解析 + 本地下载，返回结果 JSON<br>
-                <strong>GET</strong>&nbsp; /api/v1/status &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— 检查服务状态<br>
-                <span style="color:var(--text-muted);">Header: X-API-Key: &lt;密钥&gt; · Content-Type: application/json</span>
+            <div class="form-group">
+                <label>多维表格 App Token</label>
+                <input type="text" name="feishu.app_token" value="{{ config.feishu.app_token or '' }}" placeholder="从表格 URL 中获取">
+            </div>
+            <div class="form-group">
+                <label>分享表 Table ID</label>
+                <input type="text" name="feishu.collection_table_id" value="{{ config.feishu.collection_table_id or '' }}" placeholder="原始数据源表">
+            </div>
+            <div class="form-group">
+                <label>账号表 Table ID</label>
+                <input type="text" name="feishu.account_table_id" value="{{ config.feishu.account_table_id or '' }}" placeholder="同步后的账号信息表">
+            </div>
+            <div class="form-group">
+                <label>Cookie 表 Table ID</label>
+                <input type="text" name="feishu.cookie_table_id" value="{{ config.feishu.cookie_table_id or '' }}" placeholder="Cookie 池表（可选）">
+            </div>
+            <div class="settings-actions">
+                <button type="button" class="btn btn-secondary" onclick="testFeishu()"><i data-lucide="plug-zap"></i> 测试连接</button>
+                <button type="button" class="btn btn-primary" onclick="ensureFields('all')"><i data-lucide="wrench"></i> 一键创建所有表字段</button>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-secondary size-settings" onclick="ensureFields('collection')">分享表</button>
+                    <button type="button" class="btn btn-secondary size-settings" onclick="ensureFields('account')">账号表</button>
+                    <button type="button" class="btn btn-secondary size-settings" onclick="ensureFields('cookie')">Cookie表</button>
+                </div>
+                <span id="feishu-status"></span>
             </div>
         </div>
-        <div class="form-group">
-            <label>调用示例（curl）</label>
-            <div style="font-family:var(--font-mono);font-size:12px;background:var(--bg-muted);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border-default);line-height:1.6;white-space:pre-wrap;word-break:break-all;">curl -X POST http://&lt;本机IP&gt;:2999/api/v1/works/resolve \
+    </div>
+
+    <!-- 卡片:下载设置(默认展开) -->
+    <div class="card settings-card open" id="card-download">
+        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
+            <i data-lucide="folder"></i><span class="card-title">下载设置</span>
+            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="settings-card-body">
+            <div class="form-group">
+                <label>下载根目录</label>
+                <div style="display:flex;gap:8px;">
+                    <input type="text" name="local.download_path" id="download_path" value="{{ config.local.download_path or '' }}" style="flex:1;">
+                    <button type="button" class="btn btn-secondary" onclick="openDirBrowser()"><i data-lucide="folder-open"></i> 浏览</button>
+                </div>
+                <small>默认: DoukHub 文件夹下的 Download 目录</small>
+            </div>
+            <div id="dir-browser" style="display:none;max-height:300px;overflow-y:auto;border:1px solid var(--border-default);border-radius:var(--radius);padding:12px;margin-bottom:16px;background:var(--bg-muted);">
+                <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                    <span id="dir-current" style="font-weight:600;font-size:13px;"></span>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="closeDirBrowser()">关闭</button>
+                </div>
+                <div id="dir-list"></div>
+            </div>
+
+            <div class="form-group">
+                <label>文件名模板 <small style="font-weight:400;color:var(--text-muted);">点击字段追加 · 拖动排序 · 点击 ✕ 移除</small></label>
+                <div class="tpl-fields" id="tpl-fields"></div>
+                <div class="tpl-list" id="tpl-list"></div>
+                <div class="tpl-preview" id="tpl-preview"></div>
+                <small>决定保存的每个视频文件名；与下载根目录共同构成全局统一存储位置</small>
+            </div>
+
+            <div class="form-group">
+                <div style="font-size:12.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">自动目录层级（无需配置）</div>
+                <div class="structure" id="structure-preview"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 卡片:服务 -->
+    <div class="card settings-card">
+        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
+            <i data-lucide="cpu"></i><span class="card-title">服务</span>
+            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="settings-card-body">
+            <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">路径留空则默认使用 DoukHub 文件夹内的 TikTokDownloader 和 XHS-Downloader</p>
+            <div class="form-group">
+                <label>TikTokDownloader 路径</label>
+                <input type="text" name="downloader.tiktok_downloader_path" value="{{ config.downloader.tiktok_downloader_path or '' }}" placeholder="留空则使用 ./TikTokDownloader">
+            </div>
+            <div class="form-group">
+                <label>XHS-Downloader 路径</label>
+                <input type="text" name="downloader.xhs_downloader_path" value="{{ config.downloader.xhs_downloader_path or '' }}" placeholder="留空则使用 ./XHS-Downloader">
+            </div>
+            <div class="form-group">
+                <div class="settings-actions">
+                    <button type="button" class="btn btn-secondary" onclick="updateAll()"><i data-lucide="rotate-cw"></i> 一键更新所有 Downloader</button>
+                    <span id="update-status"></span>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>TTD 端口</label>
+                <input type="number" name="downloader.ttd_port" value="{{ config.downloader.ttd_port or 5555 }}">
+            </div>
+            <div class="form-group">
+                <label>XHS 端口</label>
+                <input type="number" name="downloader.xhs_port" value="{{ config.downloader.xhs_port or 5556 }}">
+            </div>
+            <div class="form-group">
+                <div class="switch-row">
+                    <span class="switch-label">启动 DoukHub 时自动启动 Downloader 服务</span>
+                    <label class="switch-item">
+                        <input type="checkbox" name="downloader.auto_start_services" {{ 'checked' if config.downloader.auto_start_services != false }}>
+                    </label>
+                </div>
+            </div>
+            <div class="form-group">
+                <div class="switch-row">
+                    <span class="switch-label">持续保持 TTD / 小红书在线（心跳检查 + 自动重启）</span>
+                    <label class="switch-item">
+                        <input type="checkbox" name="downloader.keep_services_alive" {{ 'checked' if config.downloader.keep_services_alive != false }}>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 卡片:Cookie -->
+    <div class="card settings-card">
+        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
+            <i data-lucide="cookie"></i><span class="card-title">Cookie</span>
+            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="settings-card-body">
+            <div class="form-group">
+                <label>轮换模式</label>
+                <select name="cookie.rotation_mode">
+                    <option value="random" {{ 'selected' if config.cookie.rotation_mode == 'random' }}>随机</option>
+                    <option value="sequential" {{ 'selected' if config.cookie.rotation_mode == 'sequential' }}>顺序</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>单个 Cookie 使用次数上限</label>
+                <input type="number" name="cookie.usage_limit" value="{{ config.cookie.usage_limit or 10 }}">
+            </div>
+        </div>
+    </div>
+
+    <!-- 卡片:采集 -->
+    <div class="card settings-card">
+        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
+            <i data-lucide="zap"></i><span class="card-title">采集</span>
+            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="settings-card-body">
+            <div class="form-group">
+                <label>并发采集账号数</label>
+                <input type="number" name="concurrent_accounts" value="{{ config.concurrent_accounts or 3 }}" min="1" max="10">
+            </div>
+        </div>
+    </div>
+
+    <!-- 卡片:API 模式 -->
+    <div class="card settings-card">
+        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
+            <i data-lucide="webhook"></i><span class="card-title">API 模式</span>
+            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="settings-card-body">
+            <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">允许其他设备（手机、平板等）通过 HTTP API 调用 DoukHub 进行解析或下载</p>
+            <div class="form-group">
+                <div class="switch-row">
+                    <span class="switch-label">启用 API 接口</span>
+                    <label class="switch-item">
+                        <input type="checkbox" name="api.enabled" {{ 'checked' if config.api.enabled }}>
+                    </label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>API Key</label>
+                <div class="settings-actions">
+                    <input type="text" id="api-key-display" value="{{ config.api.api_key or '' }}" readonly placeholder="点击下方按钮生成" style="flex:1;font-family:var(--font-mono);font-size:13px;min-width:180px;">
+                    <button type="button" class="btn btn-secondary" onclick="copyApiKey()"><i data-lucide="copy"></i> 复制</button>
+                    <button type="button" class="btn btn-secondary" onclick="regenerateApiKey()"><i data-lucide="refresh-cw"></i> 重新生成</button>
+                </div>
+                <small>其他设备调用时需在 Header 中传入: <code style="background:var(--bg-muted);padding:2px 6px;border-radius:3px;">X-API-Key: &lt;密钥&gt;</code></small>
+            </div>
+            <div class="form-group">
+                <label>API 接口列表</label>
+                <div style="font-family:var(--font-mono);font-size:12px;background:var(--bg-muted);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border-default);line-height:1.8;">
+                    <strong>POST</strong> /api/v1/works/resolve &nbsp;— 解析链接，返回下载地址 JSON<br>
+                    <strong>POST</strong> /api/v1/works/download &nbsp;— 解析 + 本地下载，返回结果 JSON<br>
+                    <strong>GET</strong>&nbsp; /api/v1/status &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— 检查服务状态<br>
+                    <span style="color:var(--text-muted);">Header: X-API-Key: &lt;密钥&gt; · Content-Type: application/json</span>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>调用示例（curl）</label>
+                <div style="font-family:var(--font-mono);font-size:12px;background:var(--bg-muted);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border-default);line-height:1.6;white-space:pre-wrap;word-break:break-all;">curl -X POST http://&lt;本机IP&gt;:2999/api/v1/works/resolve \
   -H "X-API-Key: dk_xxxx" \
   -H "Content-Type: application/json" \
   -d '{"links": "https://www.douyin.com/video/xxx"}'</div>
+            </div>
         </div>
     </div>
 
-    <div class="card">
-        <h3><i data-lucide="tag"></i> 标签映射</h3>
-        <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">每行一个映射, 格式: 缩写=完整标签。未匹配的缩写会作为新标签保留。</p>
-        <div class="form-group">
-            <textarea name="tags_text" rows="12" style="font-family:var(--font-mono);font-size:13px;" placeholder="个=个人&#10;图=图集&#10;分享=分享&#10;街拍=街拍">{% for k, v in config.tags.items() %}{{ k }}={{ v }}
+    <!-- 卡片:标签映射 -->
+    <div class="card settings-card">
+        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
+            <i data-lucide="tag"></i><span class="card-title">标签映射</span>
+            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="settings-card-body">
+            <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">每行一个映射, 格式: 缩写=完整标签。未匹配的缩写会作为新标签保留。</p>
+            <div class="form-group">
+                <textarea name="tags_text" rows="12" style="font-family:var(--font-mono);font-size:13px;" placeholder="个=个人&#10;图=图集&#10;分享=分享&#10;街拍=街拍">{% for k, v in config.tags.items() %}{{ k }}={{ v }}
 {% endfor %}</textarea>
+            </div>
+            <small>示例: 个=个人 | 图=图集 | 街拍=街拍 | 太多=多</small>
         </div>
-        <small>示例: 个=个人 | 图=图集 | 街拍=街拍 | 太多=多</small>
     </div>
 </form>
 {% endblock %}
 {% block scripts %}
 <script>
+    // ===== 工具函数 =====
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // ===== 折叠卡片 =====
+    function toggleCard(btn) {
+        btn.closest('.settings-card').classList.toggle('open');
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    }
+
+    // ===== 文件名模板编辑器 =====
+    var TPL_FIELDS = [
+        ['create_time', '发布时间'], ['type', '作品类型'], ['nickname', '账号昵称'],
+        ['desc', '作品描述'], ['id', '作品ID'], ['uid', '账号UID'], ['mark', '账号标识']
+    ];
+    var TPL_EXAMPLES = {
+        create_time: '2026-08-20_14-30', type: '视频', nickname: '竞品A',
+        desc: '高管专访抢先看', id: '7390001', uid: 'MS4wLjAB', mark: 'douyin_739'
+    };
+    var tplParts = [];        // 已选字段 key 数组（有序）
+    var tplDragIndex = null;  // 拖拽起始索引
+
+    function renderTemplateBuilder() {
+        // 可选字段 chips（已选的标记 data-added，点击移除）
+        var fieldHtml = TPL_FIELDS.map(function(f) {
+            var key = f[0], label = f[1];
+            var added = tplParts.indexOf(key) !== -1;
+            return '<span class="tpl-chip' + (added ? ' data-added' : '') + '" onclick="toggleTemplateField(\'' + key + '\')">' +
+                (added ? '<span class="x" title="移除">✕</span>' : '') +
+                escapeHtml(label) + '</span>';
+        }).join('');
+        document.getElementById('tpl-fields').innerHTML = fieldHtml;
+
+        // 已选字段有序列表（拖动排序）
+        var list = document.getElementById('tpl-list');
+        if (!tplParts.length) {
+            list.innerHTML = '<div class="tpl-empty">未选择字段，默认使用 create_time type nickname desc</div>';
+        } else {
+            list.innerHTML = tplParts.map(function(key, index) {
+                var label = (TPL_FIELDS.find(function(f){ return f[0] === key; }) || [key, key])[1];
+                var demo = TPL_EXAMPLES[key] || '';
+                return '<div class="tpl-row" draggable="true" ' +
+                    'ondragstart="templateDragStart(event,' + index + ')" ' +
+                    'ondragover="event.preventDefault()" ' +
+                    'ondrop="templateDrop(event,' + index + ')">' +
+                    '<span class="grip"><i data-lucide="grip-vertical"></i></span>' +
+                    '<span class="val">' + escapeHtml(label) + '</span>' +
+                    '<span class="demo">' + (demo ? '示例: ' + escapeHtml(demo) : '') + '</span>' +
+                    '<button type="button" title="移除" onclick="removeTemplateField(' + index + ')"><i data-lucide="x"></i></button>' +
+                '</div>';
+            }).join('');
+        }
+
+        // 实时预览
+        var preview = document.getElementById('tpl-preview');
+        var tpl = tplParts.length ? tplParts.join(' ') : 'create_time type nickname desc';
+        var demoName = tplParts.length
+            ? tplParts.map(function(key){ return TPL_EXAMPLES[key] || '<' + key + '>'; }).join('_')
+            : '2026-08-20_14-30_视频_竞品A_高管专访抢先看';
+        preview.innerHTML = '<span style="color:var(--text-muted);">文件名示例: </span>' + escapeHtml(demoName) + '.mp4';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    }
+
+    function toggleTemplateField(key) {
+        var idx = tplParts.indexOf(key);
+        if (idx === -1) tplParts.push(key); else tplParts.splice(idx, 1);
+        renderTemplateBuilder();
+    }
+    function removeTemplateField(index) { tplParts.splice(index, 1); renderTemplateBuilder(); }
+    function templateDragStart(e, index) { tplDragIndex = index; e.dataTransfer.effectAllowed = 'move'; }
+    function templateDrop(e, index) {
+        e.preventDefault();
+        if (tplDragIndex === null || tplDragIndex === index) return;
+        var item = tplParts.splice(tplDragIndex, 1)[0];
+        tplParts.splice(index, 0, item);
+        tplDragIndex = null;
+        renderTemplateBuilder();
+    }
+
+    // 加载全局默认(name_format 来自 collection_defaults)
+    var globalDefaultFolder = '';
+    async function loadNameFormat() {
+        try {
+            var data = await apiCall('/api/collection/defaults', 'GET');
+            var d = data.defaults || {};
+            globalDefaultFolder = d.folder_name || '';
+            var tpl = (d.name_format || '').trim();
+            tplParts = tpl ? tpl.split(/\s+/).filter(Boolean) : [];
+            // 仅保留合法字段，未知 token 忽略
+            var valid = TPL_FIELDS.map(function(f){ return f[0]; });
+            tplParts = tplParts.filter(function(k){ return valid.indexOf(k) !== -1; });
+        } catch(e) { tplParts = []; }
+        renderTemplateBuilder();
+        renderStructurePreview();
+    }
+
+    // 目录结构预览（平台目录 douyin/tiktok/xhs 自动创建）
+    function renderStructurePreview() {
+        var root = (document.getElementById('download_path').value || '').trim() || 'DoukHub/Download';
+        document.getElementById('structure-preview').innerHTML =
+            escapeHtml(root) + '\\<br>' +
+            '&nbsp;&nbsp;&nbsp;├─ <b>douyin</b>\\ <span class="dep">（平台自动创建）</span><br>' +
+            '&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;└─ <b>账号昵称</b>\\<br>' +
+            '&nbsp;&nbsp;&nbsp;├─ <b>tiktok</b>\\<br>' +
+            '&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;└─ <b>账号昵称</b>\\<br>' +
+            '&nbsp;&nbsp;&nbsp;└─ <b>xhs</b>\\<br>' +
+            '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ <b>账号昵称</b>\\' +
+            '<div style="margin-top:6px"><span class="note">同一账号永远落在同一位置，方案交叉不会产生重复下载</span></div>';
+    }
+
+    // ===== 保存 =====
     async function saveSettings(e) {
         e.preventDefault();
         const form = e.target;
@@ -225,9 +514,18 @@
                 if (key && value) data.tags[key] = value;
             }
         });
+        // 文件名模板独立保存到 collection_defaults
+        try {
+            await apiCall('/api/collection/defaults', 'PUT', {
+                folder_name: globalDefaultFolder,
+                name_format: tplParts.join(' '),
+            });
+        } catch(e) { /* 静默，主保存仍继续 */ }
         const resp = await apiCall('/api/settings', 'POST', data);
         showToast(resp.message || '保存成功');
     }
+
+    // ===== 原有功能 =====
     async function testFeishu() {
         const status = document.getElementById('feishu-status');
         status.textContent = '测试中...';
@@ -295,6 +593,7 @@
     function selectDir(path) {
         document.getElementById('download_path').value = path;
         closeDirBrowser();
+        renderStructurePreview();
         showToast('已选择: ' + path);
     }
     function copyApiKey() {
@@ -312,5 +611,9 @@
             } else { showToast(data.message || '生成失败', 'error'); }
         } catch(e) { showToast(e.message || '生成失败', 'error'); }
     }
+
+    // 初始化：加载文件名模板 + 目录预览
+    loadNameFormat();
+    document.getElementById('download_path').addEventListener('input', renderStructurePreview);
 </script>
 {% endblock %}

@@ -2942,39 +2942,99 @@ tbody tr:hover {
 }
 
 /* preset-modal-layout: 方案管理弹窗左右分栏 */
-.preset-modal-layout { display: flex; gap: 16px; min-height: 360px; }
-.preset-modal-left { width: 240px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; border-right: 1px solid var(--dh-border, var(--border-default)); padding-right: 16px; }
-.preset-modal-right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.preset-modal-layout { display: flex; gap: 0; min-height: 420px; flex: 1; overflow: hidden; }
+/* 左栏：方案列表（整体白底，仅方案卡片单独米色）。注意: .preset-modal-left 与 #preset-list 是同一元素 */
+.preset-modal-left {
+  width: 248px; flex-shrink: 0;
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--dh-border, var(--border-default));
+  overflow-y: auto;
+  gap: 8px;
+  padding: 4px 10px 10px;
+}
 .preset-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 12px; border: 1px solid var(--dh-border, var(--border-default)); border-radius: var(--dh-radius-sm, var(--radius-sm));
-  background: var(--dh-surface, var(--bg-input)); transition: all .15s; cursor: pointer;
+  display: block; width: 100%; text-align: left;
+  padding: 12px;
+  background: var(--dh-surface-muted, var(--bg-muted));   /* 米色方案卡片 */
+  border: 1px solid var(--dh-border, var(--border-default)); border-radius: var(--dh-radius, var(--radius));
+  cursor: pointer; transition: border-color .12s, box-shadow .12s, background .12s;
 }
 .preset-row:hover { border-color: var(--dh-border-strong, var(--border-default)); }
-.preset-row.is-active { border-color: var(--dh-accent, var(--accent)); background: var(--dh-accent-soft, var(--accent-active)); }
+.preset-row.is-active { border-color: var(--dh-accent, var(--accent)); box-shadow: 0 0 0 1px var(--dh-accent, var(--accent)); background: var(--dh-surface-muted, var(--bg-muted)); }
 .preset-row-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.preset-row-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
-.preset-row-desc { font-size: 11px; color: var(--dh-text-muted, var(--text-muted)); }
+.preset-row-name { font-size: 13px; font-weight: 600; color: var(--dh-text, var(--text-primary)); display: flex; align-items: center; gap: 6px; }
+.preset-row.is-active .preset-row-name { color: var(--dh-accent, var(--accent)); }
+.preset-row-desc { font-size: 11px; color: var(--dh-text-muted, var(--text-muted)); line-height: 1.45; }
 .default-star { color: var(--dh-accent, var(--accent)); font-size: 14px; }
 .default-star svg[data-lucide] { width: 14px; height: 14px; }
 .preset-new-btn {
-  display: flex; align-items: center; justify-content: center; gap: 4px;
-  padding: 10px 12px; border: 1px dashed var(--dh-border-strong, var(--border-default)); border-radius: var(--dh-radius-sm, var(--radius-sm));
-  background: transparent; color: var(--dh-text-muted, var(--text-muted)); font-size: 12px; cursor: pointer; transition: all .15s;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  margin: 2px 0 10px; padding: 9px; flex-shrink: 0;
+  border: 1px dashed var(--dh-border-strong, var(--border-default)); border-radius: var(--dh-radius, var(--radius));
+  background: transparent; color: var(--dh-text-secondary, var(--text-secondary)); font-size: 12px; cursor: pointer; transition: all .15s;
 }
-.preset-new-btn:hover { border-color: var(--dh-accent, var(--accent)); color: var(--dh-accent, var(--accent)); }
-.preset-form-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--dh-border, var(--border-default)); }
+.preset-new-btn:hover { color: var(--dh-accent, var(--accent)); border-color: var(--dh-accent, var(--accent)); background: var(--dh-accent-soft, var(--accent-active)); }
+/* 右栏：编辑表单 */
+.preset-modal-right { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.preset-right-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 12px 18px 0; flex-shrink: 0;
+}
+.preset-right-head h4 { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.preset-right-ops { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.preset-store-note {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 16px; margin-bottom: 4px; padding: 9px 12px;
+  font-size: 11.5px; color: var(--dh-text-muted, var(--text-muted));
+  background: var(--dh-surface-muted, var(--bg-muted));
+  border-radius: var(--dh-radius-sm, var(--radius-sm));
+}
+.preset-store-note a { color: var(--dh-accent, var(--accent)); text-decoration: underline; }
+.preset-modal-right .workflow-form-grid { padding: 12px 18px 4px; }
+.preset-form-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; padding: 14px 18px; border-top: 1px solid var(--dh-border, var(--border-default)); }
+/* 方案弹窗专用容器:更宽（真正生效的规则在 base.html 内联，此处作冗余兜底） */
+.dh-modal-box-preset { max-width: 800px; width: min(92vw, 800px); display: flex; flex-direction: column; max-height: 88vh; background: var(--surface-raised, var(--bg-muted)); padding: 20px; }
+/* 窄屏:左右分栏改上下 */
+@media (max-width: 720px) {
+  .preset-modal-layout { flex-direction: column; min-height: 0; }
+  .preset-modal-left { width: 100%; border-right: none; border-bottom: 1px solid var(--dh-border, var(--border-default)); max-height: 200px; }
+  .preset-right-head { flex-wrap: wrap; }
+  .preset-modal-right .workflow-form-grid { grid-template-columns: 1fr; }
+}
 
-/* run-detail-toggle */
-.run-detail-toggle {
-  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
-  font-size: 12px; font-weight: 500; color: var(--dh-text-secondary, var(--text-secondary));
-  background: none; border: none; font-family: inherit;
+/* run-detail-toggle: 醒目独立折叠行 */
+.run-detail-toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 14px; padding: 11px 16px;
+  background: var(--dh-surface-muted, var(--bg-muted));
+  border: 1px solid var(--dh-border, var(--border-default));
+  border-radius: var(--dh-radius, var(--radius));
+  cursor: pointer; user-select: none;
+  transition: border-color .15s, background .15s;
 }
-.run-detail-toggle svg[data-lucide] { width: 14px; height: 14px; transition: transform .15s; }
-.run-detail-toggle.open svg[data-lucide] { transform: rotate(180deg); }
-.run-detail-body { display: none; margin-top: 14px; }
+.run-detail-toggle-row:hover { border-color: var(--dh-accent, var(--accent)); }
+.run-detail-toggle-row.open { border-color: var(--dh-accent, var(--accent)); }
+.run-detail-toggle-label {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600; color: var(--dh-text, var(--text-primary));
+}
+.run-detail-toggle-label i { font-size: 16px; color: var(--dh-accent, var(--accent)); transition: transform .15s; }
+.run-detail-toggle-row.open .run-detail-toggle-label i { transform: rotate(180deg); }
+.run-detail-toggle-hint { font-size: 11.5px; color: var(--dh-text-muted, var(--text-muted)); }
+.run-detail-body { display: none; margin-top: 12px; }
 .run-detail-body.open { display: block; }
+/* 实时记录区:仅用间距区隔(不加横线,避免与表格线重复) */
+.run-log-section {
+  margin: 20px 0 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.run-log-section-title {
+  font-size: 11.5px; font-weight: 600; color: var(--dh-text-muted, var(--text-muted));
+  letter-spacing: .06em;
+}
+.run-log-count {
+  font-size: 11px; color: var(--dh-text-muted, var(--text-muted)); font-variant-numeric: tabular-nums;
+}
 
 /* batch-filter-bar */
 .batch-filter-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -2989,4 +3049,71 @@ tbody tr:hover {
 .run-progress-wrap { flex: 1; min-width: 200px; }
 .run-current-account { font-size: 12px; color: var(--dh-text-secondary, var(--text-secondary)); margin-bottom: 6px; }
 .run-current-account .account-name { font-weight: 600; color: var(--dh-text, var(--text-primary)); }
+
+/* ===== 运行中批次：总体进度 + 统计条（与增量采集页同风格） ===== */
+.run-meta { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: var(--dh-text-secondary, var(--text-secondary)); margin-bottom: 2px; }
+.run-meta b { color: var(--dh-text, var(--text-primary)); font-weight: 600; }
+.run-meta .pct { color: var(--dh-accent, var(--accent)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.run-current { font-size: 12px; color: var(--dh-text-secondary, var(--text-secondary)); display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.run-current .name { font-weight: 600; color: var(--dh-text, var(--text-primary)); }
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--dh-accent, var(--accent)); animation: dh-pulse 1.2s infinite; flex-shrink: 0; }
+@keyframes dh-pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+/* 统计条:沿用 preview-stats-bar，仅内部数字语义色 */
+.run-stats-bar { margin-top: 14px; }
+.run-stats-bar .preview-stat-item.total .preview-stat-num,
+.run-stats-bar .preview-stat-item.remain .preview-stat-num { color: var(--dh-text, var(--text-primary)); }
+.run-stats-bar .preview-stat-item.succ .preview-stat-num { color: var(--dh-success, var(--success-text, #16A34A)); }
+.run-stats-bar .preview-stat-item.fail .preview-stat-num { color: var(--dh-danger, var(--danger-text, #C2410C)); }
+.run-stats-bar .preview-stat-item.skip .preview-stat-num { color: var(--dh-text-muted, var(--text-muted)); }
+.run-stats-bar .preview-stat-item.run-time .preview-stat-num { color: var(--dh-accent, var(--accent)); }
+
+/* 运行中表格:当前账号行高亮 */
+.run-detail-table tbody tr.active-row { background: var(--dh-accent-soft, var(--accent-light)); }
+.run-detail-table .run-account-name { font-weight: 500; }
+.run-detail-table .cell-time { color: var(--dh-text-secondary, var(--text-secondary)); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* 账号行展开作品明细 */
+.run-expand-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; margin-right: 2px; vertical-align: -4px;
+  color: var(--dh-accent, var(--accent)); cursor: pointer;
+  border-radius: 4px; transition: color .12s, background .12s; opacity: 0.6;
+}
+.run-expand-btn:hover { color: var(--dh-accent, var(--accent)); background: var(--dh-accent-soft, var(--accent-light)); opacity: 1; }
+.run-expand-btn i { width: 14px; height: 14px; }
+.run-expand-btn.is-empty { cursor: default; visibility: hidden; }
+.run-expand-tag {
+  display: inline-flex; align-items: center;
+  font-size: 10.5px; font-weight: 600; color: var(--dh-accent, var(--accent));
+  background: var(--dh-accent-soft, var(--accent-light));
+  border-radius: 999px; padding: 1px 7px; margin-right: 4px; vertical-align: 1px;
+}
+.run-works-row { background: var(--dh-surface-muted, var(--bg-muted)); }
+.run-works-td { padding: 6px 12px 12px 36px !important; background: transparent; }
+.run-works-box { display: flex; flex-wrap: wrap; gap: 12px 24px; font-size: 12px; }
+.run-works-group { min-width: 220px; }
+.run-works-kind { font-size: 11px; font-weight: 600; color: var(--dh-accent, var(--accent)); margin-bottom: 4px; display: block; }
+.run-works-list { list-style: none; margin: 0; padding: 0; max-height: 120px; overflow-y: auto; }
+.run-works-list li { padding: 2px 0; color: var(--dh-text-secondary, var(--text-secondary)); line-height: 1.5; border-bottom: 1px dashed var(--dh-border, var(--border-default)); }
+.run-works-list li:last-child { border-bottom: none; }
+.cell-works-count { color: var(--dh-success, var(--success-text, #16A34A)); font-size: 11px; font-weight: 600; margin-right: 8px; }
+
+/* 流式日志:与 sync/account 页 workflow-log 同款(等宽/浅色/自动滚动)，一次折叠内平级展示 */
+.run-log-view {
+  margin-top: 12px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--dh-surface-muted, var(--bg-muted));
+  color: var(--dh-text-secondary, var(--text-secondary));
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.7;
+  border: none;
+}
+.run-log-view .log-ok { color: var(--dh-success, var(--success-text, #16A34A)); }
+.run-log-view .log-err { color: var(--dh-danger, var(--danger-text, #C2410C)); }
+.run-log-view .log-info { color: var(--dh-accent, var(--accent)); }
 

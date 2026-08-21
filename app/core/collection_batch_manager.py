@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -138,7 +139,15 @@ class CollectionBatchManager:
                 self._active_process.terminate()
         return True
 
-    def read_log(self, batch_id: str, max_lines: int = 200) -> list[str]:
+    def read_log(self, batch_id: str, max_lines: int | None = None) -> list[str]:
+        """读取批次日志(作品级全量 + 每行分类)。
+
+        逐行解析:
+        - 结构化标记行(account_start/account_result/summary)全部保留
+        - 作品级行(【视频/图集/实况】下载结果)+ 全部普通终端行都保留，
+          前端负责"动态保留最近 N 行"避免 DOM 膨胀
+        - 输出格式: ["<level>\t<message>", ...]，前端按 \t 切分着色
+        """
         batch = self.db.get_collection_batch(batch_id)
         if not batch or not batch.get("log_path"):
             return []
@@ -146,7 +155,171 @@ class CollectionBatchManager:
         if not path.exists():
             return []
         with path.open("r", encoding="utf-8", errors="replace") as file:
-            return [line.rstrip("\r\n") for line in file][-max_lines:]
+            lines = [line.rstrip("\r\n") for line in file]
+        all_lines = [self._classify_log_line(line) for line in lines if line.strip()]
+        if max_lines is not None and max_lines > 0:
+            all_lines = all_lines[-max_lines:]
+        return all_lines
+
+    def read_account_works(self, batch_id: str) -> dict:
+        """从批次日志聚合每个账号的作品下载明细。
+
+        返回 { account_name: {"video": [...], "image": [...], "live": [...], "total": int} }
+        只统计日志中 '【类型】...文件下载成功' 形式出现的作品标题。
+        处理日志中文件名被换行折断的情况(合并到下一行直到出现'文件下载成功')。
+        """
+        batch = self.db.get_collection_batch(batch_id)
+        if not batch or not batch.get("log_path"):
+            return {}
+        path = Path(batch["log_path"])
+        if not path.exists():
+            return {}
+        with path.open("r", encoding="utf-8", errors="replace") as file:
+            lines = [line.rstrip("\r\n") for line in file]
+
+        works: dict = {}
+        current: str | None = None
+        pending_title = ""  # 被换行折断的上一个标题残片
+        for line in lines:
+            if "__DOUKHUB__" in line:
+                try:
+                    import json as _json
+
+                    payload_str = line[line.index("__DOUKHUB__") + len("__DOUKHUB__"):].strip()
+                    payload = _json.loads(payload_str)
+                    if payload.get("type") == "account_start":
+                        current = str(payload.get("account_name") or "")
+                        works.setdefault(current, {"video": [], "image": [], "live": [], "total": 0})
+                    elif payload.get("type") == "account_result":
+                        current = None
+                except Exception:
+                    pass
+                pending_title = ""
+                continue
+            if not current:
+                pending_title = ""
+                continue
+            stripped = line.strip()
+            # 作品行起始: 【视频】/【图集】/【实况】
+            if stripped.startswith("【"):
+                pending_title = stripped
+                if "文件下载成功" in pending_title:
+                    title = pending_title
+                    pending_title = ""
+                else:
+                    continue  # 等下一行补全
+            elif pending_title and "文件下载成功" in stripped:
+                title = pending_title + stripped
+                pending_title = ""
+            else:
+                # 标题残片继续累积(可能中间还有描述文字)
+                if pending_title:
+                    pending_title += stripped
+                continue
+
+            kind = "video"
+            if "图集" in title:
+                kind = "image"
+            elif "实况" in title:
+                kind = "live"
+            clean = title.replace("文件下载成功", "").replace("【视频】", "").replace("【图集】", "").replace("【实况】", "").strip()
+            # 时间戳-类型-账号-标题 → 取标题(最后一段)
+            parts = clean.split("-", 3)
+            if len(parts) >= 4:
+                clean = "-".join(parts[3:])
+            works[current][kind].append(clean)
+            works[current]["total"] += 1
+        # 每个类型最多保留前 30 条
+        for acc in works:
+            for k in ("video", "image", "live"):
+                works[acc][k] = works[acc][k][:30]
+        return works
+
+    @staticmethod
+    def _classify_log_line(line: str) -> str:
+        """把一行日志转成 'level\tmessage' 格式；无法分类则原样返回。"""
+        content = line
+        level = "info"
+        # 结构化标记行(来自 ttd_batch_runner 的 emit_marker)
+        if "__DOUKHUB__" in line:
+            try:
+                import json as _json
+
+                payload_str = line[line.index("__DOUKHUB__") + len("__DOUKHUB__"):].strip()
+                payload = _json.loads(payload_str)
+                if isinstance(payload, dict):
+                    event = payload.get("type", "")
+                    status = payload.get("status", "")
+                    message = payload.get("message", "") or payload.get("account_name", "") or ""
+                    if event == "account_start":
+                        level = "info"
+                        message = f"▶ 开始采集: {payload.get('account_name', '')} ({payload.get('index','')}/{payload.get('total','')})"
+                    elif event == "account_result":
+                        if status == "success":
+                            level = "ok"
+                            message = f"✔ {payload.get('account_name','')}: {message or '采集完成'}"
+                        else:
+                            level = "err"
+                            message = f"✖ {payload.get('account_name','')}: {message or '失败'}"
+                    elif event == "summary":
+                        level = "info"
+                        message = f"∑ 汇总: 总数 {payload.get('total','')}, 成功 {payload.get('success','')}, 失败 {payload.get('failed','')}"
+                return f"{level}\t{message}"
+            except Exception:
+                pass
+        # 作品级行(【视频/图集/实况】): 成功绿 / 失败中断红 / 其余蓝
+        if content.strip().startswith(("【", "[", "#")):
+            if "成功" in content:
+                level = "ok"
+            elif any(k in content for k in ("失败", "中断", "错误", "超时", "取消", "error", "fail", "timeout")):
+                level = "err"
+            else:
+                level = "info"
+            # 长作品文件名截断, 避免行太长
+            if "文件下载" in content and len(content) > 60:
+                content = content[:60] + "…"
+            return f"{level}\t{content}"
+        # 普通终端行: 按关键词着色
+        text = content.lower()
+        if any(k in text for k in ("成功", "完成", "succeed", "success", "done", "ok")):
+            level = "ok"
+        elif any(k in text for k in ("失败", "错误", "超时", "取消", "error", "fail", "timeout", "cancel")):
+            level = "err"
+        elif any(k in text for k in ("开始", "下载", "处理", "正在", "account", "账号")):
+            level = "info"
+        return f"{level}\t{content}"
+
+    @staticmethod
+    def _keep_summary_line(line: str) -> bool:
+        """判断一行日志是否应进入主日志(账号级摘要)。
+
+        规则:
+        - __DOUKHUB__ 标记行: 全部保留(account_start / account_result / summary)
+        - 普通终端行: 只保留关键状态行(开始/完成/失败/汇总统计/参数/警告)，
+          过滤掉"作品级"行(每个作品一行)避免刷屏
+        """
+        if "__DOUKHUB__" in line:
+            return True
+        # 作品级行过滤: 单个文件下载/图集/视频条目/时间戳残片
+        stripped = line.strip()
+        if not stripped:
+            return False
+        if (
+            stripped.startswith(("【", "[", "#", "*", "-"))
+            or "文件下载成功" in line
+            or "文件下载失败" in line
+            or "下载中断" in line
+            or "下载失败" in line
+            or re.match(r"^\d{2}\.\d{2}\.\d{2}[-.]", stripped)   # 时间戳开头的作品条目残片
+            or re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}", stripped)  # 日期开头的残片
+        ):
+            return False
+        # 关键状态行: 开始/完成/失败/统计/参数/警告/账号处理
+        key = ["开始", "完成", "失败", "错误", "超时", "取消", "个账号", "个作品",
+               "个视频", "个图集", "个实况", "下载", "跳过", "参数", "cookie", "cookie_",
+               "警告", "账号", "私密", "登录", "提取", "筛选", "处理"]
+        text = stripped.lower()
+        return any(k in text for k in key)
 
     def _pick_cookie(self, platform: str) -> str:
         """从数据库选取一个有效 Cookie。platform 为 douyin/tiktok。"""

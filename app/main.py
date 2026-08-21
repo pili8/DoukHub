@@ -3397,6 +3397,7 @@ async def api_collection_batch_detail(batch_id: str):
         "batch": batch,
         "items": items,
         "log": get_collection_batch_manager().read_log(batch_id),
+        "works": get_collection_batch_manager().read_account_works(batch_id),
     }
 
 

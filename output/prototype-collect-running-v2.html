@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>运行中批次 · 界面样板（对齐现有风格）</title>
+<style>
+/* ===== 直接复刻 style.css 里的 token（明色主题） ===== */
+:root {
+  --dh-bg: #FBFAF7;
+  --dh-surface: #FFFFFF;
+  --dh-surface-muted: #F5F2EC;
+  --dh-text: #1F1B17;
+  --dh-text-secondary: #5C564E;
+  --dh-text-muted: #A39E96;
+  --dh-border: #ECE7DF;
+  --dh-border-strong: #D9D3C8;
+  --dh-accent: #0061A4;
+  --dh-accent-hover: #004F8A;
+  --dh-accent-soft: #E7F0F8;
+  --dh-danger: #C2410C;
+  --dh-danger-soft: #FEF1EB;
+  --dh-success: #16A34A;
+  --dh-success-soft: #ECFDF3;
+  --dh-warning: #B45309;
+  --dh-warning-soft: #FDF3E3;
+  --dh-radius: 12px;
+  --dh-radius-sm: 8px;
+  --radius-full: 999px;
+  --radius-sm: 6px;
+  --pad: 12px;
+  --transition: 0.2s ease;
+  --transition-fast: 0.15s ease;
+  --state-hover: 0.08;
+  --state-pressed: 0.12;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  /* md 映射（与 style.css 一致） */
+  --md-primary: var(--dh-accent);
+  --md-primary-container: var(--dh-accent-soft);
+  --md-on-primary-container: var(--dh-accent);
+  --md-success-container: var(--dh-success-soft);
+  --md-on-success-container: var(--dh-success);
+  --md-error-container: var(--dh-danger-soft);
+  --md-on-error-container: var(--dh-danger);
+  --md-warning-container: var(--dh-warning-soft);
+  --md-on-warning-container: var(--dh-warning);
+  --md-surface-container: var(--dh-surface-muted);
+  --md-surface-container-high: var(--dh-border);
+  --md-surface-container-low: var(--dh-surface);
+  --md-on-surface-variant: var(--dh-text-secondary);
+  --md-outline-variant: var(--dh-border);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font); background: var(--dh-bg); color: var(--dh-text); line-height: 1.55; padding: 32px 20px 60px; }
+.wrap { max-width: 920px; margin: 0 auto; }
+
+/* ===== 顶部（演示用，非设计内容） ===== */
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.page-title { font-size: 22px; font-weight: 700; }
+.page-sub { font-size: 13px; color: var(--dh-text-secondary); margin-top: 4px; }
+.scene-switch { display: flex; gap: 8px; }
+.scene-btn { border: 1px solid var(--dh-border-strong); background: var(--dh-surface); color: var(--dh-text-secondary); font-size: 13px; padding: 6px 14px; border-radius: var(--dh-radius-sm); cursor: pointer; font-family: inherit; }
+.scene-btn:hover { border-color: var(--dh-accent); color: var(--dh-accent); }
+.scene-btn.active { background: var(--dh-accent); border-color: var(--dh-accent); color: #fff; }
+
+/* ============================================================
+   以下复刻 style.css 的 .workflow-panel 体系，保持与现有页面一致
+   ============================================================ */
+.workflow-panel { background: var(--dh-surface); border: 1px solid var(--dh-border); border-radius: var(--dh-radius); box-shadow: none; padding: 18px; margin-bottom: 14px; }
+.workflow-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.workflow-title { min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--dh-text); flex-wrap: wrap; }
+.workflow-title svg[data-lucide] { width: 17px; height: 17px; color: var(--dh-accent); }
+.workflow-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
+/* ---- 按钮：复刻 .btn / .btn-sm / .btn-danger ---- */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 13px; height: 34px; border: none; border-radius: var(--dh-radius-sm); cursor: pointer; font-size: 13px; font-weight: 500; font-family: inherit; box-shadow: none; white-space: nowrap; transition: all var(--transition-fast); line-height: 1.25; position: relative; overflow: hidden; }
+.btn:hover { filter: brightness(0.97); }
+.btn:active { transform: scale(0.97); }
+.btn-sm { height: 30px; padding: 0 12px; font-size: 12px; border-radius: var(--dh-radius-sm); }
+.btn-danger { background: var(--dh-danger); color: #fff; }
+.btn-secondary { background: var(--dh-surface-muted); color: var(--dh-text); }
+.btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* ---- 标签 .tag ---- */
+.tag { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 10px; border-radius: var(--radius-full); font-size: 12px; background: var(--dh-surface-muted); color: var(--dh-text-secondary); font-weight: 500; white-space: nowrap; }
+
+/* ---- 状态徽章 .workflow-status ---- */
+.workflow-status { display: inline-flex; align-items: center; gap: 6px; min-height: 22px; padding: 3px 10px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.workflow-status.pending { background: var(--md-surface-container-high); color: var(--md-on-surface-variant); }
+.workflow-status.running, .workflow-status.cancelling, .workflow-status.enabled { background: var(--md-primary-container); color: var(--md-on-primary-container); }
+.workflow-status.success, .workflow-status.completed, .workflow-status.done { background: var(--md-success-container); color: var(--md-on-success-container); }
+.workflow-status.failed, .workflow-status.disabled { background: var(--md-error-container); color: var(--md-on-error-container); }
+.workflow-status.skipped, .workflow-status.warning, .workflow-status.cancelled { background: var(--md-warning-container); color: var(--md-on-warning-container); }
+
+/* ---- 进度条：复刻 .progress-bar-container / .progress-bar ---- */
+.progress-bar-container { width: 100%; height: 4px; background: var(--md-surface-container-highest); border-radius: var(--radius-full); margin: 8px 0; overflow: hidden; }
+.progress-bar { height: 100%; background: var(--md-primary); border-radius: var(--radius-full); transition: width 300ms cubic-bezier(0.2, 0, 0, 1); }
+.progress-bar.success { background: var(--dh-success); }
+.progress-bar.failed { background: var(--dh-danger); }
+.progress-bar.skipped { background: var(--dh-warning); }
+
+/* 当前账号的活跃进度条：米色轨道 + 蓝条（沿用现有配色） */
+.progress-bar-container.thin { height: 4px; }
+.progress-bar.animated::after { content:''; position:absolute; inset:0; background:repeating-linear-gradient(45deg, rgba(255,255,255,.22) 0 8px, transparent 8px 16px); animation: stripe 1s linear infinite; }
+.progress-bar { position: relative; }
+@keyframes stripe { to { background-position: 22.6px 0; } }
+
+/* ---- 运行态信息行 ---- */
+.run-meta { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: var(--dh-text-secondary); margin-bottom: 2px; }
+.run-meta b { color: var(--dh-text); font-weight: 600; }
+.run-meta .pct { color: var(--dh-accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+.run-current { font-size: 12px; color: var(--dh-text-secondary); display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.run-current .name { font-weight: 600; color: var(--dh-text); }
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--dh-accent); animation: pulse 1.2s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+/* ---- 统计条：完全沿用 preview-stats-bar 的横排样式 ---- */
+.preview-stats-bar { display: flex; align-items: center; gap: 0; margin-top: 14px; padding: 10px 16px; background: var(--dh-surface-muted); border-radius: var(--dh-radius); border: 1px solid var(--dh-border); }
+.preview-stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; }
+.preview-stat-num { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.preview-stat-label { font-size: 11px; color: var(--dh-text-muted); }
+.preview-stat-divider { width: 1px; height: 28px; background: var(--dh-border); flex-shrink: 0; }
+.preview-stat-item.total .preview-stat-num { color: var(--dh-accent); }
+.preview-stat-item.first .preview-stat-num { color: var(--dh-warning); }
+.preview-stat-item.incr .preview-stat-num { color: var(--dh-success); }
+.preview-stat-item.skip .preview-stat-num { color: var(--dh-text-muted); }
+/* 运行中的五项统计颜色沿用同套语义 */
+.preview-stat-item.total .preview-stat-num, .preview-stat-item.succ .preview-stat-num { color: var(--dh-success); }
+.preview-stat-item.fail .preview-stat-num { color: var(--dh-danger); }
+.preview-stat-item.remain .preview-stat-num { color: var(--dh-text); }
+.preview-stat-item.run-time .preview-stat-num { color: var(--dh-accent); }
+
+/* ---- 表格（沿用现有页面表格风格） ---- */
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { text-align: left; font-size: 11px; color: var(--dh-text-muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--dh-border); white-space: nowrap; }
+tbody td { padding: 9px 10px; border-bottom: 1px solid var(--dh-border); vertical-align: middle; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr.active-row { background: var(--dh-accent-soft); }
+.cell-msg { color: var(--dh-text-secondary); font-size: 12px; max-width: 220px; }
+.cell-msg.err { color: var(--dh-danger); }
+.cell-time { color: var(--dh-text-secondary); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mini-progress { width: 96px; }
+.mini-progress .track { height: 4px; background: var(--dh-border); border-radius: 99px; overflow: hidden; }
+.mini-progress .bar { height: 100%; border-radius: 99px; }
+.mini-progress .bar.b { background: var(--dh-accent); }
+.mini-progress .bar.g { background: var(--dh-success); }
+.mini-progress .bar.r { background: var(--dh-danger); }
+.mini-progress .bar.o { background: var(--dh-warning); }
+
+/* ---- 日志（沿用 .log-box 终端风格） ---- */
+.log-box { max-height: 200px; overflow-y: auto; background: var(--dh-surface-muted); color: var(--dh-text-secondary); border-radius: var(--radius-sm); padding: 14px 16px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; border: none; margin-top: 12px; }
+.log-box .log-ok { color: var(--dh-success); }
+.log-box .log-err { color: var(--dh-danger); }
+.log-box .log-info { color: var(--dh-accent); }
+.log-toggle { background: none; border: none; padding: 0; font: inherit; font-size: 12px; color: var(--dh-text-secondary); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.log-toggle:hover { color: var(--dh-accent); }
+.log-area { display: none; }
+.log-area.open { display: block; }
+
+@media (max-width: 720px) {
+  .preview-stats-bar { flex-wrap: wrap; }
+  .preview-stat-divider { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="page-head">
+    <div>
+      <div class="page-title">运行中批次 · 界面样板</div>
+      <div class="page-sub">严格沿用现有 daily 采集页面的面板/进度条/统计条/徽章/日志样式体系</div>
+    </div>
+    <div class="scene-switch">
+      <button class="scene-btn active" data-scene="running" onclick="switchScene('running')">运行中</button>
+      <button class="scene-btn" data-scene="done" onclick="switchScene('done')">已完成</button>
+      <button class="scene-btn" data-scene="cancelled" onclick="switchScene('cancelled')">已取消</button>
+    </div>
+  </div>
+
+  <!-- ================= 运行中 ================= -->
+  <div id="scene-running">
+    <!-- 运行中批次面板 -->
+    <div class="workflow-panel">
+      <div class="workflow-header">
+        <div class="workflow-title">
+          <svg data-lucide="loader-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          <span>运行中批次</span>
+          <span class="tag">douyin</span>
+          <span class="tag">增量 · 日常全量-抖音</span>
+          <span class="workflow-status running">运行中</span>
+        </div>
+        <div class="workflow-actions">
+          <button class="btn btn-sm btn-secondary" onclick="toggleLog()">展开日志</button>
+          <button class="btn btn-sm btn-danger" onclick="tryCancel()">取消批次</button>
+        </div>
+      </div>
+
+      <!-- 总体进度（沿用现页面进度条） -->
+      <div class="run-meta">
+        <span>批次进度</span>
+        <span>已处理 5 / 12 · <b class="pct" id="g-pct">42%</b></span>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar animated" id="g-bar" style="width:42%"></div>
+      </div>
+      <div class="run-current" style="justify-content:space-between">
+        <span><span class="pulse"></span>当前账号 <b class="name" id="cur-name">抖音小唐说车</b> · <span id="cur-step">正在抓取作品列表…</span></span>
+        <span style="color:var(--dh-text-muted)">已运行 <b id="d-elapsed" style="color:var(--dh-text)">04:32</b></span>
+      </div>
+
+      <!-- 统计条（沿用 preview-stats-bar 横排样式） -->
+      <div class="preview-stats-bar">
+        <div class="preview-stat-item total"><span class="preview-stat-num" id="s-total">12</span><span class="preview-stat-label">账号总数</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item succ"><span class="preview-stat-num" id="s-succ">4</span><span class="preview-stat-label">成功</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item fail"><span class="preview-stat-num" id="s-fail">1</span><span class="preview-stat-label">失败</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item skip"><span class="preview-stat-num" id="s-skip">0</span><span class="preview-stat-label">跳过</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item remain"><span class="preview-stat-num" id="s-remain">6</span><span class="preview-stat-label">待处理</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item run-time"><span class="preview-stat-num" id="s-time">04:32</span><span class="preview-stat-label">已运行</span></div>
+      </div>
+    </div>
+
+    <!-- 账号明细面板 -->
+    <div class="workflow-panel">
+      <div class="workflow-header">
+        <div class="workflow-title">
+          <svg data-lucide="list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          账号明细
+          <span class="tag" id="mini-summary">已处理 5 · 剩余 6</span>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:34%">账号</th>
+              <th>状态</th>
+              <th>进度</th>
+              <th>上次采集</th>
+              <th>信息</th>
+            </tr>
+          </thead>
+          <tbody id="account-rows"></tbody>
+        </table>
+      </div>
+
+      <!-- 日志（沿用现页面 log-box 终端样式，独立可折叠） -->
+      <div class="log-area" id="log-area">
+        <div class="log-box" id="log-view"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 已完成 ================= -->
+  <div id="scene-done" style="display:none;">
+    <div class="workflow-panel">
+      <div class="workflow-header">
+        <div class="workflow-title">
+          <svg data-lucide="check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          <span>运行中批次</span>
+          <span class="tag">douyin</span>
+          <span class="tag">增量 · 日常全量-抖音</span>
+          <span class="workflow-status completed">已完成</span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--dh-success-soft);border-radius:var(--dh-radius);margin-bottom:14px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--dh-success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        <div style="font-size:13px;"><b>批次已完成</b><span style="color:var(--dh-text-secondary);margin-left:8px;">共 12 个账号 · 成功 11 · 失败 1 · 总耗时 12:47</span></div>
+      </div>
+      <div class="preview-stats-bar">
+        <div class="preview-stat-item total"><span class="preview-stat-num">12</span><span class="preview-stat-label">账号总数</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item succ"><span class="preview-stat-num">11</span><span class="preview-stat-label">成功</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item fail"><span class="preview-stat-num">1</span><span class="preview-stat-label">失败</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item skip"><span class="preview-stat-num">0</span><span class="preview-stat-label">跳过</span></div>
+        <div class="preview-stat-divider"></div>
+        <div class="preview-stat-item run-time"><span class="preview-stat-num">12:47</span><span class="preview-stat-label">总耗时</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 已取消 ================= -->
+  <div id="scene-cancelled" style="display:none;">
+    <div class="workflow-panel">
+      <div class="workflow-header">
+        <div class="workflow-title">
+          <svg data-lucide="square" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
+          <span>运行中批次</span>
+          <span class="tag">douyin</span>
+          <span class="tag">增量 · 日常全量-抖音</span>
+          <span class="workflow-status cancelled">已取消</span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--dh-warning-soft);border-radius:var(--dh-radius);">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--dh-warning)" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
+        <div style="font-size:13px;"><b>批次已手动取消</b><span style="color:var(--dh-text-secondary);margin-left:8px;">5 个已成功 · 1 个被中断 · 6 个未开始，可随时重新采集</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ===== 模拟数据 ===== */
+var accounts = [
+  { name: '抖音小唐说车', status: 'done',    pct: 100, time: '2026-08-21 00:28:12', msg: '新增 12 条, 增量 8 条' },
+  { name: '教数学的老王', status: 'done',    pct: 100, time: '2026-08-21 00:29:40', msg: '新增 5 条' },
+  { name: '穿搭日记',     status: 'fail',    pct: 62,  time: '2026-08-20 23:58:02', msg: '请求超时，已重试 3 次' },
+  { name: '宠物星球 HQ',  status: 'done',    pct: 100, time: '2026-08-21 00:31:15', msg: '新增 3 条' },
+  { name: '程序员小灶',   status: 'done',    pct: 100, time: '2026-08-21 00:32:48', msg: '新增 21 条' },
+  { name: '抖音小唐说车', status: 'running', pct: 42,  time: '', msg: '' },
+  { name: '山野旅行家',   status: 'wait',    pct: 0,   time: '', msg: '' },
+  { name: '好物研究所',   status: 'wait',    pct: 0,   time: '', msg: '' },
+  { name: '深夜食堂',     status: 'wait',    pct: 0,   time: '', msg: '' },
+  { name: '城市观察员',   status: 'wait',    pct: 0,   time: '', msg: '' },
+  { name: '读书破万卷',   status: 'wait',    pct: 0,   time: '', msg: '' },
+  { name: '数码测评室',   status: 'wait',    pct: 0,   time: '', msg: '' }
+];
+var statusMap = {
+  done:    { txt: '成功',   cls: 'workflow-status completed' },
+  fail:    { txt: '失败',   cls: 'workflow-status failed' },
+  running: { txt: '进行中', cls: 'workflow-status running' },
+  wait:    { txt: '等待中', cls: 'workflow-status pending' }
+};
+var barMap = { done: 'g', fail: 'r', running: 'b', wait: '' };
+var logLines = [];
+function pushLog(cls, line) { logLines.push('<span class="' + cls + '">' + line + '</span>'); }
+
+function renderRows() {
+  var html = accounts.map(function(a, i) {
+    var isRun = a.status === 'running';
+    var st = statusMap[a.status];
+    var mini = a.pct > 0 ?
+      '<div class="mini-progress"><div class="track"><div class="bar ' + barMap[a.status] + '" style="width:' + a.pct + '%"></div></div></div>' :
+      '<div class="mini-progress"><div class="track"></div></div>';
+    var msg = a.status === 'fail' ? '<div class="cell-msg err">' + a.msg + '</div>' : '<div class="cell-msg">' + a.msg + '</div>';
+    return '<tr' + (isRun ? ' class="active-row"' : '') + '>' +
+      '<td style="font-weight:500;">' + a.name + '</td>' +
+      '<td><span class="' + st.cls + '">' + st.txt + '</span></td>' +
+      '<td>' + mini + '</td>' +
+      '<td class="cell-time">' + (a.time || '—') + '</td>' +
+      '<td>' + (isRun ? '<span style="color:var(--dh-accent);font-size:12px;">正在抓取…</span>' : msg) + '</td>' +
+      '</tr>';
+  }).join('');
+  document.getElementById('account-rows').innerHTML = html;
+  var done = accounts.filter(function(a){ return a.status === 'done'; }).length;
+  var fail = accounts.filter(function(a){ return a.status === 'fail'; }).length;
+  document.getElementById('mini-summary').textContent = '已处理 ' + (done + fail) + ' · 剩余 ' + (12 - done - fail);
+}
+
+/* ===== 模拟推进 ===== */
+function advance() {
+  var cur = accounts.find(function(a){ return a.status === 'running'; });
+  if (cur) {
+    cur.pct = Math.min(100, cur.pct + 4 + Math.random() * 7);
+    if (cur.pct >= 100) {
+      cur.status = 'done'; cur.time = '2026-08-21 00:34:1' + (tick % 9);
+      cur.msg = '新增 ' + (3 + Math.floor(Math.random() * 20)) + ' 条';
+      pushLog('log-ok', '✔ [' + cur.name + '] 采集完成，新增 N 条');
+      var next = accounts.find(function(a){ return a.status === 'wait'; });
+      if (next) { next.status = 'running'; next.pct = 2; pushLog('log-info', '▶ 开始采集：' + next.name); }
+      else document.getElementById('btn-cancel').disabled = true;
+    }
+  }
+  var done = accounts.filter(function(a){ return a.status === 'done'; }).length;
+  var fail = accounts.filter(function(a){ return a.status === 'fail'; }).length;
+  var tot = accounts.length;
+  var pct = Math.min(100, Math.round((done + fail) / tot * 100));
+  document.getElementById('g-bar').style.width = pct + '%';
+  document.getElementById('g-pct').textContent = pct + '%';
+  document.getElementById('s-succ').textContent = done;
+  document.getElementById('s-fail').textContent = fail;
+  document.getElementById('s-remain').textContent = tot - done - fail;
+  var cur2 = accounts.find(function(a){ return a.status === 'running'; });
+  if (cur2) document.getElementById('cur-name').textContent = cur2.name;
+  renderRows();
+  renderLog();
+}
+
+function fmtDur(sec){ var m=Math.floor(sec/60),s=sec%60; return (m<10?'0':'')+m+':'+(s<10?'0':'')+s; }
+var elapsed = 0, tick = 0;
+(function clock(){
+  elapsed += 3;
+  document.getElementById('d-elapsed').textContent = fmtDur(elapsed);
+  document.getElementById('s-time').textContent = fmtDur(elapsed);
+  tick++;
+  if (elapsed % 9 === 0) advance();
+  setTimeout(clock, 2000);
+})();
+
+function switchScene(name){
+  ['running','done','cancelled'].forEach(function(n){
+    document.getElementById('scene-' + n).style.display = n === name ? '' : 'none';
+    document.querySelector('.scene-btn[data-scene="' + n + '"]').classList.toggle('active', n === name);
+  });
+}
+function toggleLog(){
+  var a = document.getElementById('log-area');
+  a.classList.toggle('open');
+  document.querySelector('.log-toggle') && (document.querySelector('.log-toggle').textContent = a.classList.contains('open') ? '收起日志' : '展开日志');
+}
+function tryCancel(){
+  if (confirm('将停止当前批次进程，未完成账号会标记为取消。\n\n确定要取消该批次吗？')) {
+    pushLog('log-err', '✖ 已收到取消指令，正在停止进程…');
+    switchScene('cancelled');
+  }
+}
+
+pushLog('log-ok', '✔ [抖音小唐说车] 采集完成，新增 12 条');
+pushLog('log-ok', '✔ [教数学的老王] 采集完成，新增 5 条');
+pushLog('log-err', '✖ [穿搭日记] 请求超时，已重试 3 次后标记失败');
+pushLog('log-ok', '✔ [宠物星球 HQ] 采集完成，新增 3 条');
+pushLog('log-ok', '✔ [程序员小灶] 采集完成，新增 21 条');
+pushLog('log-info', '▶ 开始采集：[抖音小唐说车] 第 6/12 个 …');
+pushLog('log-info', '  └ 已获取 47 / 112 条作品');
+function renderLog(){
+  var v = document.getElementById('log-view');
+  if (!v) return;
+  v.innerHTML = logLines.join('\n');
+  v.scrollTop = v.scrollHeight;
+}
+
+renderRows();
+renderLog();
+</script>
+</body>
+</html>

@@ -14,7 +14,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <script src="/static/js/lucide.min.js"></script>
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
-    <link id="theme-css" rel="stylesheet" href="/static/css/style.css?v=47">
+    <link id="theme-css" rel="stylesheet" href="/static/css/style.css?v=50">
     <script>
       // 明暗模式:localStorage 优先,否则跟随系统,首屏设定避免闪烁
       (function() {
@@ -165,6 +165,14 @@
         border: 1px solid var(--border-default);
         box-shadow: var(--shadow-xl);
         animation: dh-modal-in 250ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    /* 方案设置弹窗:更宽的两栏布局（内联定义以确保覆盖 420px 默认宽） */
+    .dh-modal-box-preset {
+        max-width: 800px !important;
+        width: min(92vw, 800px) !important;
+        background: var(--surface-raised, var(--bg-muted));
+        display: flex; flex-direction: column;
+        max-height: 88vh; padding: 20px;
     }
     @keyframes dh-modal-in {
         from { transform: translateY(12px) scale(0.96); opacity: 0; }

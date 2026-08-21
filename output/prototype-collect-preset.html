@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>采集方案设置 · 原型 v1</title>
+<style>
+/* ===== Design Tokens（对齐 DESIGN.md 13.x，全量令牌化） ===== */
+:root {
+  --dh-background: #FBFAF7;
+  --dh-surface: #FFFFFF;
+  --dh-surface-muted: #F5F2EC;
+  --dh-accent: #0061A4;
+  --dh-accent-hover: #004F8A;
+  --dh-accent-soft: #E7F0F8;
+  --dh-border: #ECE7DF;
+  --dh-border-strong: #D9D3C8;
+  --dh-text: #1F1B17;
+  --dh-text-secondary: #5C564E;
+  --dh-text-muted: #A39E96;
+  --dh-danger: #C2410C;
+  --dh-danger-soft: #FEF1EB;
+  --dh-warning: #B45309;
+  --dh-warning-soft: #FEF3C7;
+  --dh-success: #16A34A;
+  --dh-success-soft: #ECFDF3;
+  --dh-radius-sm: 6px;
+  --dh-radius: 8px;
+  --dh-radius-lg: 12px;
+  --dh-shadow-sm: 0 1px 2px rgba(31,27,23,.04);
+  --dh-shadow-lg: 0 8px 24px rgba(31,27,23,.12);
+  --dh-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --dh-mono: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+  --radius-full: 9999px;
+}
+[data-theme="dark"] {
+  --dh-background: #17130F;
+  --dh-surface: #211C17;
+  --dh-surface-muted: #2A241D;
+  --dh-accent: #4DA3FF;
+  --dh-accent-hover: #6FB5FF;
+  --dh-accent-soft: rgba(77,163,255,.16);
+  --dh-border: #3D352C;
+  --dh-border-strong: #4F463A;
+  --dh-text: #F7F3EC;
+  --dh-text-secondary: #D2C9BE;
+  --dh-text-muted: #9C9387;
+  --dh-danger: #FF8A66;
+  --dh-danger-soft: rgba(255,138,102,.14);
+  --dh-warning: #FFC24D;
+  --dh-warning-soft: rgba(255,194,77,.14);
+  --dh-success: #7BD88F;
+  --dh-success-soft: rgba(123,216,143,.14);
+  --dh-shadow-sm: 0 1px 2px rgba(0,0,0,.3);
+  --dh-shadow-lg: 0 8px 24px rgba(0,0,0,.45);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--dh-font);
+  background: var(--dh-background);
+  color: var(--dh-text);
+  font-size: 14px;
+  line-height: 1.55;
+}
+button { font-family: inherit; cursor: pointer; }
+input, select { font-family: inherit; }
+
+/* ===== 原型外壳 ===== */
+.demo-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px; height: 52px;
+  background: var(--dh-surface);
+  border-bottom: 1px solid var(--dh-border);
+  position: sticky; top: 0; z-index: 40;
+}
+.demo-brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+.demo-brand .logo {
+  width: 24px; height: 24px; border-radius: 6px;
+  background: var(--dh-accent); color: #fff;
+  display: grid; place-items: center; font-size: 13px;
+}
+.demo-topbar-right { display: flex; align-items: center; gap: 10px; }
+.demo-badge {
+  font-size: 11px; color: var(--dh-accent);
+  background: var(--dh-accent-soft);
+  border: 1px solid var(--dh-border);
+  padding: 2px 10px; border-radius: var(--radius-full);
+}
+.theme-toggle {
+  height: 30px; padding: 0 12px; font-size: 12px;
+  border: 1px solid var(--dh-border); border-radius: var(--radius-full);
+  background: var(--dh-surface-muted); color: var(--dh-text-secondary);
+}
+.theme-toggle:hover { background: var(--dh-border); }
+
+/* ===== 页面容器 ===== */
+.page { max-width: 1200px; margin: 0 auto; padding: 20px 24px 96px; }
+
+/* 页头 */
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.crumb { font-size: 12px; color: var(--dh-text-muted); margin-bottom: 6px; }
+.crumb b { color: var(--dh-accent); font-weight: 600; }
+.page-title { font-size: 22px; font-weight: 700; letter-spacing: -.2px; }
+.page-sub { font-size: 12.5px; color: var(--dh-text-secondary); margin-top: 4px; }
+.page-actions { display: flex; gap: 8px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 34px; padding: 0 14px; font-size: 13px; font-weight: 500;
+  border-radius: var(--dh-radius-sm); border: 1px solid transparent;
+  transition: background .15s, border-color .15s, color .15s;
+  white-space: nowrap;
+}
+.btn i { font-style: normal; font-size: 14px; }
+.btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.btn-lg { height: 40px; padding: 0 20px; font-size: 14px; }
+.btn-primary { background: var(--dh-accent); color: #fff; }
+.btn-primary:hover { background: var(--dh-accent-hover); }
+.btn-secondary { background: var(--dh-surface); color: var(--dh-text); border-color: var(--dh-border); }
+.btn-secondary:hover { background: var(--dh-surface-muted); }
+.btn-danger { background: var(--dh-surface); color: var(--dh-danger); border-color: var(--dh-border); }
+.btn-danger:hover { background: var(--dh-danger-soft); border-color: var(--dh-danger); }
+.btn-ghost { background: transparent; color: var(--dh-text-secondary); border: 1px dashed var(--dh-border-strong); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ===== 主布局：左列表 + 右编辑 ===== */
+.preset-layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start; }
+
+/* ---- 左栏：方案列表 ---- */
+.preset-list-panel {
+  background: var(--dh-surface);
+  border: 1px solid var(--dh-border);
+  border-radius: var(--dh-radius-sm);
+  overflow: hidden;
+  position: sticky; top: 68px;
+}
+.preset-list-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-bottom: 1px solid var(--dh-border);
+  font-size: 12.5px; font-weight: 600; color: var(--dh-text-secondary);
+}
+.preset-list-count { font-weight: 400; color: var(--dh-text-muted); }
+.preset-list-body { max-height: 520px; overflow-y: auto; padding: 6px; }
+.preset-row {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 12px; border-radius: var(--dh-radius-sm);
+  cursor: pointer; border: 1px solid transparent;
+  margin-bottom: 2px;
+}
+.preset-row:hover { background: var(--dh-surface-muted); }
+.preset-row.is-active {
+  background: var(--dh-accent-soft);
+  border-color: var(--dh-accent);
+}
+.preset-row-name { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.preset-row-name .star { color: var(--dh-warning); font-size: 12px; }
+.preset-row-name .default-tag {
+  font-size: 10px; font-weight: 600; color: var(--dh-accent);
+  background: var(--dh-accent-soft); border-radius: var(--radius-full); padding: 1px 7px;
+}
+.preset-row.is-active .default-tag { background: var(--dh-surface); }
+.preset-row-desc { font-size: 11.5px; color: var(--dh-text-muted); }
+.preset-row-meta { display: flex; gap: 6px; margin-top: 3px; }
+.chip {
+  font-size: 10.5px; color: var(--dh-text-secondary);
+  background: var(--dh-surface-muted);
+  border: 1px solid var(--dh-border);
+  padding: 1px 7px; border-radius: var(--radius-full);
+}
+.preset-row.is-active .chip { background: var(--dh-surface); }
+.preset-new-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  margin: 6px; padding: 9px; width: calc(100% - 12px);
+  border: 1px dashed var(--dh-border-strong); border-radius: var(--dh-radius-sm);
+  background: transparent; color: var(--dh-text-secondary); font-size: 12.5px;
+}
+.preset-new-btn:hover { color: var(--dh-accent); border-color: var(--dh-accent); background: var(--dh-accent-soft); }
+
+/* ---- 右栏：编辑区 ---- */
+.preset-editor { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* 通用卡片 */
+.card {
+  background: var(--dh-surface);
+  border: 1px solid var(--dh-border);
+  border-radius: var(--dh-radius-sm);
+}
+.card-head {
+  display: flex; align-items: center; gap: 7px;
+  padding: 12px 16px; border-bottom: 1px solid var(--dh-border);
+  font-size: 13px; font-weight: 600;
+}
+.card-head .ic { color: var(--dh-accent); font-size: 14px; font-style: normal; }
+.card-head .hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--dh-text-muted); }
+.card-body { padding: 16px; }
+
+/* 表单网格 */
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+.form-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.form-group.full { grid-column: 1 / -1; }
+.form-label { font-size: 12.5px; font-weight: 600; color: var(--dh-text-secondary); display: flex; align-items: center; gap: 5px; }
+.form-label .opt { font-weight: 400; color: var(--dh-text-muted); font-size: 11px; }
+.form-hint { font-size: 11px; color: var(--dh-text-muted); }
+.input {
+  height: 34px; padding: 0 10px; font-size: 13px;
+  border: 1px solid var(--dh-border); border-radius: var(--dh-radius-sm);
+  background: var(--dh-surface); color: var(--dh-text);
+  outline: none; transition: border-color .15s, box-shadow .15s;
+  width: 100%;
+}
+.input:focus { border-color: var(--dh-accent); box-shadow: 0 0 0 2px var(--dh-accent-soft); }
+.input::placeholder { color: var(--dh-text-muted); }
+.input-btn { display: flex; gap: 6px; }
+.input-btn .input { flex: 1; min-width: 0; }
+
+/* 等级分段（勾选 ≥ 即采集） */
+.rating-seg {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.rating-opt {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 30px; padding: 0 12px; font-size: 12.5px;
+  border: 1px solid var(--dh-border); border-radius: var(--radius-full);
+  background: var(--dh-surface); color: var(--dh-text-secondary);
+  cursor: pointer; user-select: none; transition: all .15s;
+}
+.rating-opt input { display: none; }
+.rating-opt.is-checked {
+  background: var(--dh-accent-soft); border-color: var(--dh-accent);
+  color: var(--dh-accent); font-weight: 600;
+}
+.rating-opt.is-checked s { text-decoration: none; }
+
+/* 双列控制（平台 / 模式） */
+.select-pair { display: flex; gap: 8px; }
+.select-pair .input { flex: 1; }
+
+/* 状态徽章 */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 500;
+  padding: 2px 9px; border-radius: var(--radius-full);
+}
+.badge.b-inherit { color: var(--dh-text-muted); background: var(--dh-surface-muted); border: 1px dashed var(--dh-border-strong); }
+.badge.b-set { color: var(--dh-accent); background: var(--dh-accent-soft); }
+
+/* ===== 范围预览卡 ===== */
+.preview-stat-strip {
+  display: flex; align-items: stretch; gap: 0;
+  margin-bottom: 12px;
+}
+.preview-stat {
+  flex: 1; text-align: center;
+  padding: 12px 6px;
+  background: var(--dh-surface-muted);
+  border-radius: var(--dh-radius-sm);
+}
+.preview-stat + .preview-stat { margin-left: 0; }
+.preview-stat-num { font-size: 24px; font-weight: 700; line-height: 1.15; display: block; }
+.preview-stat-label { font-size: 11px; color: var(--dh-text-muted); display: block; margin-top: 2px; }
+.preview-stat.total .preview-stat-num { color: var(--dh-accent); }
+.preview-stat.first .preview-stat-num { color: var(--dh-text); }
+.preview-stat.incr .preview-stat-num { color: var(--dh-success); }
+.preview-stat.skip .preview-stat-num { color: var(--dh-text-muted); }
+
+.preview-summary {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  padding: 10px 12px; margin-bottom: 12px;
+  background: var(--dh-surface-muted); border-radius: var(--dh-radius-sm);
+  font-size: 12px; color: var(--dh-text-secondary);
+}
+.preview-summary .sep { color: var(--dh-text-muted); }
+.preview-summary .k { color: var(--dh-text-muted); }
+
+/* 账号样本表 */
+.mini-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.mini-table th {
+  text-align: left; font-weight: 600; color: var(--dh-text-muted);
+  font-size: 11px; padding: 6px 10px; border-bottom: 1px solid var(--dh-border);
+}
+.mini-table td { padding: 9px 10px; border-bottom: 1px solid var(--dh-border); }
+.mini-table tr:last-child td { border-bottom: none; }
+.mini-table .name { font-weight: 600; }
+.mini-table .muted { color: var(--dh-text-muted); font-size: 11.5px; }
+.platform-badge { font-size: 10.5px; color: var(--dh-accent); background: var(--dh-accent-soft); border-radius: var(--radius-full); padding: 1px 8px; }
+.stars { color: var(--dh-warning); font-size: 11px; letter-spacing: 1px; }
+.sample-toggle {
+  margin-top: 10px; width: 100%; padding: 8px;
+  font-size: 12px; color: var(--dh-text-secondary);
+  background: transparent; border: 1px dashed var(--dh-border-strong);
+  border-radius: var(--dh-radius-sm);
+}
+.sample-toggle:hover { color: var(--dh-accent); border-color: var(--dh-accent); }
+.sample-body { display: none; margin-top: 8px; }
+.sample-body.open { display: block; }
+
+/* ===== 底部操作条 ===== */
+.footer-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  background: var(--dh-surface);
+  border-top: 1px solid var(--dh-border);
+  padding: 10px 24px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.footer-bar .left { display: flex; align-items: center; gap: 8px; }
+.footer-bar .right { display: flex; align-items: center; gap: 8px; }
+.footer-bar .divider { width: 1px; height: 20px; background: var(--dh-border); }
+
+/* ===== 全局默认弹窗 ===== */
+.overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(20, 16, 12, .45);
+  display: none; align-items: center; justify-content: center;
+}
+.overlay.open { display: flex; }
+.modal {
+  background: var(--dh-surface);
+  border: 1px solid var(--dh-border);
+  border-radius: var(--dh-radius);
+  box-shadow: var(--dh-shadow-lg);
+  width: min(560px, 92vw);
+  max-height: 85vh; overflow-y: auto;
+}
+.modal-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 18px; border-bottom: 1px solid var(--dh-border);
+  font-size: 14px; font-weight: 600;
+}
+.modal-head .ic { color: var(--dh-accent); }
+.modal-close { margin-left: auto; background: none; border: none; color: var(--dh-text-muted); font-size: 16px; }
+.modal-close:hover { color: var(--dh-text); }
+.modal-body { padding: 18px; }
+.modal-foot {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 18px; border-top: 1px solid var(--dh-border);
+}
+.inherit-note {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--dh-text-muted);
+  background: var(--dh-surface-muted);
+  border-radius: var(--dh-radius-sm); padding: 8px 12px; margin-bottom: 14px;
+}
+
+/* ===== Toast ===== */
+.toast {
+  position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+  z-index: 200; padding: 8px 16px; font-size: 13px;
+  background: var(--dh-surface); border: 1px solid var(--dh-border);
+  box-shadow: var(--dh-shadow-lg); border-radius: var(--radius-full);
+  color: var(--dh-text); display: none;
+  animation: fadein .2s ease;
+}
+@keyframes fadein { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ===== 响应式 ===== */
+@media (max-width: 900px) {
+  .preset-layout { grid-template-columns: 1fr; }
+  .preset-list-panel { position: static; }
+  .preset-list-body { max-height: 220px; }
+  .form-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  .page { padding: 14px 14px 110px; }
+  .footer-bar { flex-wrap: wrap; }
+  .footer-bar .right { width: 100%; justify-content: flex-end; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===== 顶部示意 ===== -->
+<div class="demo-topbar">
+  <div class="demo-brand"><span class="logo">D</span> DoukHub</div>
+  <div class="demo-topbar-right">
+    <span class="demo-badge">原型 v1 · 仅视觉示意</span>
+    <button class="theme-toggle" onclick="toggleTheme()">🌓 明暗切换演示</button>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- ===== 页头 ===== -->
+  <div class="page-head">
+    <div>
+      <div class="crumb">日常增量采集 › 采集方案 › <b>方案设置</b></div>
+      <h1 class="page-title">方案设置</h1>
+      <div class="page-sub">管理采集方案的筛选范围与保存规则 · 共 <b>4</b> 个方案 · 默认「日常 4星+（增量）」</div>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-secondary" onclick="toast('返回采集页（示意）')">← 返回采集</button>
+      <button class="btn btn-primary" onclick="toast('保存成功（示意）')">✓ 保存方案</button>
+    </div>
+  </div>
+
+  <div class="preset-layout">
+
+    <!-- ===== 左栏：方案列表 ===== -->
+    <aside class="preset-list-panel">
+      <div class="preset-list-head">
+        <span>方案列表</span>
+        <span class="preset-list-count">4</span>
+      </div>
+      <div class="preset-list-body">
+        <div class="preset-row is-active" onclick="selectPreset(this)">
+          <div class="preset-row-name"><span class="star">★</span> 日常 4星+（增量）<span class="default-tag">默认</span></div>
+          <div class="preset-row-desc">等级 ≥ 4星 · 抖音 · 增量</div>
+          <div class="preset-row-meta">
+            <span class="chip">标签: 竞品</span>
+            <span class="chip">34 个账号</span>
+          </div>
+        </div>
+        <div class="preset-row" onclick="selectPreset(this)">
+          <div class="preset-row-name">全量备份</div>
+          <div class="preset-row-desc">等级 ≥ 1星 · 全部 · 全量</div>
+          <div class="preset-row-meta"><span class="chip">128 个账号</span></div>
+        </div>
+        <div class="preset-row" onclick="selectPreset(this)">
+          <div class="preset-row-name">TikTok 精选</div>
+          <div class="preset-row-desc">等级 ≥ 3星 · TikTok · 增量</div>
+          <div class="preset-row-meta"><span class="chip">21 个账号</span></div>
+        </div>
+        <div class="preset-row" onclick="selectPreset(this)">
+          <div class="preset-row-name">新品监控</div>
+          <div class="preset-row-desc">等级 ≥ 2星 · 全部 · 增量 · 指定账号</div>
+          <div class="preset-row-meta"><span class="chip">8 个账号</span></div>
+        </div>
+        <button class="preset-new-btn" onclick="toast('新建方案（示意）')">＋ 新建方案</button>
+      </div>
+    </aside>
+
+    <!-- ===== 右栏：编辑区 ===== -->
+    <div class="preset-editor">
+
+      <!-- 卡 1：筛选条件 -->
+      <section class="card">
+        <div class="card-head">
+          <span class="ic">◎</span><span>筛选条件</span>
+          <span class="hint">决定采集哪些账号</span>
+        </div>
+        <div class="card-body">
+          <div class="form-grid">
+            <div class="form-group full">
+              <label class="form-label">方案名称</label>
+              <input class="input" value="日常 4星+（增量）" placeholder="如: 日常 4星+（增量）">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">等级筛选 <span class="opt">勾选 ≥ 该等级</span></label>
+              <div class="rating-seg">
+                <label class="rating-opt is-checked"><input type="checkbox" checked>4星</label>
+                <label class="rating-opt is-checked"><input type="checkbox" checked>3星</label>
+                <label class="rating-opt"><input type="checkbox">2星</label>
+                <label class="rating-opt"><input type="checkbox">1星</label>
+              </div>
+              <span class="form-hint">例：勾选 4星 / 3星 → 采集 3星及以上的账号</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">跳过最近 N 天采过的</label>
+              <input class="input" type="number" min="0" max="365" value="0">
+              <span class="form-hint">填 0 或留空为不跳过</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">平台 / 采集模式</label>
+              <div class="select-pair">
+                <select class="input">
+                  <option selected>抖音</option>
+                  <option>TikTok</option>
+                  <option>全部</option>
+                </select>
+                <select class="input">
+                  <option selected>增量</option>
+                  <option>全量</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">账号录入时间 ≥</label>
+              <input class="input" type="date" placeholder="留空为不限">
+              <span class="form-hint">只采集此日期之后录入的账号</span>
+            </div>
+
+            <div class="form-group full">
+              <label class="form-label">标签筛选</label>
+              <input class="input" value="竞品" placeholder="多, 个人">
+            </div>
+
+            <div class="form-group full">
+              <label class="form-label">指定账号</label>
+              <input class="input" value="" placeholder="留空为全部符合条件的账号，多个用逗号分隔">
+              <span class="form-hint">输入 sec_user_id，可在「表浏览」多选账号后「存为方案」自动填入</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 卡 2：采集设置 -->
+      <section class="card">
+        <div class="card-head">
+          <span class="ic">⚙</span><span>采集设置</span>
+          <span class="hint">留空使用全局默认</span>
+        </div>
+        <div class="card-body">
+          <div class="form-grid">
+            <div class="form-group full">
+              <label class="form-label">保存目录</label>
+              <div class="input-btn">
+                <input class="input" value="" placeholder="留空使用全局默认（Download）">
+                <button class="btn btn-secondary" onclick="toast('打开目录选择器（示意）')">📁</button>
+              </div>
+              <span class="form-hint">文件保存的文件夹路径（相对于 TTD 根目录或绝对路径）</span>
+            </div>
+            <div class="form-group full">
+              <label class="form-label">文件名模板</label>
+              <div class="input-btn">
+                <input class="input" value="" placeholder="留空使用全局默认（create_time type nickname desc）">
+                <button class="btn btn-secondary" onclick="toast('打开模板编辑器（示意）')">⚙</button>
+              </div>
+              <span class="form-hint">拖拽排列变量：发布时间 / 作品类型 / 账号昵称 / 作品描述 …</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+            <span class="badge b-inherit">继承全局</span>
+            <span class="badge b-set">本方案覆盖</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 卡 3：范围预览（实时） -->
+      <section class="card">
+        <div class="card-head">
+          <span class="ic">◉</span><span>范围预览</span>
+          <span class="hint">随参数实时更新</span>
+        </div>
+        <div class="card-body">
+          <div class="preview-stat-strip">
+            <div class="preview-stat total"><span class="preview-stat-num">34</span><span class="preview-stat-label">可采</span></div>
+            <div class="preview-stat first"><span class="preview-stat-num">6</span><span class="preview-stat-label">首次</span></div>
+            <div class="preview-stat incr"><span class="preview-stat-num">26</span><span class="preview-stat-label">增量</span></div>
+            <div class="preview-stat skip"><span class="preview-stat-num">2</span><span class="preview-stat-label">跳过</span></div>
+          </div>
+          <div class="preview-summary">
+            <span class="k">范围</span>
+            <span>等级 ≥ 3星</span><span class="sep">·</span>
+            <span>抖音</span><span class="sep">·</span>
+            <span>增量模式</span><span class="sep">·</span>
+            <span>标签: 竞品</span><span class="sep">·</span>
+            <span>跳过近 7 天已采</span>
+          </div>
+          <button class="sample-toggle" onclick="document.querySelector('.sample-body').classList.toggle('open'); this.textContent = this.textContent.startsWith('展开') ? '收起账号样本' : '展开账号样本';">展开账号样本</button>
+          <div class="sample-body">
+            <table class="mini-table">
+              <thead><tr><th>账号</th><th>平台</th><th>评级</th><th>上次采集</th><th>本次</th></tr></thead>
+              <tbody>
+                <tr><td class="name">竞品A</td><td><span class="platform-badge">抖音</span></td><td><span class="stars">★★★★</span></td><td class="muted">08-19 02:00</td><td><span class="badge b-inherit">增量</span></td></tr>
+                <tr><td class="name">KOL-B</td><td><span class="platform-badge">抖音</span></td><td><span class="stars">★★★★</span></td><td class="muted">从未采集</td><td><span class="badge b-set">首次</span></td></tr>
+                <tr><td class="name">竞品C</td><td><span class="platform-badge">抖音</span></td><td><span class="stars">★★★</span></td><td class="muted">08-20 02:00</td><td><span class="badge b-inherit">跳过</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<!-- ===== 底部操作条 ===== -->
+<div class="footer-bar">
+  <div class="left">
+    <button class="btn btn-danger btn-sm" onclick="toast('删除方案（示意，默认方案不可删）')">🗑 删除方案</button>
+    <span class="divider"></span>
+    <button class="btn btn-ghost btn-sm" onclick="openDefaults()">🌐 全局默认设置</button>
+  </div>
+  <div class="right">
+    <button class="btn btn-secondary btn-sm" onclick="toast('已设为默认（示意）')">★ 设为默认</button>
+    <button class="btn btn-primary" onclick="toast('已应用并返回采集页（示意）')">应用</button>
+  </div>
+</div>
+
+<!-- ===== 全局默认设置弹窗 ===== -->
+<div class="overlay" id="defaults-overlay" onclick="if(event.target===this)closeDefaults()">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="ic">🌐</span> 全局默认设置
+      <button class="modal-close" onclick="closeDefaults()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="inherit-note">◎ 所有方案中留空的采集设置，都将使用这里的默认值。</div>
+      <div class="form-grid">
+        <div class="form-group full">
+          <label class="form-label">默认保存目录</label>
+          <div class="input-btn">
+            <input class="input" value="Download" placeholder="如: Download">
+            <button class="btn btn-secondary" onclick="toast('选择目录（示意）')">📁</button>
+          </div>
+        </div>
+        <div class="form-group full">
+          <label class="form-label">默认文件名模板</label>
+          <div class="input-btn">
+            <input class="input" value="create_time type nickname desc">
+            <button class="btn btn-secondary" onclick="toast('模板编辑器（示意）')">⚙</button>
+          </div>
+          <span class="form-hint">示例输出：2026-08-20_12_30 视频 竞品A 高赞作品标题.mp4</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-secondary" onclick="closeDefaults()">取消</button>
+      <button class="btn btn-primary" onclick="toast('全局默认已保存（示意）');closeDefaults()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function toggleTheme() {
+  var html = document.documentElement;
+  html.setAttribute('data-theme', html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  var btn = document.querySelector('.theme-toggle');
+  btn.textContent = html.getAttribute('data-theme') === 'dark' ? '☀ 明暗切换演示' : '🌓 明暗切换演示';
+}
+function selectPreset(el) {
+  document.querySelectorAll('.preset-row').forEach(function(r){ r.classList.remove('is-active'); });
+  el.classList.add('is-active');
+  toast('已切换到该方案（示意）');
+}
+function openDefaults() { document.getElementById('defaults-overlay').classList.add('open'); }
+function closeDefaults() { document.getElementById('defaults-overlay').classList.remove('open'); }
+var toastTimer = null;
+function toast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.style.display = 'none'; }, 1800);
+}
+</script>
+</body>
+</html>
