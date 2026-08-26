@@ -89,9 +89,9 @@ class Collector:
         )
 
         try:
-            if account.platform in ("抖音", "TikTok"):
+            if account.platform in ("douyin", "tiktok"):
                 data = await self._collect_ttd(account, cookie)
-            elif account.platform == "小红书":
+            elif account.platform == "xhs":
                 data = await self._collect_xhs(account, cookie)
             else:
                 result.status = "failed"
@@ -113,7 +113,7 @@ class Collector:
 
     async def _collect_ttd(self, account: Account, cookie: str) -> Any:
         """调用 TikTokDownloader API 采集抖音/TikTok 账号"""
-        if account.platform == "抖音":
+        if account.platform == "douyin":
             endpoint = f"{self.ttd_url}/douyin/account"
         else:
             endpoint = f"{self.ttd_url}/tiktok/account"
@@ -167,7 +167,7 @@ class Collector:
             started_at=time.time(),
         )
         try:
-            if platform in ("抖音", "TikTok"):
+            if platform in ("douyin", "tiktok"):
                 endpoint = f"{self.ttd_url}/douyin/detail"
                 # 从链接中提取 detail_id
                 match = re.search(r"\b(\d{19})\b", link)
@@ -178,7 +178,7 @@ class Collector:
                 payload = {"detail_id": match.group(1), "source": False}
                 if cookie:
                     payload["cookie"] = cookie
-            elif platform == "小红书":
+            elif platform == "xhs":
                 endpoint = f"{self.xhs_url}/xhs/detail"
                 payload = {"url": link, "download": True}
                 if cookie:
@@ -232,20 +232,20 @@ class Collector:
         await asyncio.gather(*tasks)
         return results
 
-    async def resolve_short_url(self, url: str, platform: str = "抖音", proxy: str = "") -> str:
+    async def resolve_short_url(self, url: str, platform: str = "douyin", proxy: str = "") -> str:
         """调用 TTD API 解析短链接"""
-        if platform == "抖音":
+        if platform == "douyin":
             endpoint = f"{self.ttd_url}/douyin/share"
-        elif platform == "TikTok":
+        elif platform == "tiktok":
             endpoint = f"{self.ttd_url}/tiktok/share"
         else:
             return ""
 
         # 补全短链接前缀（TTD API 需要完整 URL）
         if url and not url.startswith("http"):
-            if platform == "抖音":
+            if platform == "douyin":
                 url = f"https://v.douyin.com/{url}/"
-            elif platform == "TikTok":
+            elif platform == "tiktok":
                 url = f"https://vm.tiktok.com/{url}"
 
         payload = {"text": url}
@@ -262,15 +262,15 @@ class Collector:
             _logger.warning(f"短链接解析失败: {url} - {e}")
             return ""
 
-    async def get_account_info(self, sec_user_id: str, platform: str = "抖音", cookie: str = "") -> dict:
+    async def get_account_info(self, sec_user_id: str, platform: str = "douyin", cookie: str = "") -> dict:
         """通过 sec_user_id 获取账号资料（账号名称、粉丝数、作品数等）"""
         if not sec_user_id:
             return {}
 
         try:
-            if platform == "抖音":
+            if platform == "douyin":
                 endpoint = f"{self.ttd_url}/douyin/user/profile"
-            elif platform == "TikTok":
+            elif platform == "tiktok":
                 endpoint = f"{self.ttd_url}/tiktok/account"
             else:
                 return {}
@@ -314,7 +314,7 @@ class Collector:
         except Exception as e:
             return {"sec_user_id": sec_user_id, "_error": f"TTD 请求异常: {type(e).__name__}: {e}"}
 
-    async def validate_cookie(self, cookie: str, platform: str = "抖音") -> dict:
+    async def validate_cookie(self, cookie: str, platform: str = "douyin") -> dict:
         """验证 Cookie 是否有效，返回详细状态。
 
         返回值:
@@ -327,9 +327,9 @@ class Collector:
 
         test_sec = "MS4wLjABAAAAzDqoM18FSDjaF9sNew0tqW6SfduLomZWPPhOrBkDm3IzPjbBWhw31ec8O6wfn1ps"
 
-        if platform == "抖音":
+        if platform == "douyin":
             endpoint = f"{self.ttd_url}/douyin/account"
-        elif platform == "TikTok":
+        elif platform == "tiktok":
             endpoint = f"{self.ttd_url}/tiktok/account"
         else:
             return {"status": "invalid", "message": f"不支持的平台: {platform}"}
@@ -385,11 +385,11 @@ class Collector:
     def detect_platform(self, link: str) -> str:
         """根据链接自动识别平台"""
         if "douyin.com" in link or "iesdouyin.com" in link:
-            return "抖音"
+            return "douyin"
         elif "tiktok.com" in link:
-            return "TikTok"
+            return "tiktok"
         elif "xiaohongshu.com" in link or "xhslink.com" in link or "rednote.com" in link:
-            return "小红书"
+            return "xhs"
         return ""
 
     async def close(self):

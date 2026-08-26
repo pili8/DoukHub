@@ -261,7 +261,7 @@ class FeishuClient:
             # 分享表：原始数据源
             return [
                 ("分享码", 1, None),             # 文本，抖音分享码（如 iMLuCKjq）
-                ("平台", 3, {"options": [{"name": "抖音"}, {"name": "TikTok"}, {"name": "小红书"}]}),
+                ("平台", 3, {"options": [{"name": "douyin"}, {"name": "tiktok"}, {"name": "xhs"}]}),
                 ("等级", 2, None),             # 数字 1-4
                 ("标签", 4, None),             # 多选标签
                 ("sec_user_id", 1, None),      # 自动回填
@@ -277,7 +277,7 @@ class FeishuClient:
             # Cookie 表
             return [
                 ("Cookie", 1, None),           # Cookie 字符串
-                ("平台", 3, {"options": [{"name": "抖音"}, {"name": "TikTok"}, {"name": "小红书"}, {"name": "通用"}]}),
+                ("平台", 3, {"options": [{"name": "douyin"}, {"name": "tiktok"}, {"name": "xhs"}, {"name": "通用"}]}),
                 ("状态", 3, {"options": [{"name": "正常"}, {"name": "失效"}]}),
                 ("启用", 7, None),             # 是否参与轮换
                 ("备注", 1, None),
@@ -289,7 +289,7 @@ class FeishuClient:
             # 账号表（默认）
             return [
                 ("账号名称", 1, None),
-                ("平台", 3, {"options": [{"name": "抖音"}, {"name": "TikTok"}, {"name": "小红书"}]}),
+                ("平台", 3, {"options": [{"name": "douyin"}, {"name": "tiktok"}, {"name": "xhs"}]}),
                 ("链接", 15, None),
                 ("sec_user_id", 1, None),
                 ("等级", 2, None),             # 数字 1-4

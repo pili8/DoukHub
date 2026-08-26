@@ -144,7 +144,7 @@
   --font-mono: "Roboto Mono", "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
 
   /* --- Layout --- */
-  --sidebar-w: 210px;
+  --sidebar-w: 185px;
   --sidebar-w-mobile: 160px;
   --content-max: 1280px;
 
@@ -254,7 +254,7 @@ code, pre { font-family: var(--font-mono); }
 }
 
 .sidebar-brand {
-  padding: 28px 24px 20px;
+  padding: 22px 16px 16px;
   display: flex;
   align-items: center;
   gap: 12px;

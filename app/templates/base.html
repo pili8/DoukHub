@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-title" content="DoukHub">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <script src="/static/js/lucide.min.js"></script>
-    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+    <link rel="stylesheet" href="/static/vendor/phosphor/regular/style.css">
     <link id="theme-css" rel="stylesheet" href="/static/css/style.css?v=50">
     <script>
       // 明暗模式:localStorage 优先,否则跟随系统,首屏设定避免闪烁
@@ -30,9 +30,6 @@
             <div class="sidebar-brand">
                 <i data-lucide="rocket"></i>
                 <span>DoukHub</span>
-                <button id="sidebar-collapse-btn" onclick="toggleSidebar()" title="折叠/展开侧边栏" class="sidebar-collapse-btn">
-                    <i data-lucide="panel-left-close"></i>
-                </button>
             </div>
             <div class="sidebar-nav">
                 <a href="/status" title="状态" class="{% if page == 'status' %}active{% endif %}">
@@ -71,14 +68,14 @@
                         <a href="/collect/detail" title="单作品采集" class="{% if page == 'collect_detail' %}active{% endif %}">
                             <i data-lucide="link"></i><span>单作品采集</span>
                         </a>
-                        <a href="/collect" title="日常增量采集" class="{% if page == 'collect_account' %}active{% endif %}">
-                            <i data-lucide="download"></i><span>日常增量采集</span>
+                        <a href="/collect" title="增量采集" class="{% if page == 'collect_account' %}active{% endif %}">
+                            <i data-lucide="download"></i><span>增量采集</span>
                         </a>
                     </div>
                 </div>
 
                 <!-- 数据父级:手风琴式展开/收起子项 -->
-                <div class="nav-group{% if page in ('database','table','sync_cloud') %} expanded{% endif %}">
+                <div class="nav-group{% if page in ('database','table','sync_cloud','backup','dedup') %} expanded{% endif %}">
                     <a href="/database" title="数据" class="nav-group-toggle{% if page == 'database' %} active{% endif %}">
                         <i data-lucide="database"></i><span>数据</span>
                         <i data-lucide="chevron-right" class="nav-arrow" onclick="toggleNavGroup(event, this)" title="展开/收起"></i>
@@ -87,6 +84,12 @@
                         <a href="/table" title="表浏览" class="{% if page == 'table' %}active{% endif %}">
                             <i data-lucide="table-2"></i><span>表浏览</span>
                         </a>
+                        <a href="/backup" title="数据备份" class="{% if page == 'backup' %}active{% endif %}">
+                            <i data-lucide="database-backup"></i><span>数据备份</span>
+                        </a>
+                        <a href="/dedup" title="文件查重" class="{% if page == 'dedup' %}active{% endif %}">
+                            <i data-lucide="file-search"></i><span>文件查重</span>
+                        </a>
                     </div>
                 </div>
                 <a href="/settings" title="设置" class="{% if page == 'settings' %}active{% endif %}">
@@ -94,17 +97,17 @@
                 </a>
             </div>
             <div class="sidebar-footer">
-            <div class="sidebar-footer">
-              <div style="display:flex;gap:6px;">
-                <button id="mode-toggle" onclick="toggleMode()" title="切换明/暗" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);cursor:pointer;font-size:16px;transition:all var(--transition-fast);">
-                    <i data-lucide="moon"></i>
-                </button>
-                <button id="task-badge" onclick="openTaskPanel()" title="后台任务" style="width:32px;height:32px;display:none;align-items:center;justify-content:center;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);cursor:pointer;font-size:16px;transition:all var(--transition-fast);position:relative;">
-                    <i data-lucide="list-checks"></i>
-                    <span id="task-badge-count" style="position:absolute;top:-6px;right:-6px;background:var(--accent);color:var(--text-on-accent,#fff);font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;line-height:1;"></span>
-                </button>
-              </div>
+              <button id="mode-toggle" class="footer-btn" onclick="toggleMode()" title="切换明/暗">
+                <i data-lucide="moon"></i>
+              </button>
+              <button id="task-badge" class="footer-btn" onclick="openTaskPanel()" title="后台任务">
+                <i data-lucide="list-checks"></i>
+                <span id="task-badge-count" class="footer-badge">0</span>
+              </button>
             </div>
+            <button id="sidebar-collapse-btn" class="sidebar-collapse-edge" onclick="toggleSidebar()" title="折叠侧边栏">
+                <i data-lucide="chevrons-left"></i>
+            </button>
         </nav>
         <main class="main" id="main-content">
             {% block content %}{% endblock %}
@@ -142,7 +145,7 @@
                 <h3><i data-lucide="list-checks"></i> <span>后台任务</span></h3>
                 <button class="dh-modal-close" onclick="closeTaskPanel()"><i data-lucide="x"></i></button>
             </div>
-            <div id="task-panel-body" class="dh-modal-body" style="max-height:72vh;overflow-y:auto;"></div>
+            <div id="task-panel-body" class="dh-modal-body" style="max-height:72vh;overflow-y:auto;"><div class="task-tabs"><button class="task-tab active" data-tab="active" onclick="switchTaskTab('active')">进行中</button><button class="task-tab" data-tab="history" onclick="switchTaskTab('history')">历史</button></div><div id="task-tab-content"></div></div>
             <div class="dh-modal-actions">
                 <button class="dh-btn dh-btn-ghost" onclick="closeTaskPanel()">关闭</button>
             </div>
@@ -197,6 +200,19 @@
     .dh-modal-close svg[data-lucide] { width: 16px; height: 16px; }
     .dh-modal-close:hover { background: var(--danger-light); color: var(--danger-text); }
     .dh-modal-body { font-size: 14px; color: var(--text-secondary); line-height: 1.6; word-break: break-all; }
+    .task-tabs {
+        display: flex; gap: 6px; margin-bottom: 12px;
+        background: var(--bg-input, var(--bg-muted));
+        border-radius: var(--radius-sm); padding: 3px;
+    }
+    .task-tab {
+        flex: 1; padding: 7px 0; border: none; border-radius: var(--radius-xs);
+        background: transparent; color: var(--text-muted);
+        font-size: 13px; font-weight: 500; cursor: pointer;
+        transition: all var(--transition-fast);
+    }
+    .task-tab:hover { color: var(--text-primary); }
+    .task-tab.active { background: var(--accent); color: var(--text-on-accent, #fff); }
     .dh-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
     .dh-btn {
         padding: 8px 18px; border: none; border-radius: var(--radius-sm);
@@ -213,7 +229,7 @@
 
 /* ===== 侧边栏折叠 ===== */
     .sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; transition: width 0.2s ease; }
-    .sidebar.sb-collapsed { width: 64px !important; }
+    .sidebar.sb-collapsed { width: 64px !important; overflow: visible; z-index: 10; border-right: none; }
     /* 折叠态:隐藏文字,只留图标 */
     .sb-collapsed .sidebar-brand > span,
     .sb-collapsed .sidebar-nav a span { display: none; }
@@ -246,6 +262,24 @@
     .sidebar-collapse-btn:hover { background: var(--bg-hover); color: var(--accent); }
     .sidebar-collapse-btn svg[data-lucide] { width: 16px; height: 16px; }
     .sb-collapsed .sidebar-collapse-btn svg[data-lucide] { width: 14px; height: 14px; }
+    /* 折叠按钮:侧栏右边缘竖线 */
+    .sidebar-collapse-edge {
+        position: absolute;
+        right: 0; top: 50%;
+        transform: translateY(-50%);
+        width: 15px; height: 60px;
+        border: 1px solid var(--md-outline-variant, var(--border-default));
+        border-right: none;
+        border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+        background: var(--md-surface-container-low, var(--bg-muted));
+        color: var(--text-muted);
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        z-index: 50; padding: 0;
+        transition: all var(--transition-fast);
+    }
+    .sidebar-collapse-edge:hover { color: var(--accent); background: var(--bg-hover); }
+    .sidebar-collapse-edge svg[data-lucide] { width: 14px; height: 14px; }
 
     .sidebar-brand > svg[data-lucide] {
         width: 28px; height: 28px;
@@ -261,7 +295,7 @@
         font-size: 13px; font-weight: 500;
         line-height: 1.25;
         border-radius: var(--radius-sm);
-        margin-bottom: 2px;
+        margin-bottom: 8px;
         position: relative;
         overflow: hidden;
         transition: background var(--transition-fast), color var(--transition-fast);
@@ -298,7 +332,7 @@
         text-decoration: none;
         font-size: 13px; font-weight: 500;
         border-radius: var(--radius-sm);
-        margin-bottom: 2px;
+        margin-bottom: 8px;
         position: relative;
         transition: background var(--transition-fast), color var(--transition-fast);
     }
@@ -339,12 +373,120 @@
     }
     .nav-group .nav-submenu a.active i { color: var(--text-on-accent, #fff); }
     .nav-group .nav-submenu a.active svg[data-lucide] { color: var(--text-on-accent, #fff); }
-    /* 折叠态:隐藏子菜单,箭头隐藏 */
-    .sb-collapsed .nav-submenu { display: none !important; }
+    /* ===== 折叠态悬浮菜单（flyout 子菜单 + tooltip 统一视觉） ===== */
+    .sb-collapsed .nav-group { position: relative; }
+    .sb-collapsed .nav-submenu {
+        display: none !important;
+        position: absolute;
+        left: 100%;
+        top: 0;
+        min-width: 176px;
+        max-height: none !important;
+        overflow: visible;
+        background: var(--md-surface-container-high, var(--bg-muted));
+        border: 1px solid var(--md-outline-variant, var(--border-default));
+        border-radius: 12px;
+        box-shadow: 0 16px 40px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.08);
+        padding: 6px;
+        z-index: 300;
+        animation: sidebar-pop 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes sidebar-pop {
+        from { opacity: 0; transform: translateX(-4px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+    .sb-collapsed .nav-group:hover .nav-submenu { display: block !important; }
+    .sb-collapsed .nav-submenu::before {
+        content: '';
+        position: absolute;
+        left: -7px;
+        top: 18px;
+        border: 7px solid transparent;
+        border-right-color: var(--md-outline-variant, var(--border-default));
+    }
+    .sb-collapsed .nav-submenu::after {
+        content: '';
+        position: absolute;
+        left: -5px;
+        top: 19px;
+        border: 5px solid transparent;
+        border-right-color: var(--md-surface-container-high, var(--bg-muted));
+    }
     .sb-collapsed .nav-arrow { display: none; }
     .sb-collapsed .nav-group-toggle { justify-content: center; padding: 0; gap: 0; }
-    #mode-toggle svg[data-lucide],
-    #task-badge svg[data-lucide] { width: 16px; height: 16px; }
+    .sb-collapsed .nav-submenu a {
+        display: flex; align-items: center; gap: 10px;
+        padding: 0 12px; height: 38px;
+        justify-content: flex-start;
+        border-radius: 8px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        transition: background var(--transition-fast), color var(--transition-fast);
+    }
+    .sb-collapsed .nav-submenu a:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .sb-collapsed .nav-submenu a:hover svg[data-lucide] { color: var(--accent); }
+    .sb-collapsed .nav-submenu a span { display: inline; }
+
+    /* 无子菜单项 tooltip（与 flyout 统一视觉） */
+    .sb-collapsed .sidebar-nav > a { overflow: visible; }
+    .sb-collapsed .sidebar-nav > a::after {
+        content: attr(title);
+        position: absolute;
+        left: calc(100% + 8px);
+        top: 50%;
+        transform: translateY(-50%) translateX(-4px);
+        background: var(--md-surface-container-high, var(--bg-muted));
+        color: var(--text-primary);
+        border: 1px solid var(--md-outline-variant, var(--border-default));
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.16);
+        padding: 8px 14px;
+        font-size: 13px; font-weight: 500;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.16s ease, transform 0.16s ease;
+        z-index: 300;
+    }
+    .sb-collapsed .sidebar-nav > a:hover::after {
+        opacity: 1;
+        transform: translateY(-50%) translateX(0);
+    }
+    /* ===== 侧边栏底部按钮（明暗切换 + 后台任务） ===== */
+    .sidebar-footer {
+        display: flex; flex-direction: row; gap: 8px;
+        padding: 12px 16px;
+        border-top: 1px solid var(--md-outline-variant, var(--border-default));
+    }
+    .footer-btn {
+        position: relative;
+        display: flex; align-items: center; justify-content: center;
+        width: 36px; height: 36px;
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-sm);
+        background: var(--bg-input);
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        box-sizing: border-box;
+    }
+    .footer-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-hover); }
+    .footer-btn svg[data-lucide] { width: 16px; height: 16px; }
+    .footer-btn i { font-size: 16px; }
+    .footer-btn .footer-badge {
+        position: absolute;
+        top: -6px; right: -6px;
+        background: var(--accent); color: var(--text-on-accent, #fff);
+        font-size: 10px; font-weight: 700; min-width: 16px; height: 16px;
+        border-radius: 8px; display: flex; align-items: center; justify-content: center;
+        padding: 0 4px; line-height: 1;
+    }
+    .sb-collapsed .sidebar-footer { flex-direction: column; align-items: center; }
+    .sb-collapsed .footer-btn .footer-badge {
+        width: 8px; height: 8px; min-width: 8px;
+        font-size: 0; padding: 0; border-radius: 4px;
+        top: 0; right: 0;
+    }
 
 /* ===== 移动端抽屉导航(≤768px,与桌面折叠态互不污染) ===== */
     .hamburger-btn, .sidebar-mask { display: none; }
@@ -377,7 +519,7 @@
       }
       body.sidebar-open .sidebar { transform: translateX(0); box-shadow: var(--shadow-xl, 0 8px 30px rgba(0,0,0,0.3)); }
       /* 抽屉模式下隐藏桌面端折叠按钮,避免状态污染 */
-      .sidebar-collapse-btn { display: none !important; }
+      .sidebar-collapse-edge { display: none !important; }
       /* 触控目标≥44px:导航项及子菜单 */
       .sidebar-nav a, .nav-group .nav-group-toggle { height: 48px; }
       .nav-group .nav-submenu a { height: 44px; padding-left: 44px; }
@@ -460,7 +602,7 @@
             if (!btn) return;
             btn.innerHTML = '<i data-lucide="' + (mode === 'dark' ? 'sun' : 'moon') + '"></i>';
             if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-            btn.title = mode === 'dark' ? '当前暗色 — 点击切到亮色' : '当前亮色 — 点击切到暗色';
+            btn.title = mode === 'dark' ? '切换到亮色模式' : '切换到暗色模式';
         }
         updateModeToggle(document.documentElement.getAttribute('data-theme') || 'light');
 
@@ -469,11 +611,19 @@
             const sb = document.querySelector('.sidebar');
             const collapsed = sb.classList.toggle('sb-collapsed');
             localStorage.setItem('doukhub-sidebar-collapsed', collapsed ? '1' : '0');
+            updateCollapseBtn(collapsed);
+        }
+        function updateCollapseBtn(collapsed) {
+            const btn = document.getElementById('sidebar-collapse-btn');
+            if (!btn) return;
+            btn.innerHTML = '<i data-lucide="' + (collapsed ? 'chevrons-right' : 'chevrons-left') + '"></i>';
+            btn.title = collapsed ? '展开侧边栏' : '折叠侧边栏';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         }
         // 恢复上次折叠状态
-        if (localStorage.getItem('doukhub-sidebar-collapsed') === '1') {
-            document.querySelector('.sidebar').classList.add('sb-collapsed');
-        }
+        var _sbCollapsed = localStorage.getItem('doukhub-sidebar-collapsed') === '1';
+        if (_sbCollapsed) document.querySelector('.sidebar').classList.add('sb-collapsed');
+        updateCollapseBtn(_sbCollapsed);
 
         // ===== 移动端抽屉导航(≤768px;body.sidebar-open 独立于 sb-collapsed,互不污染) =====
         function setSidebarDrawer(open) {
@@ -658,30 +808,25 @@
         var _taskPanelOpen = false;
         var _taskPollTimer = null;
         var _lastTasks = [];
-        var TASK_TYPE_LABEL = {update_collection: '解析账号标识', sync_account: '生成账号表', refresh_accounts: '刷新账号资料', cloud_sync: '云端同步', cloud_sync_full: '全盘同步'};
-        var TASK_STATUS_LABEL = {pending: '排队', running: '运行', done: '完成', failed: '失败', cancelled: '已取消'};
+        var TASK_TYPE_LABEL = {update_collection: '解析账号标识', sync_account: '生成账号表', refresh_accounts: '刷新账号资料', cloud_sync: '云端同步', cloud_sync_full: '全盘同步', collection_batch: '增量采集'};
+        var TASK_STATUS_LABEL = {pending: '排队', running: '运行', cancelling: '取消中', done: '完成', failed: '失败', cancelled: '已取消'};
 
         async function pollTasks() {
             try {
                 const data = await apiCall('/api/tasks', 'GET');
                 _lastTasks = data.tasks || [];
                 updateTaskBadge(_lastTasks);
-                if (_taskPanelOpen) renderTaskPanel(_lastTasks);
+                if (_taskPanelOpen && _taskPanelTab === 'active') renderTaskPanel(_lastTasks);
                 // 通知 sync 页(如果开着)刷新进度
                 if (typeof onTasksUpdate === 'function') onTasksUpdate(_lastTasks);
             } catch (e) { /* 静默,下次重试 */ }
         }
         function updateTaskBadge(tasks) {
             const active = tasks.filter(t => t.status === 'pending' || t.status === 'running');
-            const badge = document.getElementById('task-badge');
             const count = document.getElementById('task-badge-count');
-            if (!badge || !count) return;
-            if (active.length > 0) {
-                badge.style.display = 'flex';
-                count.textContent = active.length;
-            } else {
-                badge.style.display = 'none';
-            }
+            if (!count) return;
+            count.textContent = active.length;
+            count.style.display = active.length > 0 ? 'flex' : 'none';
         }
         function openTaskPanel() {
             _taskPanelOpen = true;
@@ -692,34 +837,118 @@
             _taskPanelOpen = false;
             document.getElementById('task-panel-overlay').classList.remove('dh-show');
         }
+        var _taskPanelTab = 'active';
+        function switchTaskTab(tab) {
+            _taskPanelTab = tab;
+            document.querySelectorAll('.task-tab').forEach(function (b) {
+                b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+            });
+            if (tab === 'active') {
+                renderActiveTasks(_lastTasks);
+            } else {
+                loadHistory(true);
+            }
+        }
         function renderTaskPanel(tasks) {
-            const body = document.getElementById('task-panel-body');
+            if (_taskPanelTab === 'active') {
+                renderActiveTasks(tasks);
+            }
+        }
+        function _taskCardHtml(t) {
+            const done = t.success + t.failed + t.skipped;
+            const pct = t.total > 0 ? Math.round(done / t.total * 100) : 0;
+            const statusColors = { pending: '#d97706', running: '#3b82f6', cancelling: '#9ca3af', done: '#16a34a', failed: '#dc2626', cancelled: '#9ca3af' };
+            const statusColor = statusColors[t.status] || 'var(--text-muted)';
+            const statusLabel = TASK_STATUS_LABEL[t.status] || t.status;
+            const typeLabel = TASK_TYPE_LABEL[t.type] || t.type;
+            const logHtml = (t.log || []).slice(-5).map(function (l) {
+                const cls = l.level === 'ok' ? 'log-ok' : (l.level === 'error' ? 'log-err' : 'log-info');
+                return '<div class="' + cls + '">' + l.message + '</div>';
+            }).join('');
+            const canCancel = t.status === 'pending' || t.status === 'running';
+            const cancelBtn = canCancel ? ' · <a onclick="cancelTask(\'' + t.task_id + '\')" style="color:var(--danger);cursor:pointer;text-decoration:underline;font-size:11px;">取消</a>' : '';
+            return '<div style="border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+                '<b style="font-size:13px;">' + typeLabel + '</b>' +
+                '<span style="font-size:11px;font-weight:600;color:' + statusColor + ';">' + statusLabel + '</span>' + cancelBtn +
+                '</div>' +
+                '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">总 ' + t.total + ' · 成功 ' + t.success + ' · 失败 ' + t.failed + (t.skipped ? ' · 跳过 ' + t.skipped : '') + '</div>' +
+                '<div style="height:4px;background:var(--bg-hover);border-radius:2px;overflow:hidden;margin-bottom:6px;"><div style="width:' + pct + '%;height:100%;background:var(--accent);transition:width .3s;"></div></div>' +
+                (logHtml ? '<div style="font-family:var(--font-mono);font-size:11px;line-height:1.5;max-height:80px;overflow-y:auto;background:#0f172a;color:#cbd5e1;padding:6px 8px;border-radius:var(--radius-xs);">' + logHtml + '</div>' : '') +
+                '</div>';
+        }
+        function renderActiveTasks(tasks) {
+            const body = document.getElementById('task-tab-content');
             if (!body) return;
-            if (!tasks.length) {
-                body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:24px;font-size:13px;">暂无任务</div>';
+            const active = tasks.filter(function (t) { return t.status === 'pending' || t.status === 'running' || t.status === 'cancelling'; });
+            const html = active.length
+                ? active.map(_taskCardHtml).join('')
+                : '<div style="color:var(--text-muted);text-align:center;padding:24px;font-size:13px;">暂无进行中的任务</div>';
+            if (body.innerHTML !== html) body.innerHTML = html;
+        }
+        var _historyOffset = 0;
+        var _historyList = [];
+        var _historyHasMore = false;
+        function renderHistoryTasks() {
+            loadHistory(true);
+        }
+        async function loadHistory(reset) {
+            const body = document.getElementById('task-tab-content');
+            if (!body) return;
+            if (reset) {
+                _historyOffset = 0;
+                _historyList = [];
+                body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:24px;font-size:13px;">加载中...</div>';
+            }
+            try {
+                const data = await apiCall('/api/tasks/history?limit=20&offset=' + _historyOffset, 'GET');
+                const list = data.history || [];
+                _historyList = _historyList.concat(list);
+                _historyHasMore = !!data.has_more;
+                _historyOffset += list.length;
+                drawHistoryList(body);
+            } catch (e) {
+                body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:24px;font-size:13px;">加载失败</div>';
+            }
+        }
+        function drawHistoryList(body) {
+            if (!_historyList.length) {
+                body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:24px;font-size:13px;">暂无历史记录</div>';
                 return;
             }
-            body.innerHTML = tasks.map(t => {
-                const done = t.success + t.failed + t.skipped;
-                const pct = t.total > 0 ? Math.round(done / t.total * 100) : 0;
-                const statusLabel = TASK_STATUS_LABEL[t.status] || t.status;
-                const typeLabel = TASK_TYPE_LABEL[t.type] || t.type;
-                const logHtml = (t.log || []).slice(-5).map(l => {
-                    const cls = l.level === 'ok' ? 'log-ok' : (l.level === 'error' ? 'log-err' : 'log-info');
-                    return '<div class="' + cls + '">' + l.message + '</div>';
-                }).join('');
-                const canCancel = t.status === 'pending' || t.status === 'running';
-                const cancelBtn = canCancel ? ' · <a onclick="cancelTask(\'' + t.task_id + '\')" style="color:var(--danger);cursor:pointer;text-decoration:underline;font-size:11px;">取消</a>' : '';
+            const statusColors = { pending: '#d97706', running: '#3b82f6', done: '#16a34a', failed: '#dc2626', cancelled: '#9ca3af' };
+            body.innerHTML = _historyList.map(function (h, idx) {
+                const uid = idx;
+                const statusColor = statusColors[h.status] || 'var(--text-muted)';
+                const statusLabel = TASK_STATUS_LABEL[h.status] || h.status;
+                const typeLabel = TASK_TYPE_LABEL[h.task_type] || h.task_type;
+                const when = h.finished_at || h.created_at || '';
+                let logHtml = '';
+                try {
+                    const logs = JSON.parse(h.log_json || '[]');
+                    logHtml = logs.map(function (l) {
+                        const cls = l.level === 'ok' ? 'log-ok' : (l.level === 'error' ? 'log-err' : 'log-info');
+                        return '<div class="' + cls + '">' + l.message + '</div>';
+                    }).join('');
+                } catch (e) {}
                 return '<div style="border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;">' +
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
                     '<b style="font-size:13px;">' + typeLabel + '</b>' +
-                    '<span style="font-size:11px;color:var(--text-muted);">' + statusLabel + cancelBtn + '</span>' +
+                    '<span style="font-size:11px;font-weight:600;color:' + statusColor + ';">' + statusLabel + '</span>' +
                     '</div>' +
-                    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">总 ' + t.total + ' · 成功 ' + t.success + ' · 失败 ' + t.failed + (t.skipped ? ' · 跳过 ' + t.skipped : '') + '</div>' +
-                    '<div style="height:4px;background:var(--bg-hover);border-radius:2px;overflow:hidden;margin-bottom:6px;"><div style="width:' + pct + '%;height:100%;background:var(--accent);transition:width .3s;"></div></div>' +
-                    (logHtml ? '<div style="font-family:var(--font-mono);font-size:11px;line-height:1.5;max-height:80px;overflow-y:auto;background:#0f172a;color:#cbd5e1;padding:6px 8px;border-radius:var(--radius-xs);">' + logHtml + '</div>' : '') +
+                    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">总 ' + (h.total || 0) + ' · 成功 ' + (h.success || 0) + ' · 失败 ' + (h.failed || 0) + (h.skipped ? ' · 跳过 ' + h.skipped : '') + (when ? ' · ' + when : '') + '</div>' +
+                    (logHtml ? '<a onclick="toggleHistoryLog(' + uid + ', this)" style="font-size:11px;color:var(--accent);cursor:pointer;">展开日志</a>' +
+                    '<div id="hist-log-' + uid + '" style="display:none;margin-top:6px;font-family:var(--font-mono);font-size:11px;line-height:1.5;background:#0f172a;color:#cbd5e1;padding:6px 8px;border-radius:var(--radius-xs);">' + logHtml + '</div>' : '') +
                     '</div>';
-            }).join('');
+            }).join('') +
+            (_historyHasMore ? '<div style="text-align:center;padding:8px;"><button class="btn btn-secondary btn-sm" onclick="loadHistory(false)">加载更多</button></div>' : '');
+        }
+        function toggleHistoryLog(uid, btn) {
+            const box = document.getElementById('hist-log-' + uid);
+            if (!box) return;
+            const open = box.style.display !== 'none';
+            box.style.display = open ? 'none' : 'block';
+            btn.textContent = open ? '展开日志' : '收起日志';
         }
         async function cancelTask(taskId) {
             await apiCall('/api/tasks/' + taskId + '/cancel', 'POST');

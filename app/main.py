@@ -12,7 +12,7 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -32,6 +32,10 @@ from .core.scheduler import TaskScheduler
 from .core.tasks import get_task_manager
 from .core.link_resolver import extract_sec_user_id, build_profile_url
 from .core import single_work
+from .core import storage_profiles as sp
+from .core.download_worker import DownloadWorker
+from .core import backup
+from .core import dedup
 from .services.downloader import ServiceManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
@@ -50,6 +54,7 @@ history: HistoryDB | None = None
 services: ServiceManager | None = None
 scheduler: TaskScheduler | None = None
 collection_batch_manager: CollectionBatchManager | None = None
+download_worker: DownloadWorker | None = None
 single_work_client: httpx.AsyncClient | None = None
 
 
@@ -102,6 +107,16 @@ def get_collection_batch_manager() -> CollectionBatchManager:
             ttd_url=f"http://127.0.0.1:{config.ttd_port}",
         )
     return collection_batch_manager
+
+def get_download_worker() -> DownloadWorker:
+    global download_worker
+    if download_worker is None:
+        download_worker = DownloadWorker(
+            db=get_database(),
+            client=get_single_work_client(),
+            ttd_url=f"http://127.0.0.1:{config.ttd_port}",
+        )
+    return download_worker
 
 
 def get_single_work_client() -> httpx.AsyncClient:
@@ -183,6 +198,7 @@ def get_scheduler() -> TaskScheduler:
             get_collector=get_collector,
             get_syncer=get_syncer,
             get_accounts=lambda: (get_syncer().load_local_accounts() if get_syncer() else []),
+            config=config,
         )
     return scheduler
 
@@ -229,6 +245,21 @@ async def lifespan(app: FastAPI):
         threading.Thread(target=_bg_sync, daemon=True).start()
 
     get_collection_batch_manager().recover_interrupted_batches()
+    get_download_worker().recover()
+
+    # 启动时检查每日备份（距离上次超过 24 小时则自动备份）
+    try:
+        _bkp = backup.check_daily_backup()
+        if _bkp.get("success"):
+            logger.info(f"启动时自动备份：{_bkp.get('filename')}")
+    except Exception as _e:
+        logger.warning(f"启动备份检查失败（不影响使用）: {_e}")
+
+    # 初始化文件查重的回收区目录
+    try:
+        dedup.set_recycle_dir(config.get("dedup.recycle_dir", ""))
+    except Exception as _e:
+        logger.warning(f"回收区目录初始化失败（使用默认）: {_e}")
 
     yield
 
@@ -255,11 +286,11 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 def detect_platform(link: str) -> str:
     """根据链接识别平台"""
     if "douyin.com" in link or "iesdouyin.com" in link:
-        return "抖音"
+        return "douyin"
     elif "tiktok.com" in link:
-        return "TikTok"
+        return "tiktok"
     elif "xiaohongshu.com" in link or "xhslink.com" in link or "rednote.com" in link:
-        return "小红书"
+        return "xhs"
     return ""
 
 
@@ -473,6 +504,236 @@ async def page_table(request: Request):
         "page": "table",
         "tags_mapping_json": _json.dumps(config._data.get("tags", {}), ensure_ascii=False),
     })
+
+
+@app.get("/backup", response_class=HTMLResponse)
+async def page_backup(request: Request):
+    """数据备份页面"""
+    return templates.TemplateResponse(request, "backup.html", context={
+        "request": request,
+        "page": "backup",
+    })
+
+
+@app.post("/api/backup/create")
+async def api_backup_create():
+    """创建数据库备份"""
+    result = backup.create_backup(reason="手动备份")
+    if result["success"]:
+        backup.cleanup_old_backups()
+    return result
+
+
+@app.get("/api/backup/list")
+async def api_backup_list():
+    """列出所有备份"""
+    return {"backups": backup.list_backups(), "backup_dir": str(backup.get_backup_dir())}
+
+
+@app.post("/api/backup/restore")
+async def api_backup_restore(payload: dict):
+    """从备份恢复数据库"""
+    filename = payload.get("filename", "")
+    if not filename:
+        return {"success": False, "error": "缺少 filename"}
+    return backup.restore_backup(filename)
+
+
+@app.post("/api/backup/delete")
+async def api_backup_delete(payload: dict):
+    """删除指定备份"""
+    filename = payload.get("filename", "")
+    if not filename:
+        return {"success": False, "error": "缺少 filename"}
+    return backup.delete_backup(filename)
+
+
+@app.post("/api/backup/vacuum")
+async def api_backup_vacuum():
+    """压缩数据库，回收空间"""
+    return backup.vacuum_database()
+
+
+@app.get("/api/backup/stats")
+async def api_backup_stats():
+    """数据库统计信息"""
+    return backup.get_db_stats()
+
+
+@app.get("/api/backup/download/{filename}")
+async def api_backup_download(filename: str):
+    """下载备份文件"""
+    backup_dir = backup.get_backup_dir()
+    filepath = backup_dir / filename
+    try:
+        if not filepath.resolve().is_relative_to(backup_dir.resolve()):
+            return JSONResponse({"success": False, "error": "非法路径"})
+    except AttributeError:
+        if backup_dir.resolve() not in filepath.resolve().parents:
+            return JSONResponse({"success": False, "error": "非法路径"})
+    if not filepath.exists():
+        return JSONResponse({"success": False, "error": "文件不存在"})
+    return FileResponse(str(filepath), filename=filename, media_type="application/octet-stream")
+
+
+@app.post("/api/backup/open-dir")
+async def api_backup_open_dir():
+    """打开备份目录"""
+    import subprocess
+    import sys
+    import os
+    backup_dir = backup.get_backup_dir()
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(backup_dir))
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(backup_dir)])
+        else:
+            subprocess.Popen(["xdg-open", str(backup_dir)])
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/dedup", response_class=HTMLResponse)
+async def page_dedup(request: Request):
+    """文件查重页面"""
+    return templates.TemplateResponse(request, "dedup.html", context={
+        "request": request,
+        "page": "dedup",
+    })
+
+
+@app.get("/api/dedup/scope")
+async def api_dedup_scope():
+    """返回可扫描的存储方案（含方案名/路径/主次角色）。"""
+    state = sp.ensure_migrated(config)
+    profiles = []
+    for scope in ("single", "batch"):
+        for p in sp.get_profiles(state.get(scope)):
+            path = (p.get("path") or "").strip()
+            if not path:
+                continue
+            profiles.append({
+                "id": p.get("id", ""),
+                "name": p.get("name", "") or "未命名方案",
+                "path": path,
+                "scope": scope,
+                "role": p.get("role", ""),
+            })
+    return {"success": True, "profiles": profiles}
+
+
+@app.post("/api/dedup/browse")
+def api_dedup_browse():
+    """弹出系统文件夹选择器，返回选中路径。"""
+    import subprocess
+    import sys
+    if sys.platform != "win32":
+        return {"success": False, "error": "仅 Windows 支持系统文件夹选择器"}
+    ps = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+        "$f.Description = '选择要扫描的文件夹'; "
+        "$f.ShowNewFolderButton = $false; "
+        "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $f.SelectedPath }"
+    )
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=180,
+        )
+        path = (r.stdout or "").strip()
+        if path:
+            return {"success": True, "path": path}
+        return {"success": False, "error": "未选择文件夹"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/dedup/scan")
+async def api_dedup_scan(payload: dict):
+    """启动后台扫描。"""
+    roots = payload.get("roots") or []
+    exts = payload.get("exts")
+    return dedup.start_scan(roots, exts)
+
+
+@app.get("/api/dedup/status")
+async def api_dedup_status():
+    """扫描进度与状态。"""
+    return {"success": True, **dedup.get_scan_state()}
+
+
+@app.get("/api/dedup/result")
+async def api_dedup_result():
+    """上次扫描结果。"""
+    result = dedup.get_result()
+    return {"success": result is not None, "result": result}
+
+
+@app.post("/api/dedup/move")
+async def api_dedup_move(payload: dict):
+    """把选中文件移动到回收区。"""
+    paths = payload.get("paths") or []
+    return dedup.move_to_recycle(paths)
+
+
+@app.get("/api/dedup/recycle")
+async def api_dedup_recycle():
+    """回收区文件列表。"""
+    return {"success": True, "items": dedup.list_recycle(), "recycle_dir": str(dedup.RECYCLE_DIR)}
+
+
+@app.post("/api/dedup/restore")
+async def api_dedup_restore(payload: dict):
+    """从回收区还原。"""
+    paths = payload.get("paths") or []
+    return dedup.restore_from_recycle(paths)
+
+
+@app.post("/api/dedup/delete")
+async def api_dedup_delete(payload: dict):
+    """清理回收区（返回引导，不直接删）。"""
+    paths = payload.get("paths") or []
+    return dedup.delete_from_recycle(paths)
+
+
+@app.post("/api/dedup/open-recycle")
+async def api_dedup_open_recycle():
+    """打开回收区文件夹。"""
+    import subprocess
+    import sys
+    import os
+    recycle = dedup.RECYCLE_DIR
+    recycle.mkdir(parents=True, exist_ok=True)
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(recycle))
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(recycle)])
+        else:
+            subprocess.Popen(["xdg-open", str(recycle)])
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/dedup/settings")
+async def api_dedup_settings():
+    """查重设置（当前回收区目录）。"""
+    return {"success": True, "recycle_dir": str(dedup.get_recycle_dir())}
+
+
+@app.post("/api/dedup/settings")
+async def api_dedup_save_settings(payload: dict):
+    """保存查重设置（回收区目录）。"""
+    path = payload.get("recycle_dir", "")
+    effective = dedup.set_recycle_dir(path)
+    config.set("dedup.recycle_dir", str(effective))
+    config.save()
+    return {"success": True, "recycle_dir": str(effective)}
 
 
 @app.get("/collect", response_class=HTMLResponse)
@@ -769,14 +1030,17 @@ async def api_validate_cookies():
 
                 yield f"data: {json.dumps({'type': 'progress', 'message': f'验证 [{i+1}/{total}]: {label}'})}\n\n"
 
-                valid = await c.validate_cookie(cookie_str, ck.get("平台", "抶音"))
+                valid = await c.validate_cookie(cookie_str, ck.get("平台", "douyin"))
 
                 from datetime import datetime
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                db.update_cookie(record_id, {
+                update_data = {
                     "状态": "正常" if valid else "失效",
                     "验证时间": now_str,
-                })
+                }
+                if not valid:
+                    update_data["启用"] = 0
+                db.update_cookie(record_id, update_data)
 
                 if valid:
                     valid_count += 1
@@ -1112,7 +1376,7 @@ async def _run_update_collection(task):
             tm.update(task.task_id, status="cancelled")
             return
         share = collection["share_code"]
-        platform = collection.get("平台") or "抖音"
+        platform = collection.get("平台") or "douyin"
         tm.add_log(task.task_id, f"[{i+1}/{len(to_process)}] {share}", "info")
         try:
             resolved_url = await s.collector.resolve_short_url(share, platform)
@@ -1133,7 +1397,7 @@ async def _run_update_collection(task):
                 existing_tags = json.loads(existing.get("标签", "[]")) if existing.get("标签") else []
                 new_tags = json.loads(collection.get("标签", "[]")) if collection.get("标签") else []
                 merged_tags = s.merge_tags(existing_tags, new_tags)
-                s.db.update_collection(existing["record_id"], {"等级": new_level, "标签": json.dumps(merged_tags)})
+                s.db.update_collection(existing["record_id"], {"等级": new_level, "标签": json.dumps(merged_tags, ensure_ascii=False)})
                 s.db.delete_collection(collection["record_id"])
                 success += 1
                 tm.add_log(task.task_id, "OK 合并重复记录", "ok")
@@ -1211,7 +1475,7 @@ async def _run_sync_account(task):
             tm.update(task.task_id, status="cancelled")
             return
         sec_user_id = collection["sec_user_id"]
-        platform = collection.get("平台") or "抖音"
+        platform = collection.get("平台") or "douyin"
         existing_account = existing_accounts_map.get(sec_user_id)
         # 跳过 API 调用的条件：账号表已有 且 获取状态=已获取
         skip_api = existing_account and existing_account.get("获取状态") == "已获取"
@@ -1227,7 +1491,7 @@ async def _run_sync_account(task):
                 merged_note = existing_account.get("备注") or collection.get("备注") or ""
                 s.db.update_account(existing_account["record_id"], {
                     "等级": new_level,
-                    "标签": json.dumps(merged_tags),
+                    "标签": json.dumps(merged_tags, ensure_ascii=False),
                     "备注": merged_note,
                 })
                 # 标记为已生成
@@ -1300,10 +1564,36 @@ async def _run_sync_account(task):
 
 @app.get("/api/tasks")
 async def api_tasks_list():
-    """列出所有任务(running/pending 在前,完成的按时间倒序)"""
+    """列出所有任务(running/pending 在前,完成的按时间倒序)，并附加运行中的采集批次"""
     tm = get_task_manager()
-    return {"tasks": [t.to_dict() for t in tm.list()]}
+    tasks = [t.to_dict() for t in tm.list()]
+    try:
+        active_batches = get_database().list_active_collection_batches()
+    except Exception:
+        active_batches = []
+    for b in active_batches:
+        tasks.append({
+            "task_id": f"batch_{b.get('id', '')}",
+            "type": "collection_batch",
+            "status": b.get("status", "running"),
+            "total": b.get("total_accounts", 0) or 0,
+            "success": b.get("success_accounts", 0) or 0,
+            "failed": b.get("failed_accounts", 0) or 0,
+            "skipped": b.get("skipped_accounts", 0) or 0,
+            "log": [],
+            "started_at": b.get("started_at"),
+            "finished_at": None,
+            "error": "",
+        })
+    return {"tasks": tasks}
 
+
+@app.get("/api/tasks/history")
+async def api_tasks_history(limit: int = 20, offset: int = 0):
+    """历史任务(从 sync_history 表读,支持分页)"""
+    db = get_database()
+    history = db.get_sync_history(limit=limit, offset=offset)
+    return {"history": history, "has_more": len(history) == limit}
 
 @app.get("/api/tasks/{task_id}")
 async def api_task_detail(task_id: str):
@@ -1386,7 +1676,7 @@ async def _run_refresh_accounts(task):
         tm.add_log(task.task_id, f"[{i+1}/{len(to_fetch)}] {old_name}", "info")
         try:
             cookie = cookie_list[i % len(cookie_list)]
-            platform = account.get("平台") or "抖音"
+            platform = account.get("平台") or "douyin"
             info = await col.get_account_info(sec_user_id, platform, cookie)
             nickname = info.get("nickname", "") if info else ""
             if nickname:
@@ -1462,6 +1752,8 @@ class CollectionBatchRequest(BaseModel):
     mode: Literal["incremental", "full"] = "incremental"
     platform: Literal["douyin", "tiktok", "all"] = "douyin"
     preset_id: int | None = None
+    storage_primary_id: str = ""   # 主方案 ID（空=用预设/默认主）
+    storage_secondary_id: str = ""  # 次方案 ID（空=用预设/默认次）
 
 
 class CollectionRetryRequest(BaseModel):
@@ -1475,17 +1767,23 @@ class SingleWorkResolveRequest(BaseModel):
 
 class SingleWorkDownloadRequest(SingleWorkResolveRequest):
     target_dir: str
+    storage_primary_id: str = ""   # 主方案 ID（空=设置页默认主）
+    storage_secondary_id: str = ""  # 次方案 ID（空=设置页默认次）
+    storage_choice: str = "auto"  # 旧版兼容字段：p:<id> 自动迁移为主方案 ID
     filename_template: str = "{create_time} {author} {title}"
     filename_overrides: dict[str, str] = Field(default_factory=dict)
     asset_indexes: list[int] = Field(default_factory=list)
     include_music: bool = False
     include_static_cover: bool = False
     include_dynamic_cover: bool = False
+    folder_mode: bool = False  # 每作品独立子文件夹（与增量 TTD folder_mode 语义一致）
     work: dict | None = None  # 前端可传入已解析的 work 数据，跳过二次解析
 
 
 class SingleWorkRetryRequest(BaseModel):
     target_dir: str = ""
+    storage_primary_id: str = ""
+    storage_secondary_id: str = ""
     filename_template: str = ""
     filename_override: str | None = None
     asset_indexes: list[int] | None = None
@@ -2174,188 +2472,6 @@ async def _run_cloud_sync_full(task):
     tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed}", "info")
 
 
-# --- 采集（使用新数据库）---
-
-@app.post("/api/collect/v2/account")
-async def api_collect_v2_account(request: Request):
-    """整号采集（使用新数据库）- SSE 实时进度"""
-    db = get_database()
-    c = get_collector()
-
-    data = await request.json()
-    account_names = data.get("account_names", "")
-    rating_min = data.get("rating_min", 3)
-
-    # 从数据库获取账号
-    accounts = db.get_all_accounts()
-    if account_names:
-        names = [n.strip() for n in account_names.split(",") if n.strip()]
-        accounts = [a for a in accounts if a.get("账号名称") in names]
-    else:
-        accounts = [a for a in accounts if a.get("等级", 0) >= rating_min and a.get("sec_user_id")]
-
-    if not accounts:
-        return JSONResponse({"success": False, "message": "没有符合条件的账号"}, status_code=400)
-
-    # 按等级排序
-    accounts.sort(key=lambda a: a.get("等级", 0), reverse=True)
-
-    import json
-
-    async def collect_stream():
-        try:
-            yield f"data: {json.dumps({'type': 'start', 'message': '开始采集'})}\n\n"
-            yield f"data: {json.dumps({'type': 'stats', 'total': len(accounts), 'success': 0, 'failed': 0})}\n\n"
-
-            # 获取 Cookie
-            cookies = db.get_enabled_cookies()
-            cookie_list = [ck.get("Cookie", "") for ck in cookies]
-
-            success = 0
-            failed = 0
-
-            for i, account in enumerate(accounts):
-                account_name = account.get("账号名称") or account.get("sec_user_id", "")
-                sec_user_id = account.get("sec_user_id", "")
-                platform = account.get("平台", "抖音")
-                collection_type = account.get("采集类型", "发布")
-
-                yield f"data: {json.dumps({'type': 'progress', 'message': f'采集 [{i+1}/{len(accounts)}]: {account_name}'})}\n\n"
-
-                try:
-                    import time
-                    start_time = time.time()
-
-                    # 获取 Cookie
-                    cookie = cookie_list[i % len(cookie_list)] if cookie_list else ""
-
-                    # 调用 TTD API 采集
-                    result = await c.collect_account(
-                        Account(
-                            name=account_name,
-                            platform=platform,
-                            sec_user_id=sec_user_id,
-                            collection_type=collection_type,
-                        ),
-                        cookie=cookie,
-                    )
-
-                    end_time = time.time()
-
-                    if result.status == "success":
-                        success += 1
-                        # 记录历史
-                        db.add_history({
-                            "账号名称": account_name,
-                            "平台": platform,
-                            "sec_user_id": sec_user_id,
-                            "采集类型": collection_type,
-                            "等级": account.get("等级"),
-                            "状态": "成功",
-                            "作品数": result.works_count,
-                            "开始时间": datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S"),
-                            "结束时间": datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S"),
-                            "耗时秒数": end_time - start_time,
-                        })
-                        yield f"data: {json.dumps({'type': 'log', 'level': 'ok', 'message': f'✅ {account_name}: {result.works_count} 个作品'})}\n\n"
-                    else:
-                        failed += 1
-                        db.add_history({
-                            "账号名称": account_name,
-                            "平台": platform,
-                            "sec_user_id": sec_user_id,
-                            "采集类型": collection_type,
-                            "等级": account.get("等级"),
-                            "状态": "失败",
-                            "作品数": 0,
-                            "开始时间": datetime.fromtimestamp(start_time).strftime("%Y-%m-%d %H:%M:%S"),
-                            "结束时间": datetime.fromtimestamp(end_time).strftime("%Y-%m-%d %H:%M:%S"),
-                            "耗时秒数": end_time - start_time,
-                            "错误信息": result.message,
-                        })
-                        yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {account_name}: {result.message}'})}\n\n"
-
-                    yield f"data: {json.dumps({'type': 'stats', 'total': len(accounts), 'success': success, 'failed': failed})}\n\n"
-
-                except Exception as e:
-                    failed += 1
-                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'❌ {account_name}: {e}'})}\n\n"
-
-            yield f"data: {json.dumps({'type': 'complete', 'success': failed == 0, 'message': f'采集完成: 成功 {success} 个, 失败 {failed} 个', 'total': len(accounts), 'success_count': success, 'failed': failed})}\n\n"
-
-        except Exception as e:
-            logger.error(f"采集失败: {e}")
-            yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'采集失败: {str(e)}', 'total': 0, 'success_count': 0, 'failed': 1})}\n\n"
-
-    return StreamingResponse(
-        collect_stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-# --- 原有采集 ---
-
-@app.post("/api/collect/account")
-async def api_collect_account(
-    account_names: str = Form(""),
-    rating_min: int = Form(3),
-):
-    """整号采集"""
-    s = get_syncer()
-    if not s:
-        return JSONResponse({"success": False, "message": "无可用账号"}, status_code=400)
-
-    accounts = s.load_local_accounts()
-    if account_names:
-        names = [n.strip() for n in account_names.split(",") if n.strip()]
-        accounts = [a for a in accounts if a.name in names and a.enabled]
-    else:
-        accounts = [a for a in accounts if a.enabled and a.rating >= rating_min]
-
-    if not accounts:
-        return JSONResponse({"success": False, "message": "没有符合条件的账号"}, status_code=400)
-
-    accounts.sort(key=lambda a: a.rating, reverse=True)
-
-    c = get_collector()
-    h = get_history()
-    results = await c.collect_batch(
-        accounts,
-        concurrency=config.concurrent_accounts,
-    )
-
-    for r in results:
-        h.add_record({
-            "account_name": r.account_name,
-            "platform": r.platform,
-            "works_count": r.works_count,
-            "success_count": r.works_count if r.status == "success" else 0,
-            "fail_count": 0 if r.status == "success" else 1,
-            "started_at": r.started_at,
-            "finished_at": r.finished_at,
-            "duration_seconds": r.duration,
-            "status": r.status,
-            "error_message": r.message if r.status == "failed" else "",
-        })
-
-    return {
-        "success": True,
-        "message": f"完成 {len(results)} 个账号的采集",
-        "results": [
-            {
-                "name": r.account_name,
-                "platform": r.platform,
-                "status": r.status,
-                "works_count": r.works_count,
-                "message": r.message,
-                "duration": f"{r.duration:.1f}s",
-            }
-            for r in results
-        ],
-    }
-
-
 @app.post("/api/collect/detail")
 async def api_collect_detail(links: str = Form("")):
     """单品采集"""
@@ -2402,30 +2518,32 @@ SINGLE_WORK_TEMPLATE_FIELDS = {"create_time", "author", "title", "id", "type", "
 
 
 def _single_work_preferences() -> dict:
-    prefs = config.single_work
-    templates = prefs.get("templates", []) or []
-    if not templates:
-        templates = [{
-            "id": "default",
-            "name": "默认模板",
-            "template": "{create_time} {author} {title}",
-            "is_default": True,
+    """单作品偏好：优先从存储方案列表生成（存储方案为唯一数据源，兼容旧前端视图）。"""
+    state = sp.ensure_migrated(config)
+    single_state = state.get("single") or {}
+    profiles = sp.get_profiles(single_state)
+    default_nfmt = (single_state.get("default_name_format") or "").strip() or "{create_time} {author} {title}"
+    primary = next((p for p in profiles if p.get("role") == "primary"), None) or (profiles[0] if profiles else None)
+    active_path = (primary.get("path") or "").strip() if primary else ""
+    if not active_path:
+        active_path = (config.single_work.get("download_path") or "").strip()
+    templates = []
+    for i, p in enumerate(profiles):
+        templates.append({
+            "id": p.get("id") or f"p{i}",
+            "name": (p.get("name") or "未命名").strip(),
+            "template": (p.get("name_format") or "").strip() or default_nfmt,
+            "download_path": (p.get("path") or "").strip(),
+            "is_default": p.get("role") == "primary",
             "created_at": "2026-08-16 00:00:00",
             "updated_at": "2026-08-16 00:00:00",
-        }]
-    default_id = prefs.get("default_template_id") or "default"
-    if not any(t.get("id") == default_id for t in templates):
-        default_id = templates[0]["id"]
-    synced = []
-    for tpl in templates:
-        copy = dict(tpl)
-        copy["is_default"] = copy.get("id") == default_id
-        synced.append(copy)
+        })
     return {
-        "download_path": prefs.get("download_path", ""),
-        "recent_dirs": prefs.get("recent_dirs", []) or [],
-        "default_template_id": default_id,
-        "templates": synced,
+        "download_path": active_path,
+        "recent_dirs": (config.single_work.get("recent_dirs") or []) or [],
+        "default_template_id": (primary.get("id") or "default") if primary else "default",
+        "folder_mode": bool((config.single_work.get("folder_mode") or False)),
+        "templates": templates,
     }
 
 
@@ -2436,6 +2554,7 @@ def _save_single_work_preferences(data: dict) -> dict:
         "download_path": str(data.get("download_path") or ""),
         "recent_dirs": [],
         "default_template_id": str(data.get("default_template_id") or ""),
+        "folder_mode": bool(data.get("folder_mode", False)),
         "templates": [],
     }
 
@@ -2465,10 +2584,13 @@ def _save_single_work_preferences(data: dict) -> dict:
             tpl_id = f"tpl_{int(time.time() * 1000)}"
         now = "2026-08-16 00:00:00"
         old = existing_map.get(tpl_id, {})
+        # 每个模板可携带自己的下载目录（空则用全局默认）
+        tpl_dir = str(tpl.get("download_path") or "").strip()
         prefs["templates"].append({
             "id": tpl_id,
             "name": name,
             "template": template,
+            "download_path": tpl_dir,
             "is_default": bool(tpl.get("is_default")),
             "created_at": old.get("created_at") or now,
             "updated_at": now,
@@ -2478,6 +2600,7 @@ def _save_single_work_preferences(data: dict) -> dict:
             "id": "default",
             "name": "默认模板",
             "template": "{create_time} {author} {title}",
+            "download_path": "",
             "is_default": True,
             "created_at": "2026-08-16 00:00:00",
             "updated_at": "2026-08-16 00:00:00",
@@ -2522,6 +2645,7 @@ async def _download_single_work_and_record(
     include_music: bool = False,
     include_static_cover: bool = False,
     include_dynamic_cover: bool = False,
+    folder_mode: bool = False,
     old_history: dict | None = None,
     work: dict | None = None,
 ) -> dict:
@@ -2545,6 +2669,7 @@ async def _download_single_work_and_record(
             "include_music": include_music,
             "include_static_cover": include_static_cover,
             "include_dynamic_cover": include_dynamic_cover,
+            "folder_mode": folder_mode,
         }),
     )
     try:
@@ -2560,6 +2685,7 @@ async def _download_single_work_and_record(
             include_music=include_music,
             include_static_cover=include_static_cover,
             include_dynamic_cover=include_dynamic_cover,
+            folder_mode=folder_mode,
         )
         db.update_single_work_history(
             history_id,
@@ -2689,10 +2815,45 @@ async def api_resolve_single_works_stream(request: SingleWorkResolveRequest):
     )
 
 
+# ========== 单作品下载：存储方案接入 ==========
+
+def _resolve_single_target(target_dir_str: str, primary_id: str = "", secondary_id: str = "") -> tuple[Path | None, str | None]:
+    """单作品下载目录解析：前端指定目录→直接校验；留空→按主/次方案解析（主失败自动切次）。
+
+    primary_id/secondary_id 为空时用设置页的默认主/次。
+    返回 (target, error)。
+    """
+    target_dir_str = (target_dir_str or "").strip()
+    if target_dir_str:
+        target = Path(target_dir_str).expanduser()
+        if not target.exists() or not target.is_dir():
+            return None, "保存目录不存在"
+        return target, None
+    profile, diagnostics = sp.resolve_pair(config, "single", primary_id, secondary_id)
+    if profile is None:
+        reasons = "；".join(f"{d.get('name', '?')}: {d.get('reason', '不可用')}" for d in diagnostics)
+        return None, f"主/次存储方案均不可用（{reasons}）"
+    target = Path(profile["path"]).expanduser()
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return None, f"目录不可创建: {exc}"
+    return target, None
+
+
+def _resolve_single_template(template_str: str, profile: dict | None = None) -> str:
+    """单作品命名模板：前端指定→用前端；否则用生效方案/该套默认。"""
+    template_str = (template_str or "").strip()
+    if template_str:
+        return template_str
+    return sp.resolve_name_format(config, "single", profile)
+
+
 @app.post("/api/collection/works/download")
 async def api_download_single_works(request: SingleWorkDownloadRequest):
+    filename_template = _resolve_single_template(request.filename_template)
     try:
-        unsafe_template = _is_unsafe_filename_template(request.filename_template)
+        unsafe_template = _is_unsafe_filename_template(filename_template)
     except (AttributeError, KeyError, IndexError, ValueError):
         return JSONResponse(
             {"success": False, "message": "命名模板格式无效"},
@@ -2709,10 +2870,10 @@ async def api_download_single_works(request: SingleWorkDownloadRequest):
             {"success": False, "message": "未识别到抖音或 TikTok 作品链接"},
             status_code=400,
         )
-    target = Path(request.target_dir).expanduser()
-    if not target.exists() or not target.is_dir():
+    target, target_err = _resolve_single_target(request.target_dir, request.storage_primary_id, request.storage_secondary_id)
+    if target is None:
         return JSONResponse(
-            {"success": False, "message": "保存目录不存在"},
+            {"success": False, "message": target_err},
             status_code=400,
         )
 
@@ -2731,7 +2892,7 @@ async def api_download_single_works(request: SingleWorkDownloadRequest):
             except Exception as error:
                 result = await _download_single_work_and_record(
                     db, client, ttd_url, link, platform, target,
-                    request.filename_template,
+                    filename_template,
                     work=work,
                 )
                 result["message"] = str(error)
@@ -2741,12 +2902,13 @@ async def api_download_single_works(request: SingleWorkDownloadRequest):
         results.append(
             await _download_single_work_and_record(
                 db, client, ttd_url, link, platform, target,
-                request.filename_template,
+                filename_template,
                 filename_override=override,
                 asset_indexes=request.asset_indexes,
                 include_music=request.include_music,
                 include_static_cover=request.include_static_cover,
                 include_dynamic_cover=request.include_dynamic_cover,
+                folder_mode=request.folder_mode,
                 work=work,
             )
         )
@@ -2756,11 +2918,12 @@ async def api_download_single_works(request: SingleWorkDownloadRequest):
     }
 
 
-@app.post("/api/collection/works/download-stream")
-async def api_download_single_works_stream(request: SingleWorkDownloadRequest):
-    """一键解析+下载 SSE 流式接口，实时推送解析和下载进度"""
+@app.post("/api/collection/works/download-task")
+async def api_download_single_works_task(request: SingleWorkDownloadRequest):
+    """单作品后台下载：创建历史记录并入队，立即返回"""
+    filename_template = _resolve_single_template(request.filename_template)
     try:
-        unsafe_template = _is_unsafe_filename_template(request.filename_template)
+        unsafe_template = _is_unsafe_filename_template(filename_template)
     except (AttributeError, KeyError, IndexError, ValueError):
         return JSONResponse(
             {"success": False, "message": "命名模板格式无效"},
@@ -2777,10 +2940,73 @@ async def api_download_single_works_stream(request: SingleWorkDownloadRequest):
             {"success": False, "message": "未识别到抖音或 TikTok 作品链接"},
             status_code=400,
         )
-    target = Path(request.target_dir).expanduser()
-    if not target.exists() or not target.is_dir():
+    target, target_err = _resolve_single_target(request.target_dir, request.storage_primary_id, request.storage_secondary_id)
+    if target is None:
         return JSONResponse(
-            {"success": False, "message": "保存目录不存在"},
+            {"success": False, "message": target_err},
+            status_code=400,
+        )
+
+    db = get_database()
+    worker = get_download_worker()
+    history_ids = []
+    for link, platform in links:
+        history_id = db.create_single_work_history(
+            work_id="",
+            source_link=link,
+            platform=platform,
+            work_type="",
+            title="",
+            author="",
+            filename_template=filename_template,
+            filename_override="",
+            target_dir=str(target),
+            request_json=json.dumps({
+                "filename_template": filename_template,
+                "asset_indexes": request.asset_indexes or [],
+                "include_music": request.include_music,
+                "include_static_cover": request.include_static_cover,
+                "include_dynamic_cover": request.include_dynamic_cover,
+                "folder_mode": request.folder_mode,
+            }),
+            status="pending",
+        )
+        history_ids.append(history_id)
+        worker.enqueue(history_id)
+
+    return {
+        "success": True,
+        "message": f"已加入后台下载，共 {len(history_ids)} 个作品",
+        "history_ids": history_ids,
+        "total": len(history_ids),
+    }
+
+@app.post("/api/collection/works/download-stream")
+async def api_download_single_works_stream(request: SingleWorkDownloadRequest):
+    """一键解析+下载 SSE 流式接口，实时推送解析和下载进度"""
+    filename_template = _resolve_single_template(request.filename_template)
+    try:
+        unsafe_template = _is_unsafe_filename_template(filename_template)
+    except (AttributeError, KeyError, IndexError, ValueError):
+        return JSONResponse(
+            {"success": False, "message": "命名模板格式无效"},
+            status_code=400,
+        )
+    if unsafe_template:
+        return JSONResponse(
+            {"success": False, "message": "命名模板不能包含路径分隔符或绝对路径"},
+            status_code=400,
+        )
+    links = _extract_single_work_links(request.links)
+    if not links:
+        return JSONResponse(
+            {"success": False, "message": "未识别到抖音或 TikTok 作品链接"},
+            status_code=400,
+        )
+    target, target_err = _resolve_single_target(request.target_dir, request.storage_primary_id, request.storage_secondary_id)
+    if target is None:
+        return JSONResponse(
+            {"success": False, "message": target_err},
             status_code=400,
         )
 
@@ -2822,12 +3048,13 @@ async def api_download_single_works_stream(request: SingleWorkDownloadRequest):
                 override = request.filename_overrides.get(work.get("id", ""), "")
                 result = await _download_single_work_and_record(
                     db, client, ttd_url, link, platform, target,
-                    request.filename_template,
+                    filename_template,
                     filename_override=override,
                     asset_indexes=request.asset_indexes,
                     include_music=request.include_music,
                     include_static_cover=request.include_static_cover,
                     include_dynamic_cover=request.include_dynamic_cover,
+                    folder_mode=request.folder_mode,
                     work=work,
                 )
                 results.append(result)
@@ -2934,7 +3161,7 @@ async def api_proxy_download(url: str, filename: str = "download"):
 
 class QuickAddShareRequest(BaseModel):
     sec_user_id: str
-    platform: str = "抖音"
+    platform: str = "douyin"
     account_name: str = ""
     rating: int = 3
     tags: list[str] = []
@@ -3045,13 +3272,17 @@ async def api_retry_single_work_history(history_id: int, request: SingleWorkRetr
         )
     link = old.get("source_link") or ""
     platform = single_work.detect_single_platform(link) or old.get("platform", "")
-    target_dir = Path(request.target_dir or old.get("target_dir") or str(config.download_path)).expanduser()
-    if not target_dir.exists() or not target_dir.is_dir():
+    target, target_err = _resolve_single_target(
+        request.target_dir or old.get("target_dir") or "",
+        request.storage_primary_id,
+        request.storage_secondary_id,
+    )
+    if target is None:
         return JSONResponse(
-            {"success": False, "message": "保存目录不存在"},
+            {"success": False, "message": target_err},
             status_code=400,
         )
-    template = request.filename_template or old.get("filename_template") or "{create_time} {author} {title}"
+    template = request.filename_template or old.get("filename_template") or _resolve_single_template("")
     try:
         unsafe_template = _is_unsafe_filename_template(template)
     except (AttributeError, KeyError, IndexError, ValueError):
@@ -3079,19 +3310,73 @@ async def api_retry_single_work_history(history_id: int, request: SingleWorkRetr
     include_music = old_request.get("include_music", False)
     include_static_cover = old_request.get("include_static_cover", False)
     include_dynamic_cover = old_request.get("include_dynamic_cover", False)
+    folder_mode = old_request.get("folder_mode", False)
 
     client = get_single_work_client()
     ttd_url = f"http://127.0.0.1:{config.ttd_port}"
     result = await _download_single_work_and_record(
-        db, client, ttd_url, link, platform, target_dir, template,
+        db, client, ttd_url, link, platform, target, template,
         filename_override=filename_override,
         asset_indexes=asset_indexes,
         include_music=include_music,
         include_static_cover=include_static_cover,
         include_dynamic_cover=include_dynamic_cover,
+        folder_mode=folder_mode,
         old_history=old,
     )
     return {"success": result["status"] == "success", "results": [result]}
+
+
+# ========== 存储方案（单作品/增量）==========
+
+@app.get("/api/collection/storage")
+async def api_get_storage_profiles():
+    """获取两套存储方案（single/batch）+ 各自使用方式与默认命名。"""
+    state = sp.ensure_migrated(config)
+    return {"success": True, **state}
+
+
+@app.put("/api/collection/storage")
+async def api_save_storage_profiles(request: Request):
+    """保存两套存储方案（设置页整体提交）。"""
+    data = await request.json()
+    try:
+        state = sp.save_state(config, data)
+    except ValueError as error:
+        return JSONResponse({"success": False, "message": str(error)}, status_code=400)
+    return {"success": True, **state}
+
+
+@app.post("/api/collection/storage/check")
+async def api_check_storage_paths(request: Request):
+    """探测一组路径可用性（本地=存在且可写；远程=带超时可达性）。"""
+    data = await request.json()
+    items = data.get("items") or []
+    timeout = float(data.get("timeout") or 3.0)
+    results = {}
+    for item in items:
+        path = str(item.get("path") or "").strip()
+        ok, reason = sp.check_path(path, timeout)
+        results[item.get("id", path)] = {"ok": ok, "reason": reason}
+    return {"success": True, "results": results}
+
+
+@app.put("/api/collection/storage/profile/{profile_id}")
+async def api_update_storage_profile(profile_id: str, request: Request):
+    """就地更新单个存储方案（采集页可视化编辑命名等场景）。
+    body: { "scope": "single"|"batch", "patch": { "name_format": "...", ... } }"""
+    data = await request.json()
+    scope = str(data.get("scope") or "").strip().lower()
+    patch = data.get("patch") or {}
+    if scope not in ("single", "batch"):
+        return JSONResponse({"success": False, "message": "scope 无效"}, status_code=400)
+    if not isinstance(patch, dict):
+        return JSONResponse({"success": False, "message": "patch 必须是对象"}, status_code=400)
+    updated = sp.update_profile(config, scope, profile_id, patch)
+    if updated is None:
+        return JSONResponse({"success": False, "message": "未找到该方案或更新失败"}, status_code=404)
+    return {"success": True, "profile": updated,
+            "state": sp.ensure_migrated(config)}
 
 
 # ========== 采集方案（预设）==========
@@ -3105,6 +3390,9 @@ class CollectionPresetRequest(BaseModel):
     mode: Literal["incremental", "full"] = "incremental"
     folder_name: str = ""
     name_format: str = ""
+    storage_primary_id: str = ""   # 主方案 ID（空=设置页默认主）
+    storage_secondary_id: str = ""  # 次方案 ID（空=设置页默认次）
+    storage_choice: str = "auto"  # 旧版兼容字段：p:<id> 自动迁移为主方案 ID
     account_created_after: str = ""
     skip_recent_days: int = 0
     is_default: bool = False
@@ -3151,13 +3439,20 @@ async def api_list_collection_presets():
 
 @app.post("/api/collection/presets")
 async def api_create_collection_preset(request: CollectionPresetRequest):
-    preset = get_database().create_collection_preset(request.model_dump())
+    data = request.model_dump()
+    # 旧版 storage_choice=p:<id> 兼容 → 迁移为主方案 ID
+    if not data.get("storage_primary_id") and str(data.get("storage_choice") or "").startswith("p:"):
+        data["storage_primary_id"] = data["storage_choice"][2:]
+    preset = get_database().create_collection_preset(data)
     return {"success": True, "preset": preset}
 
 
 @app.put("/api/collection/presets/{preset_id}")
 async def api_update_collection_preset(preset_id: int, request: CollectionPresetRequest):
-    preset = get_database().update_collection_preset(preset_id, request.model_dump())
+    data = request.model_dump()
+    if not data.get("storage_primary_id") and str(data.get("storage_choice") or "").startswith("p:"):
+        data["storage_primary_id"] = data["storage_choice"][2:]
+    preset = get_database().update_collection_preset(preset_id, data)
     if not preset:
         return JSONResponse({"success": False, "message": "方案不存在"}, status_code=404)
     return {"success": True, "preset": preset}
@@ -3186,13 +3481,23 @@ async def api_get_collection_defaults():
 
 @app.put("/api/collection/defaults")
 async def api_save_collection_defaults(request: Request):
-    """保存增量采集的全局默认设置"""
+    """保存增量采集的全局默认设置（含引擎参数）"""
     data = await request.json()
     folder_name = str(data.get("folder_name") or "").strip()
     name_format = str(data.get("name_format") or "").strip()
     config._data["collection_defaults"] = {
         "folder_name": folder_name,
         "name_format": name_format,
+        # 固化参数
+        "split": "-",
+        "date_format": "%Y%m%d_%H%M%S",
+        # 引擎级参数（设置页可配）
+        "folder_mode": bool(data.get("folder_mode", False)),
+        "music": bool(data.get("music", False)),
+        "dynamic_cover": bool(data.get("dynamic_cover", False)),
+        "static_cover": bool(data.get("static_cover", False)),
+        "max_size": int(data.get("max_size") or 0),
+        "storage_format": str(data.get("storage_format") or ""),
     }
     config.save()
     return {"success": True, "defaults": config.collection_defaults}
@@ -3278,6 +3583,16 @@ async def api_start_collection_batch(request: CollectionBatchRequest):
         preset_name = preset["name"]
         folder_name = preset.get("folder_name", "")
         name_format = preset.get("name_format", "")
+        storage_primary_id = preset.get("storage_primary_id") or ""
+        storage_secondary_id = preset.get("storage_secondary_id") or ""
+        # 旧版 storage_choice 兼容：p:<id> → 主方案 ID
+        legacy_choice = str(preset.get("storage_choice") or "")
+        if not storage_primary_id and legacy_choice.startswith("p:"):
+            storage_primary_id = legacy_choice[2:]
+        if not storage_primary_id:
+            storage_primary_id = request.storage_primary_id or ""
+        if not storage_secondary_id:
+            storage_secondary_id = request.storage_secondary_id or ""
         account_created_after = preset.get("account_created_after", "")
         skip_recent_days = int(preset.get("skip_recent_days", 0))
     else:
@@ -3289,14 +3604,41 @@ async def api_start_collection_batch(request: CollectionBatchRequest):
         preset_name = ""
         folder_name = ""
         name_format = ""
+        storage_primary_id = request.storage_primary_id or ""
+        storage_secondary_id = request.storage_secondary_id or ""
         account_created_after = ""
         skip_recent_days = 0
-    # 方案未设值时使用全局默认
+    # 存储方案接入：主/次双下拉（空=设置页默认主/次；主失败自动切次，整套设置随之切换）
     defaults = config.collection_defaults
+    active_profile = None
+    if not folder_name:
+        active_profile, storage_diags = sp.resolve_pair(
+            config, "batch", storage_primary_id, storage_secondary_id
+        )
+        if active_profile is not None:
+            folder_name = active_profile["path"] or ""
+        elif storage_diags:
+            reasons = "；".join(
+                f"{d.get('name', '?')}: {d.get('reason', '不可用')}" for d in storage_diags
+            )
+            return JSONResponse(
+                {"success": False, "message": f"主/次存储方案均不可用（{reasons}）"},
+                status_code=400,
+            )
     if not folder_name:
         folder_name = defaults.get("folder_name", "Download")
     if not name_format:
-        name_format = defaults.get("name_format", "create_time type nickname desc")
+        name_format = sp.resolve_name_format(config, "batch", active_profile)
+        if not name_format:
+            name_format = defaults.get("name_format", "create_time type nickname desc")
+    # 引擎参数：优先取生效方案的设置，方案未配置时回退全局默认
+    engine_params = sp.resolve_engine_params(config, "batch", active_profile)
+    if engine_params is None:
+        engine_params = {
+            k: defaults.get(k) for k in (
+                "folder_mode", "music", "dynamic_cover", "static_cover", "max_size", "storage_format", "max_pages"
+            ) if k in defaults
+        }
     platforms = (
         ("douyin", "tiktok") if platform == "all" else (platform,)
     )
@@ -3313,6 +3655,7 @@ async def api_start_collection_batch(request: CollectionBatchRequest):
             name_format=name_format,
             account_created_after=account_created_after,
             skip_recent_days=skip_recent_days,
+            engine_params=engine_params,
         )
         return {"success": True, "batches": batches}
     except ValueError as error:
@@ -3586,6 +3929,32 @@ async def api_get_tags():
     return config._data.get("tags", {})
 
 
+@app.get("/api/tags/options")
+async def api_tag_options():
+    """获取所有账号出现过的标签（去重排序），供方案弹窗多选下拉使用"""
+    tags = set()
+    # 1) 标签映射的规范标签（values）
+    for v in (config._data.get("tags") or {}).values():
+        v = str(v).strip()
+        if v:
+            tags.add(v)
+    # 2) 数据库账号实际标签
+    for a in get_database().get_all_accounts():
+        raw = a.get("标签") or ""
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = [raw] if raw.strip() else []
+        else:
+            parsed = raw if isinstance(raw, list) else []
+        for t in parsed:
+            t = str(t).strip()
+            if t:
+                tags.add(t)
+    return {"success": True, "tags": sorted(tags)}
+
+
 @app.post("/api/ensure-fields")
 async def api_ensure_fields(request: Request):
     """检测并创建缺失的云端表格字段，支持指定表类型"""
@@ -3853,6 +4222,7 @@ class ApiV1DownloadRequest(BaseModel):
     include_music: bool = False
     include_static_cover: bool = False
     include_dynamic_cover: bool = False
+    folder_mode: bool = False  # 每作品独立子文件夹（与设置页开关一致）
     resolve_mode: str = "auto"
 
 
@@ -3873,9 +4243,13 @@ async def api_v1_download_works(request: Request, body: ApiV1DownloadRequest):
             status_code=400,
         )
 
-    target_str = body.target_dir or str(config.download_path)
-    target = Path(target_str).expanduser()
-    target.mkdir(parents=True, exist_ok=True)
+    target, target_err = _resolve_single_target(body.target_dir)
+    if target is None:
+        return JSONResponse(
+            {"success": False, "message": target_err},
+            status_code=400,
+        )
+    filename_template = _resolve_single_template(body.filename_template)
 
     resolve_mode = body.resolve_mode or config.api_config.get("default_resolve_mode", "auto")
     db = get_database()
@@ -3893,10 +4267,11 @@ async def api_v1_download_works(request: Request, body: ApiV1DownloadRequest):
             )
             result = await _download_single_work_and_record(
                 db, client, ttd_url, link, platform, target,
-                body.filename_template,
+                filename_template,
                 include_music=body.include_music,
                 include_static_cover=body.include_static_cover,
                 include_dynamic_cover=body.include_dynamic_cover,
+                folder_mode=body.folder_mode,
                 work=work,
             )
             results.append(result)

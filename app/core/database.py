@@ -91,6 +91,8 @@ class Database:
                     启用 BOOLEAN DEFAULT 1,
                     备注 TEXT,
                     验证时间 DATETIME,
+                    last_used_at DATETIME,
+                    use_count INTEGER DEFAULT 0,
                     同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     is_deleted BOOLEAN DEFAULT 0,
@@ -226,6 +228,9 @@ class Database:
                     mode TEXT NOT NULL DEFAULT 'incremental',
                     folder_name TEXT NOT NULL DEFAULT '',
                     name_format TEXT NOT NULL DEFAULT '',
+                    storage_choice TEXT NOT NULL DEFAULT 'auto',
+                    storage_primary_id TEXT NOT NULL DEFAULT '',
+                    storage_secondary_id TEXT NOT NULL DEFAULT '',
                     is_default INTEGER NOT NULL DEFAULT 0,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -360,12 +365,19 @@ class Database:
                 ("last_collected_at", "DATETIME"),
                 ("collect_window_days", "INTEGER"),
             ],
+            "cookie_cache": [
+                ("last_used_at", "DATETIME"),
+                ("use_count", "INTEGER DEFAULT 0"),
+            ],
             "collection_batches": [
                 ("preset_name", "TEXT"),
             ],
             "collection_presets": [
                 ("folder_name", "TEXT NOT NULL DEFAULT ''"),
                 ("name_format", "TEXT NOT NULL DEFAULT ''"),
+                ("storage_choice", "TEXT NOT NULL DEFAULT 'auto'"),
+                ("storage_primary_id", "TEXT NOT NULL DEFAULT ''"),
+                ("storage_secondary_id", "TEXT NOT NULL DEFAULT ''"),
                 ("account_created_after", "TEXT NOT NULL DEFAULT ''"),
                 ("skip_recent_days", "INTEGER NOT NULL DEFAULT 0"),
             ],
@@ -516,6 +528,18 @@ class Database:
                 conn.execute(f"INSERT INTO account_cache ({col_list}) SELECT {col_list} FROM account_cache_old_v3")
                 conn.execute("DROP TABLE account_cache_old_v3")
 
+
+
+                # 平台值规范化：抖音/小红书等中文与大小写写法统一为 douyin / tiktok / xhs
+        from .platform_utils import normalize_platform
+        for _tbl in ("share_cache", "account_cache", "cookie_cache"):
+            _cols = [r[1] for r in conn.execute(f"PRAGMA table_info({_tbl})").fetchall()]
+            if "平台" not in _cols:
+                continue
+            for _rid, _pf in conn.execute(f'SELECT record_id, 平台 FROM {_tbl}').fetchall():
+                _norm = normalize_platform(_pf)
+                if _norm and _norm != _pf:
+                    conn.execute(f'UPDATE {_tbl} SET 平台 = ? WHERE record_id = ?', (_norm, _rid))
 
     def _connect(self) -> sqlite3.Connection:
         """Create one SQLite connection with the project's standard pragmas."""
@@ -894,6 +918,7 @@ class Database:
         filename_override: str,
         target_dir: str,
         request_json: str,
+        status: str = "running",
     ) -> int:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self._connect() as conn:
@@ -903,11 +928,11 @@ class Database:
                 (work_id, source_link, platform, work_type, title, author,
                  filename_template, filename_override, target_dir,
                  request_json, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (work_id, source_link, platform, work_type, title, author,
                  filename_template, filename_override, target_dir,
-                 request_json, now, now),
+                 request_json, status, now, now),
             )
             conn.commit()
             return cursor.lastrowid
@@ -989,6 +1014,16 @@ class Database:
     def mark_cookie_invalid(self, record_id: str) -> bool:
         """标记 Cookie 为失效"""
         return self.update_cookie(record_id, {"状态": "失效"})
+
+    def record_cookie_usage(self, record_id: str) -> None:
+        """记录 Cookie 被使用一次（use_count+1，更新 last_used_at）。"""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE cookie_cache SET use_count = COALESCE(use_count, 0) + 1, "
+                "last_used_at = ? WHERE record_id = ?",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id),
+            )
+            conn.commit()
 
     def get_cookie_by_id(self, record_id: str) -> Optional[dict]:
         """根据记录ID获取 Cookie 记录"""
@@ -1219,8 +1254,15 @@ class Database:
                     where_parts.append(f'CAST("{filter_field}" AS TEXT) = ?')
                     params.append(str(filter_value))
                 elif filter_op == "contains":
-                    where_parts.append(f'CAST("{filter_field}" AS TEXT) LIKE ?')
-                    params.append(f"%{filter_value}%")
+                    if filter_field == "标签":
+                        # 标签可能存为 Unicode 转义 JSON（\uXXXX），中文原值与转义形式都匹配
+                        escaped = str(filter_value).encode('unicode_escape').decode('ascii')
+                        where_parts.append(f'(CAST("{filter_field}" AS TEXT) LIKE ? OR CAST("{filter_field}" AS TEXT) LIKE ?)')
+                        params.append(f"%{filter_value}%")
+                        params.append(f"%{escaped}%")
+                    else:
+                        where_parts.append(f'CAST("{filter_field}" AS TEXT) LIKE ?')
+                        params.append(f"%{filter_value}%")
             where = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
 
             # 构造 ORDER BY
@@ -1589,18 +1631,18 @@ class Database:
             conn.commit()
             return cursor.lastrowid
 
-    def get_sync_history(self, task_type: Optional[str] = None, limit: int = 50) -> list[dict]:
-        """获取同步历史记录。可按 task_type 过滤，默认返回全部。"""
+    def get_sync_history(self, task_type: Optional[str] = None, limit: int = 50, offset: int = 0) -> list[dict]:
+        """获取同步历史记录。可按 task_type 过滤，支持分页。"""
         with self._connect() as conn:
             if task_type:
                 rows = conn.execute(
-                    "SELECT * FROM sync_history WHERE task_type = ? ORDER BY created_at DESC LIMIT ?",
-                    (task_type, limit)
+                    "SELECT * FROM sync_history WHERE task_type = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (task_type, limit, offset)
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM sync_history ORDER BY created_at DESC LIMIT ?",
-                    (limit,)
+                    "SELECT * FROM sync_history ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (limit, offset)
                 ).fetchall()
             return [dict(row) for row in rows]
 
@@ -1617,10 +1659,10 @@ class Database:
     # ===== 采集方案（预设）=====
 
     def list_collection_presets(self) -> list[dict]:
-        """返回所有采集方案，默认方案排首位，其余按创建时间排序。"""
+        """返回所有采集方案，按创建时间排序。"""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM collection_presets ORDER BY is_default DESC, created_at ASC"
+                "SELECT * FROM collection_presets ORDER BY created_at ASC"
             ).fetchall()
             return [dict(row) for row in rows]
 
@@ -1638,9 +1680,10 @@ class Database:
                 """
                 INSERT INTO collection_presets
                     (name, rating_min, tags, account_names, platform, mode,
-                     folder_name, name_format, account_created_after, skip_recent_days,
+                     folder_name, name_format, storage_choice, storage_primary_id, storage_secondary_id,
+                     account_created_after, skip_recent_days,
                      is_default, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data.get("name", ""),
@@ -1651,6 +1694,9 @@ class Database:
                     data.get("mode", "incremental"),
                     str(data.get("folder_name", "")),
                     str(data.get("name_format", "")),
+                    str(data.get("storage_choice", "auto")),
+                    str(data.get("storage_primary_id", "")),
+                    str(data.get("storage_secondary_id", "")),
                     str(data.get("account_created_after", "")),
                     int(data.get("skip_recent_days", 0)),
                     1 if data.get("is_default") else 0,
@@ -1671,6 +1717,9 @@ class Database:
             "mode": data.get("mode"),
             "folder_name": data.get("folder_name"),
             "name_format": data.get("name_format"),
+            "storage_choice": data.get("storage_choice"),
+            "storage_primary_id": data.get("storage_primary_id"),
+            "storage_secondary_id": data.get("storage_secondary_id"),
             "account_created_after": data.get("account_created_after"),
             "skip_recent_days": int(data["skip_recent_days"]) if "skip_recent_days" in data else None,
             "is_default": 1 if data.get("is_default") else None,

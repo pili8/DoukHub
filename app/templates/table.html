@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}表浏览 - DoukHub{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31/styles/ag-grid.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31/styles/ag-theme-quartz.css">
+<link rel="stylesheet" href="/static/vendor/ag-grid/styles/ag-grid.css">
+<link rel="stylesheet" href="/static/vendor/ag-grid/styles/ag-theme-quartz.css">
 
 <div class="page-header">
     <h2>表浏览</h2>
@@ -101,6 +101,13 @@
     <div class="modal-box" style="max-width:800px;">
         <div class="modal-header"><h3><i class="ph ph-copy"></i> 重复记录检测 - <span id="dup-modal-table-name"></span></h3><button onclick="closeDuplicatesModal()" class="modal-close"><i class="ph ph-x"></i></button></div>
         <div id="duplicates-modal-body"></div>
+    </div>
+</div>
+
+<div id="save-preset-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width:480px;">
+        <div class="modal-header"><h3><i class="ph ph-floppy-disk"></i> 保存为采集方案</h3><button onclick="closeSavePresetModal()" class="modal-close"><i class="ph ph-x"></i></button></div>
+        <div id="save-preset-body"></div>
     </div>
 </div>
 
@@ -615,6 +622,14 @@
     background: rgba(148, 163, 184, 0.06) !important;
     border-top: 2px solid rgba(148, 163, 184, 0.3);
 }
+.ag-theme-quartz .ag-header-cell.col-cat-credential {
+    background: rgba(251, 191, 36, 0.08) !important;
+    border-top: 2px solid rgba(251, 191, 36, 0.5);
+}
+.ag-theme-quartz .ag-header-cell.col-cat-status {
+    background: rgba(167, 139, 250, 0.08) !important;
+    border-top: 2px solid rgba(167, 139, 250, 0.5);
+}
 
 /* ===== 分类图例 ===== */
 .tbl-cat-legend {
@@ -637,6 +652,8 @@
 .tbl-cat-dot.col-cat-fetched { background: rgba(74, 222, 128, 0.8); color: rgba(74, 222, 128, 0.4); }
 .tbl-cat-dot.col-cat-control { background: rgba(167, 139, 250, 0.8); color: rgba(167, 139, 250, 0.4); }
 .tbl-cat-dot.col-cat-system { background: rgba(148, 163, 184, 0.6); color: rgba(148, 163, 184, 0.3); }
+.tbl-cat-dot.col-cat-credential { background: rgba(251, 191, 36, 0.8); color: rgba(251, 191, 36, 0.4); }
+.tbl-cat-dot.col-cat-status { background: rgba(167, 139, 250, 0.8); color: rgba(167, 139, 250, 0.4); }
 
 /* ===== 表图标颜色 ===== */
 .tab-icon.coll { color: var(--accent); }
@@ -736,12 +753,45 @@ input[type="checkbox"]:disabled {
     .tbl-action-group { justify-content: flex-end; }
     .tbl-grid { height: calc(100vh - 380px); }
 }
+/* 列头菜单按钮：默认隐藏，悬停列头显示；有排序/筛选时常驻 */
+.tbl-header-menu-btn { opacity: 0; transition: opacity .12s, color .12s; }
+.ag-header-cell:hover .tbl-header-menu-btn,
+.ag-header-cell:focus-within .tbl-header-menu-btn { opacity: 1; }
+.tbl-header-menu-btn.is-active { opacity: 1; }
+/* 存为方案弹窗：整体容器 */
+.sp-body { display: flex; flex-direction: column; gap: 14px; }
+/* 存为方案弹窗：保存方式选项 */
+.save-preset-opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px; border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm); cursor: pointer; font-size: 13px;
+  background: var(--bg-input);
+  transition: border-color .12s, background .12s, box-shadow .12s;
+}
+.save-preset-opt:hover { border-color: var(--accent); }
+.save-preset-opt:has(input:checked) {
+  border-color: var(--accent);
+  background: rgba(45, 212, 191, 0.07);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.save-preset-opt input[type="radio"] { accent-color: var(--accent); width: 15px; height: 15px; flex-shrink: 0; margin: 0; }
+.save-preset-opt .sp-opt-sub { font-size: 11.5px; color: var(--text-muted); margin-left: auto; }
+/* 存为方案弹窗：说明提示框 */
+.sp-hint {
+  display: flex; gap: 8px; align-items: flex-start;
+  font-size: 12px; color: var(--text-muted); line-height: 1.65;
+  background: var(--bg-muted);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.sp-hint i { color: var(--accent); font-size: 14px; margin-top: 1px; flex-shrink: 0; }
 </style>
 
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@31/dist/ag-grid-community.min.js"></script>
+<script src="/static/vendor/ag-grid/ag-grid-community.min.js"></script>
 <script>
     // =========================================================================
     // SPA 清理：由 loadPage 在替换 DOM 前调用，确保 Grid 在 DOM 仍挂载时被销毁
@@ -769,23 +819,17 @@ input[type="checkbox"]:disabled {
     var TABLE_NAMES = {
         'share_cache': '分享表',
         'account_cache': '账号表',
-        'cookie_cache': 'Cookie表',
-        'collection_history': '采集历史',
-        'scheduled_tasks': '定时任务'
+        'cookie_cache': 'Cookie表'
     };
     var TABLE_ICONS = {
         'share_cache': 'ph-clipboard-text',
         'account_cache': 'ph-user',
-        'cookie_cache': 'ph-cookie',
-        'collection_history': 'ph-clock-counter-clockwise',
-        'scheduled_tasks': 'ph-calendar-clock'
+        'cookie_cache': 'ph-cookie'
     };
     var TABLE_COLORS = {
         'share_cache': 'coll',
         'account_cache': 'acc',
-        'cookie_cache': 'ck',
-        'collection_history': 'hist',
-        'scheduled_tasks': 'task'
+        'cookie_cache': 'ck'
     };
     var PAGE_SIZE = parseInt(localStorage.getItem('doukhub-table-page-size')) || 50;
 
@@ -797,6 +841,7 @@ input[type="checkbox"]:disabled {
 
     var TABLE_MODAL_ALWAYS_READONLY = {
         'account_cache': ['链接', '账号名称', '粉丝数', '作品数', '签名', '头像'],
+        'cookie_cache': ['状态', '验证时间', 'last_used_at', 'use_count'],
     };
 
     var TABLE_MODAL_READONLY_ON_EDIT = {
@@ -809,7 +854,7 @@ var FIELD_EDITORS = {
 '等级': { editor: 'agSelectCellEditor', params: { values: [1, 2, 3, 4, 5] } },
 '采集类型': { editor: 'agSelectCellEditor', params: { values: ['发布', '喜欢'] } },
 '状态': { editor: 'agSelectCellEditor', params: { values: ['正常', '失效'] } },
-'平台': { editor: 'agSelectCellEditor', params: { values: ['抖音', 'TikTok', '小红书'] } },
+'平台': { editor: 'agSelectCellEditor', params: { values: ['douyin', 'tiktok', 'xhs'] } },
 '解析状态': { editor: 'agSelectCellEditor', params: { values: ['待解析', '已就绪', '已生成', '已删除', '解析失败'] } },
 '获取状态': { editor: 'agSelectCellEditor', params: { values: ['待获取', '已获取', '获取失败'] } },
 '备注': { editor: 'agTextCellEditor' },
@@ -825,27 +870,25 @@ var FIELD_EDITORS = {
     var FIELD_DISPLAY_NAMES = {
         'share_code': 'share',
         'created_at': '创建时间',
+        'last_used_at': '最后使用时间',
+        'use_count': '使用次数',
     };
 
     var TABLE_EDITABLE_FIELDS = {
         'account_cache': ['平台', '等级', '标签', '备注', '获取状态', '采集类型', 'collect_window_days', '启用'],
         'share_cache': ['share_code', '平台', '等级', '标签', '备注', '解析状态', '账号名称', '粉丝数', '作品数'],
-        'cookie_cache': ['状态', '启用', '备注', '平台'],
-        'collection_history': [],
-        'scheduled_tasks': ['任务名称', 'Cron表达式', '等级筛选', '启用'],
+        'cookie_cache': ['平台', '启用', '备注'],
     };
 
     var TABLE_HAS_ACTIONS = {
         'account_cache': true,
         'share_cache': true,
         'cookie_cache': true,
-        'collection_history': false,
-        'scheduled_tasks': false,
     };
 
     var FIELD_WIDTHS = {
         '等级': 80, '启用': 70, '采集类型': 90, '平台': 80, '状态': 80,
-        '备注': 150, 'Cookie': 200, '链接': 200, '头像': 60, '标签': 150,
+        '备注': 150, 'Cookie': 240, '链接': 200, '头像': 60, '标签': 150,
         '签名': 200, 'sec_user_id': 200, 'record_id': 200, '同步时间': 140,
         'created_at': 140, '粉丝数': 90, '作品数': 90, '账号名称': 120,
         '获取状态': 90, '解析状态': 90, 'synced': 70,
@@ -873,6 +916,11 @@ var FIELD_EDITORS = {
             '账号名称', '粉丝数', '作品数',
             'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
         ],
+        'cookie_cache': [
+            '启用', '平台', '备注',
+            'Cookie', '状态', '验证时间', 'last_used_at', 'use_count',
+            'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
+        ],
     };
 
     var FIELD_CATEGORIES = {
@@ -893,6 +941,14 @@ var FIELD_EDITORS = {
             'created_at': 'system', 'record_id': 'system', '同步时间': 'system',
             'synced': 'system', 'local_updated_at': 'system', 'is_deleted': 'system', 'deleted_at': 'system',
         },
+        'cookie_cache': {
+            'Cookie': 'credential',
+            '状态': 'credential',
+            '验证时间': 'credential', 'last_used_at': 'credential', 'use_count': 'credential',
+            '平台': 'control', '启用': 'control', '备注': 'control',
+            'created_at': 'system', '同步时间': 'system', 'record_id': 'system',
+            'is_deleted': 'system', 'deleted_at': 'system', 'synced': 'system', 'local_updated_at': 'system',
+        },
     };
 
     function getFieldCategory(tableName, fieldName) {
@@ -900,16 +956,36 @@ var FIELD_EDITORS = {
         return cats ? (cats[fieldName] || null) : null;
     }
 
+    var TABLE_LEGENDS = {
+        'share_cache': [
+            { cls: 'original', label: '原始' },
+            { cls: 'edit', label: '分类' },
+            { cls: 'control', label: '控制' },
+            { cls: 'fetched', label: '账号' },
+            { cls: 'system', label: '系统' },
+        ],
+        'account_cache': [
+            { cls: 'original', label: '原始' },
+            { cls: 'edit', label: '分类' },
+            { cls: 'control', label: '控制' },
+            { cls: 'fetched', label: '账号' },
+            { cls: 'system', label: '系统' },
+        ],
+        'cookie_cache': [
+            { cls: 'credential', label: '凭证' },
+            { cls: 'control', label: '用户控制' },
+            { cls: 'system', label: '系统' },
+        ],
+    };
+
     function renderCategoryLegend(tableName) {
         const legend = document.getElementById('tbl-cat-legend');
         if (!legend) return;
-        if (!FIELD_CATEGORIES[tableName]) { legend.innerHTML = ''; return; }
-        legend.innerHTML =
-            '<span class="tbl-cat-item"><span class="tbl-cat-dot col-cat-original"></span>原始</span>' +
-            '<span class="tbl-cat-item"><span class="tbl-cat-dot col-cat-edit"></span>分类</span>' +
-            '<span class="tbl-cat-item"><span class="tbl-cat-dot col-cat-control"></span>控制</span>' +
-            '<span class="tbl-cat-item"><span class="tbl-cat-dot col-cat-fetched"></span>账号</span>' +
-            '<span class="tbl-cat-item"><span class="tbl-cat-dot col-cat-system"></span>系统</span>';
+        const items = TABLE_LEGENDS[tableName];
+        if (!items) { legend.innerHTML = ''; return; }
+        legend.innerHTML = items.map(function(it) {
+            return '<span class="tbl-cat-item"><span class="tbl-cat-dot col-cat-' + it.cls + '"></span>' + it.label + '</span>';
+        }).join('');
     }
 
     // =========================================================================
@@ -1060,8 +1136,8 @@ return el;
     function cookieRenderer(params) {
         const val = params.value;
         if (!val) return '<span style="color: var(--text-muted);">-</span>';
-        let display = val.length > 30 ? val.substring(0, 30) + '…' : val;
-        return '<span title="' + val.replace(/"/g, '&quot;') + '" style="font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);">' + display + '</span>';
+        const display = val.length > 30 ? val.substring(0, 30) + '…' : val;
+        return '<span title="' + String(val).replace(/"/g, '&quot;') + '" style="font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);">' + display + '</span>';
     }
 
     function errorRenderer(params) {
@@ -1083,16 +1159,34 @@ return el;
     function actionsRenderer(params) {
         const recordId = params.data.record_id || String(params.data.ID || '');
         if (!recordId) return '';
-        if (currentTable === 'collection_history') return '<span style="color: var(--text-muted);">-</span>';
         const safeId = recordId.replace(/'/g, "\\'");
         let html = '<div style="display: flex; gap: 4px; align-items: center;">';
         html += '<button class="tbl-action-btn tbl-action-edit" onclick="openAddModal(\'' + safeId + '\')" title="编辑"><i class="ph ph-pencil-simple"></i></button>';
-        if (currentTable !== 'scheduled_tasks') {
-            html += '<button class="tbl-action-btn tbl-action-delete" onclick="deleteRecord(\'' + currentTable + '\', \'' + safeId + '\')" title="删除"><i class="ph ph-trash"></i></button>';
+        if (currentTable === 'cookie_cache') {
+            html += '<button class="tbl-action-btn" onclick="copyCookieValue(\'' + safeId + '\')" title="复制 Cookie"><i class="ph ph-copy"></i></button>';
         }
+        html += '<button class="tbl-action-btn tbl-action-delete" onclick="deleteRecord(\'' + currentTable + '\', \'' + safeId + '\')" title="删除"><i class="ph ph-trash"></i></button>';
         html += '</div>';
         return html;
     }
+
+async function copyCookieValue(recordId) {
+    let val = '';
+    if (gridApi) {
+        gridApi.forEachNode(function(node) {
+            if ((node.data.record_id || String(node.data.ID || '')) === recordId) {
+                val = node.data.Cookie || '';
+            }
+        });
+    }
+    if (!val) { showToast('未找到 Cookie', 'error'); return; }
+    try {
+        await navigator.clipboard.writeText(val);
+        showToast('Cookie 已复制', 'success');
+    } catch (e) {
+        showToast('复制失败，请手动复制', 'error');
+    }
+}
 
 // sec_user_id 链接渲染器：仅在分享表中使用，点击跳转到账号表并高亮对应行
 function secUserIdLinkRenderer(params) {
@@ -1133,6 +1227,8 @@ var FIELD_RENDERERS = {
         }
         _render() {
             const isSorted = currentSortField === this.field;
+            const hasFilter = currentFilterField === this.field;
+            const btnActive = isSorted || hasFilter;
             const order = isSorted ? currentSortOrder : '';
             const arrow = order === 'asc' ? '↑' : (order === 'desc' ? '↓' : '');
             const safeName = htmlEscape(this.displayName);
@@ -1142,8 +1238,8 @@ var FIELD_RENDERERS = {
                 safeName + '">' + safeName +
                 (isSorted ? '<span style="color:var(--accent);margin-left:4px;font-weight:700;">' + arrow + '</span>' : '') +
                 '</span>' +
-                '<button class="tbl-header-menu-btn" data-field="' + safeField + '" title="菜单：排序/筛选" style="' +
-                'flex-shrink:0;border:none;background:transparent;color:var(--text-muted);cursor:pointer;padding:2px 4px;border-radius:4px;font-size:13px;line-height:1;' +
+                '<button class="tbl-header-menu-btn' + (btnActive ? ' is-active' : '') + '" data-field="' + safeField + '" title="菜单：排序/筛选" style="' +
+                'flex-shrink:0;border:none;background:transparent;color:' + (btnActive ? 'var(--accent)' : 'var(--text-muted)') + ';cursor:pointer;padding:2px 4px;border-radius:4px;font-size:13px;line-height:1;' +
                 '">⋮</button>';
             this.gui.querySelector('.tbl-header-menu-btn').addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1162,6 +1258,27 @@ var FIELD_RENDERERS = {
     // 自写列菜单（排序 + 筛选）
     // =========================================================================
     var colMenuEl = null;
+
+    // 收集当前表某字段的去重值（用于筛选下拉选项）
+    function collectDistinctValues(field) {
+        const vals = new Set();
+        if (gridApi) {
+            gridApi.forEachNode(function(node) {
+                if (!node.data || node.data[field] == null) return;
+                let v = node.data[field];
+                if (field === '标签') {
+                    if (typeof v === 'string') {
+                        try { const p = JSON.parse(v); if (Array.isArray(p)) v = p; } catch (e) {}
+                    }
+                    if (Array.isArray(v)) { v.forEach(function(t) { vals.add(String(t)); }); }
+                    else if (v) { vals.add(String(v)); }
+                } else {
+                    vals.add(String(v));
+                }
+            });
+        }
+        return Array.from(vals).sort();
+    }
 
     function openColMenu(event, field) {
         closeColMenu();
@@ -1221,15 +1338,35 @@ var FIELD_RENDERERS = {
         filterHead.style.cssText = 'font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;padding:2px 6px;';
         filterRow.appendChild(filterHead);
 
+        const ctrlStyle = 'padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-xs);font-size:12px;background:var(--bg-input);color:var(--text-primary);font-family:inherit;';
         const opSelect = document.createElement('select');
-        opSelect.style.cssText = 'padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-xs);font-size:12px;background:var(--bg-input);color:var(--text-primary);font-family:inherit;';
-        opSelect.innerHTML = '<option value="contains">包含</option><option value="equals">等于</option>';
-        if (currentFilterField === field && currentFilterOp) opSelect.value = currentFilterOp;
+        opSelect.style.cssText = ctrlStyle;
 
-        const valInput = document.createElement('input');
-        valInput.type = 'text';
-        valInput.placeholder = '筛选值…';
-        valInput.style.cssText = 'padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-xs);font-size:12px;background:var(--bg-input);color:var(--text-primary);font-family:inherit;';
+        const isRating = field === '等级' || field === '等级筛选';
+        const isTag = field === '标签';
+        let valInput;
+        if (isRating) {
+            opSelect.innerHTML = '<option value="equals">等于</option>';
+            valInput = document.createElement('select');
+            valInput.style.cssText = ctrlStyle;
+            valInput.innerHTML = '<option value="">选择等级…</option>' + [1, 2, 3, 4, 5].map(function(n) { return '<option value="' + n + '">' + n + ' 星</option>'; }).join('');
+        } else if (isTag) {
+            opSelect.innerHTML = '<option value="contains">包含</option>';
+            valInput = document.createElement('select');
+            valInput.style.cssText = ctrlStyle;
+            const tags = collectDistinctValues('标签');
+            if (currentFilterField === field && currentFilterValue && tags.indexOf(currentFilterValue) < 0) {
+                tags.push(currentFilterValue);
+            }
+            valInput.innerHTML = '<option value="">选择标签…</option>' + tags.map(function(tg) { return '<option value="' + htmlEscape(tg) + '">' + htmlEscape(tg) + '</option>'; }).join('');
+        } else {
+            opSelect.innerHTML = '<option value="contains">包含</option><option value="equals">等于</option>';
+            valInput = document.createElement('input');
+            valInput.type = 'text';
+            valInput.placeholder = '筛选值…';
+            valInput.style.cssText = ctrlStyle;
+        }
+        if (currentFilterField === field && currentFilterOp) opSelect.value = currentFilterOp;
         if (currentFilterField === field) valInput.value = currentFilterValue || '';
 
         const btnRow = document.createElement('div');
@@ -1260,7 +1397,7 @@ var FIELD_RENDERERS = {
 
         document.body.appendChild(menu);
         colMenuEl = menu;
-        if (valInput.value) valInput.focus();
+        if (valInput.tagName === 'INPUT' && valInput.value) valInput.focus();
     }
 
     function closeColMenu() {
@@ -1460,8 +1597,8 @@ var FIELD_RENDERERS = {
                 field: field.name,
                 headerName: FIELD_DISPLAY_NAMES[field.name] || field.name,
                 sortable: true,
-                filter: true,
-                floatingFilter: true,
+                filter: false,
+                floatingFilter: false,
                 resizable: true,
                 editable: isEditable,
                 width: _getSavedWidth(tableName, field.name, FIELD_WIDTHS[field.name] || 120),
@@ -1560,7 +1697,7 @@ var FIELD_RENDERERS = {
                 sortable: true,
                 resizable: true,
                 minWidth: 50,
-                floatingFilter: true,
+                floatingFilter: false,
             },
                 rowHeight: 40,
                 headerHeight: 40,
@@ -1822,38 +1959,112 @@ var FIELD_RENDERERS = {
     function clearSelection() { if (gridApi) gridApi.deselectAll(); updateBatchToolbar(); }
 
     /**
-     * 将选中的账号行保存为采集方案。
-     * 提取每行的 sec_user_id，拼接后作为 account_names 字段存入方案。
+     * 将选中的账号行保存为采集方案（弹窗确认：可保存筛选条件或账号列表）。
      */
-    async function saveSelectionAsPreset() {
+    var _savePresetSecIds = [];
+
+    function saveSelectionAsPreset() {
         if (!gridApi) return;
         const rows = gridApi.getSelectedRows();
         if (!rows.length) return;
-        const secUserIds = rows
-            .map(r => r.sec_user_id)
-            .filter(v => v && String(v).trim());
-        if (!secUserIds.length) {
+        _savePresetSecIds = rows.map(r => r.sec_user_id).filter(v => v && String(v).trim());
+        if (!_savePresetSecIds.length) {
             showToast('选中的行缺少 sec_user_id，无法保存', 'error');
             return;
         }
-        const name = '从表浏览选择-' + new Date().toLocaleDateString('zh-CN');
+        openSavePresetModal();
+    }
+
+    // 当前表浏览筛选条件 → 采集方案条件的映射（等级/标签/平台）
+    function _presetCondition() {
+        if (!currentFilterField || !currentFilterValue) return null;
+        const field = currentFilterField;
+        const value = String(currentFilterValue).trim();
+        if (!value) return null;
+        if (field === '等级') {
+            const n = parseInt(value);
+            if (n >= 1 && n <= 5) return { label: '等级 ≥ ' + n + ' 星', data: { rating_min: n } };
+        }
+        if (field === '标签') {
+            return { label: '标签包含「' + value + '」', data: { tags: value } };
+        }
+        if (field === '平台') {
+            const pmap = { '抖音': 'douyin', 'TikTok': 'tiktok', '小红书': 'xhs', 'tiktok': 'tiktok', 'douyin': 'douyin', 'xhs': 'xhs' };
+            const pf = pmap[value];
+            if (pf) return { label: '平台 = ' + value, data: { platform: pf } };
+        }
+        return null;
+    }
+
+    function openSavePresetModal() {
+        const modal = document.getElementById('save-preset-modal');
+        const body = document.getElementById('save-preset-body');
+        if (!modal || !body) return;
+        const cond = _presetCondition();
+        const secCount = _savePresetSecIds.length;
+        const defName = cond ? cond.label : ('从表浏览-' + secCount + '个账号');
+
+        let html = '<div class="sp-body">';
+        html += '<div class="tbl-form-row"><label class="tbl-form-label">方案名称</label>';
+        html += '<input type="text" id="save-preset-name" class="tbl-form-input" value="' + htmlEscape(defName) + '" autocomplete="off"></div>';
+
+        html += '<div class="tbl-form-row" style="align-items:flex-start;"><label class="tbl-form-label" style="padding-top:11px;">保存方式</label>';
+        html += '<div style="flex:1;display:flex;flex-direction:column;gap:8px;">';
+        if (cond) {
+            html += '<label class="save-preset-opt"><input type="radio" name="save-preset-mode" value="condition" checked><span>按筛选条件</span><span class="sp-opt-sub">' + htmlEscape(cond.label) + '</span></label>';
+        }
+        html += '<label class="save-preset-opt"><input type="radio" name="save-preset-mode" value="accounts"' + (cond ? '' : ' checked') + '><span>按选中账号</span><span class="sp-opt-sub">' + secCount + ' 个</span></label>';
+        html += '</div></div>';
+
+        html += '<div class="sp-hint"><i class="ph ph-info"></i><span>' +
+            (cond ? '按筛选条件保存更灵活：以后账号有增删会自动适配，不用逐个列举 ID。' : '当前筛选不是等级/标签/平台，无法转成条件，将保存这 ' + secCount + ' 个账号。') +
+            '</span></div>';
+
+        html += '<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:2px;">';
+        html += '<button class="btn btn-secondary btn-sm" onclick="closeSavePresetModal()">取消</button>';
+        html += '<button class="btn btn-primary btn-sm" onclick="confirmSavePreset()">保存方案</button>';
+        html += '</div></div>';
+        body.innerHTML = html;
+        modal.style.display = 'flex';
+    }
+
+    function closeSavePresetModal() {
+        const modal = document.getElementById('save-preset-modal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    async function confirmSavePreset() {
+        const nameEl = document.getElementById('save-preset-name');
+        const name = (nameEl ? nameEl.value : '').trim() || '未命名方案';
+        const modeEl = document.querySelector('input[name="save-preset-mode"]:checked');
+        const mode = modeEl ? modeEl.value : 'accounts';
+        const cond = _presetCondition();
+
+        const payload = {
+            name: name,
+            rating_min: 1,
+            tags: '',
+            account_names: '',
+            platform: 'douyin',
+            mode: 'incremental',
+            is_default: false,
+        };
+        if (mode === 'condition' && cond) {
+            Object.assign(payload, cond.data);
+        } else {
+            payload.account_names = _savePresetSecIds.join(',');
+        }
+
         try {
             const resp = await fetch('/api/collection/presets', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: name,
-                    rating_min: 1,
-                    tags: '',
-                    account_names: secUserIds.join(','),
-                    platform: 'douyin',
-                    mode: 'incremental',
-                    is_default: false,
-                }),
+                body: JSON.stringify(payload),
             });
             const data = await resp.json();
             if (data.success) {
-                showToast('已保存方案"' + name + '"（' + secUserIds.length + '个账号）', 'success');
+                closeSavePresetModal();
+                showToast('已保存方案「' + name + '」', 'success');
             } else {
                 showToast('保存失败: ' + (data.message || ''), 'error');
             }
@@ -1973,7 +2184,9 @@ container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><o
             const labelIcon = isReadonly ? ' <i class="ph ph-lock-simple" style="font-size:11px;color:var(--text-muted);"></i>' : '';
             const labelCls = isReadonly ? ' style="color:var(--text-muted);"' : '';
             html += '<div class="tbl-form-row"><label class="tbl-form-label"' + labelCls + '>' + f.name + labelIcon + '</label>';
-            if (f.name === '标签') {
+            if (f.name === 'Cookie') {
+                html += '<textarea id="add-field-' + f.name + '" class="tbl-form-input" style="resize: both; min-height: 64px; font-family: var(--font-mono); font-size: 11px;" placeholder="粘贴 Cookie 字符串"' + disabledAttr + '></textarea>';
+            } else if (f.name === '标签') {
                 html += '<input type="text" id="add-field-' + f.name + '" class="tbl-form-input" placeholder="用逗号分隔，如: 街拍,户外"' + disabledAttr + '>';
             } else if (isBool && f.name !== '解析状态' && f.name !== '获取状态') {
                 html += '<input type="checkbox" id="add-field-' + f.name + '" style="flex-shrink:0;width:18px;height:18px;"' + disabledAttr + '>';

@@ -1,0 +1,35 @@
+{# ===== 命名模板编辑器弹窗（共享组件：设置页 / 单作品采集 / 增量采集 三页共用） =====
+     只负责"编辑命名代码"，命名归存储方案所有；不含"默认继承"概念。
+     注意：本片段应放在 </form> 之后；弹窗必须嵌在遮罩内部（遮罩 fixed 居中），否则会掉到文档流底部。 #}
+<div class="nm-mask" id="nm-mask" onclick="closeNameEditor()">
+<div class="name-modal" id="name-modal" role="dialog" aria-modal="true" aria-hidden="true" onclick="event.stopPropagation()">
+    <div class="nm">
+        <div class="nm-head">
+            <span class="nm-title"><i data-lucide="type"></i> <span id="nm-title-text">编辑命名</span></span>
+            <button type="button" class="nm-close" onclick="closeNameEditor()" title="关闭">✕</button>
+        </div>
+        <div class="nm-body">
+            <p class="nm-hint">点击下方字段加入命名，拖动已选字段换位，✕ 移除。生成的命名代码可一键复制，粘贴或保存后直接生效。</p>
+
+            <div class="wb-sec">
+                <div class="wb-label"><span class="d"></span> 字段（点击加入命名）</div>
+                <div class="pool" id="wb-pool"></div>
+            </div>
+
+            <div class="wb-sec">
+                <div class="wb-label"><span class="d on"></span> 命名顺序（拖动换位）</div>
+                <div class="belt" id="wb-belt"></div>
+            </div>
+
+            <div class="wb-sec">
+                <div class="wb-label"><span class="d on"></span> 预览</div>
+                <div class="wb-pv" id="wb-pv"></div>
+            </div>
+        </div>
+        <div class="nm-foot">
+            <button type="button" class="btn btn-secondary" onclick="copyNameCode()"><i data-lucide="copy"></i> 复制命名代码</button>
+            <button type="button" class="btn btn-primary" onclick="closeNameEditor()">完成</button>
+        </div>
+    </div>
+</div>
+</div>

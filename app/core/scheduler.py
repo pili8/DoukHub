@@ -1,7 +1,10 @@
 """定时任务调度器 — APScheduler 集成"""
 import asyncio
+import json
 import logging
+import os
 from datetime import datetime
+from pathlib import Path
 from typing import Callable
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -11,6 +14,7 @@ from .database import Database
 from .history import HistoryDB
 from .collector import Collector, Account
 from .syncer import Syncer
+from . import storage_profiles as sp
 
 logger = logging.getLogger("doukhub.scheduler")
 
@@ -24,11 +28,13 @@ class TaskScheduler:
         get_collector: Callable,
         get_syncer: Callable,
         get_accounts: Callable,
+        config=None,
     ):
         self.history = history
         self.get_collector = get_collector
         self.get_syncer = get_syncer
         self.get_accounts = get_accounts
+        self.config = config
         self.scheduler = AsyncIOScheduler()
         self._loaded_task_ids: set[int] = set()
         # 优先使用新数据库
@@ -116,6 +122,9 @@ class TaskScheduler:
         })
 
         try:
+            # 接入增量存储方案：把生效方案的 folder_name/name_format 写入 TTD settings.json
+            self._apply_batch_storage()
+
             # 从新数据库获取账号
             accounts = self.db.get_all_accounts()
             # 筛选符合等级 + 已启用采集的账号
@@ -135,16 +144,18 @@ class TaskScheduler:
 
             c = self.get_collector()
             cookies = self.db.get_enabled_cookies()
-            cookie_list = [ck.get("Cookie", "") for ck in cookies]
 
             success_count = 0
             for i, account in enumerate(accounts):
                 try:
-                    cookie = cookie_list[i % len(cookie_list)] if cookie_list else ""
+                    chosen = cookies[i % len(cookies)] if cookies else {}
+                    cookie = chosen.get("Cookie", "")
+                    if chosen.get("record_id"):
+                        self.db.record_cookie_usage(chosen["record_id"])
                     result = await c.collect_account(
                         Account(
                             name=account.get("账号名称", ""),
-                            platform=account.get("平台", "抖音"),
+                            platform=account.get("平台", "douyin"),
                             sec_user_id=account.get("sec_user_id", ""),
                             collection_type=account.get("采集类型", "发布"),
                         ),
@@ -176,6 +187,53 @@ class TaskScheduler:
 
         except Exception as e:
             logger.error(f"定时任务 {task_name} 执行失败: {e}")
+
+    def _apply_batch_storage(self) -> None:
+        """把增量存储方案生效的 folder_name/name_format 写入 TTD settings.json。
+
+        定时任务走 Collector 引擎（TTD HTTP API），不经过批次 runner，
+        此处与批次保持一致：执行前同步存储方案，TTD 引擎按新目录落盘。
+        """
+        if self.config is None:
+            return
+        try:
+            profile, diags = sp.resolve_active_profile(self.config, "batch")
+            if profile is None:
+                logger.warning(f"定时任务: 增量存储方案均不可用，使用 TTD 默认目录"
+                               + (f"（{diags[0]['name']}: {diags[0]['reason']}）" if diags else ""))
+                return
+            name_format = sp.resolve_name_format(self.config, "batch", profile)
+            settings_path = Path(self.config.ttd_path) / "Volume" / "settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings = {}
+            if settings_path.exists():
+                with settings_path.open("r", encoding="utf-8-sig") as f:
+                    settings = json.load(f)
+            changed = False
+            folder_name = (profile.get("path") or "").strip()
+            if folder_name and settings.get("folder_name") != folder_name:
+                settings["folder_name"] = folder_name
+                changed = True
+            if name_format and settings.get("name_format") != name_format:
+                settings["name_format"] = name_format
+                changed = True
+            # 引擎参数（与批次链路一致：方案内设置 → 全局默认兜底）
+            engine_params = sp.resolve_engine_params(self.config, "batch", profile) or {}
+            for k in sp.ENGINE_KEYS:
+                if k in engine_params and settings.get(k) != engine_params[k]:
+                    settings[k] = engine_params[k]
+                    changed = True
+            if not changed:
+                return
+            tmp = settings_path.with_name(f"{settings_path.name}.doukhub.tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(settings, f, ensure_ascii=False, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, settings_path)
+            logger.info(f"定时任务: 已应用增量存储方案 {profile.get('name', '')} → {folder_name}")
+        except Exception as exc:
+            logger.error(f"定时任务: 应用存储方案失败: {exc}")
 
     def reload_tasks(self) -> None:
         """重新加载所有定时任务"""

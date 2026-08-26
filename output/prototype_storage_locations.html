@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>存储方案三处位置与关联原型</title>
+<style>
+  :root{
+    --dh-bg:#FBFAF7; --dh-surface:#FFFFFF; --dh-surface-muted:#F5F2EC;
+    --dh-border:#ECE7DF; --dh-accent:#0061A4; --dh-accent-soft:rgba(0,97,164,.10);
+    --dh-text:#1F2421; --dh-text-secondary:#444A45; --dh-text-muted:#8A8C86;
+    --dh-success:#2E7D32; --dh-danger:#C62828; --dh-warning:#B26A00;
+    --dh-radius:14px; --dh-radius-sm:8px;
+    --dh-violet:#6D4ABB; --dh-green:#2E7D32;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--dh-bg); color:var(--dh-text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    line-height:1.6;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:32px 28px 80px;}
+  header.top{margin-bottom:28px;}
+  header.top h1{font-size:23px; margin:0 0 6px; letter-spacing:.3px;}
+  header.top p{margin:0; color:var(--dh-text-muted); font-size:14px; max-width:760px;}
+
+  .legend{display:flex; gap:18px; flex-wrap:wrap; margin:18px 0 8px; font-size:12.5px; color:var(--dh-text-secondary);}
+  .legend span{display:inline-flex; align-items:center; gap:7px;}
+  .dot{width:11px; height:11px; border-radius:50%; display:inline-block;}
+  .dot.here{background:var(--dh-accent); box-shadow:0 0 0 4px var(--dh-accent-soft);}
+  .dot.src{background:var(--dh-violet);}
+  .dot.consume{background:var(--dh-green);}
+
+  h2.section{font-size:17px; margin:42px 0 14px; padding-bottom:8px; border-bottom:2px solid var(--dh-border);}
+  h2.section small{font-size:12.5px; color:var(--dh-text-muted); font-weight:400; margin-left:8px;}
+
+  /* ===== 三屏网格 ===== */
+  .screens{display:grid; grid-template-columns:repeat(3,1fr); gap:20px;}
+  @media(max-width:980px){.screens{grid-template-columns:1fr;}}
+  .screen{
+    background:var(--dh-surface); border:1px solid var(--dh-border);
+    border-radius:var(--dh-radius); overflow:hidden; position:relative;
+    box-shadow:0 1px 3px rgba(0,0,0,.04);
+  }
+  .screen-head{
+    background:var(--dh-surface-muted); padding:10px 14px; border-bottom:1px solid var(--dh-border);
+    font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px;
+  }
+  .screen-head .num{
+    width:20px;height:20px;border-radius:6px;background:var(--dh-accent);color:#fff;
+    font-size:12px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+  }
+  .screen-body{padding:14px;}
+
+  .loc-badge{
+    display:inline-block; margin-bottom:10px; font-size:11px; color:var(--dh-accent);
+    background:var(--dh-accent-soft); border:1px solid rgba(0,97,164,.25);
+    padding:3px 9px; border-radius:20px; font-weight:600;
+  }
+
+  /* —— 设置页 tab —— */
+  .tabs{display:flex; gap:4px; background:var(--dh-surface-muted); padding:5px; border-radius:var(--dh-radius-sm); margin-bottom:12px; flex-wrap:wrap;}
+  .tab{font-size:11.5px; padding:4px 9px; border-radius:6px; color:var(--dh-text-muted);}
+  .tab.active{background:var(--dh-surface); color:var(--dh-accent); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.06);}
+  .info-banner{font-size:11px; color:var(--dh-text-muted); background:var(--dh-surface-muted); border:1px solid var(--dh-border); border-radius:var(--dh-radius-sm); padding:8px 10px; margin-bottom:12px; line-height:1.7;}
+
+  .major-card{border:1px solid var(--dh-border); border-radius:var(--dh-radius-sm); margin-bottom:12px; overflow:hidden;}
+  .major-head{display:flex; align-items:center; gap:8px; padding:9px 11px; background:var(--dh-surface-muted); font-weight:600; font-size:12.5px;}
+  .mj-ic{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;}
+  .mj-ic.single{background:var(--dh-violet);} .mj-ic.batch{background:var(--dh-green);}
+  .mj-sub{font-size:10.5px; color:var(--dh-text-muted); font-weight:400; margin-left:auto; max-width:150px; text-align:right;}
+  .major-body{padding:11px;}
+  .dh-section{margin-bottom:10px;}
+  .dh-section-title{font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px; margin-bottom:7px; color:var(--dh-text-secondary);}
+  .tpl-summary{display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px; background:var(--dh-surface-muted); border:1px solid var(--dh-border); border-radius:6px; padding:7px 9px;}
+  .tpl-summary b{color:var(--dh-text);} .tpl-summary .lab{color:var(--dh-text-muted);}
+  .tpl-summary .sum-sep{color:var(--dh-text-muted);} .tpl-summary .sum-ext{color:var(--dh-text-muted); font-family:var(--mono);}
+  .edit-btn{font-size:10.5px; border:1px solid var(--dh-border); background:var(--dh-surface); border-radius:6px; padding:3px 8px; color:var(--dh-accent); cursor:pointer; white-space:nowrap;}
+  .note{font-size:10.5px; color:var(--dh-text-muted); margin-top:6px;}
+
+  /* 高亮框：本次关注 */
+  .hl{position:relative; border:2px dashed var(--dh-accent); border-radius:var(--dh-radius-sm); padding:9px; margin:-2px -2px 8px;}
+  .hl-tag{position:absolute; top:-10px; left:9px; background:var(--dh-accent); color:#fff; font-size:10px; font-weight:600; padding:2px 8px; border-radius:10px; white-space:nowrap;}
+
+  /* 存储行（当前真实形态） */
+  .storage-row{display:flex; align-items:center; gap:8px; font-size:11px; background:var(--dh-surface-muted); border:1px solid var(--dh-border); border-radius:6px; padding:7px 9px; margin-bottom:7px;}
+  .role-chip{font-size:10px; font-weight:700; padding:1px 7px; border-radius:10px; flex:0 0 auto;}
+  .role-chip.pri{background:rgba(0,97,164,.12); color:var(--dh-accent);}
+  .role-chip.sec{background:rgba(139,140,134,.15); color:var(--dh-text-secondary);}
+  .stor-name{font-weight:600;} .stor-path{color:var(--dh-text-muted); font-family:var(--mono); font-size:10px; word-break:break-all;}
+  .stor-dot{width:8px;height:8px;border-radius:50%; margin-left:auto; flex:0 0 auto;}
+  .stor-dot.ok{background:var(--dh-success);} .stor-dot.fail{background:var(--dh-danger);} .stor-dot.warn{background:var(--dh-warning);}
+  .toolbar{display:flex; align-items:center; gap:8px; font-size:10.5px; color:var(--dh-text-muted); margin-top:4px;}
+  .test-btn{font-size:10.5px; border:1px solid var(--dh-border); background:var(--dh-surface); border-radius:6px; padding:3px 8px; color:var(--dh-text-secondary); cursor:pointer;}
+
+  /* —— 采集页 面板 + 弹窗 —— */
+  .panel{background:var(--dh-surface); border:1px solid var(--dh-border); border-radius:var(--dh-radius-sm); padding:11px; margin-bottom:12px;}
+  .panel-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:9px;}
+  .panel-title{font-size:12.5px; font-weight:600; display:flex; align-items:center; gap:6px;}
+  .mini-btn{font-size:10.5px; border:1px solid var(--dh-border); background:var(--dh-surface-muted); border-radius:6px; padding:3px 8px; color:var(--dh-text-secondary); cursor:pointer;}
+  select.mini{width:100%; font-size:11px; border:1px solid var(--dh-border); border-radius:6px; padding:6px 8px; background:var(--dh-surface); color:var(--dh-text); font-family:inherit;}
+  .modal{background:var(--dh-surface); border:1px solid var(--dh-border); border-radius:var(--dh-radius-sm); padding:0; overflow:hidden;}
+  .modal-head{background:var(--dh-surface-muted); padding:9px 11px; font-size:12.5px; font-weight:600; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--dh-border);}
+  .modal-grid{display:grid; grid-template-columns:88px 1fr; gap:0; max-height:230px; overflow:hidden;}
+  .modal-left{background:var(--dh-surface-muted); border-right:1px solid var(--dh-border); padding:8px;}
+  .preset-item{font-size:10.5px; padding:5px 7px; border-radius:6px; margin-bottom:4px; color:var(--dh-text-secondary); background:var(--dh-surface); border:1px solid var(--dh-border);}
+  .preset-item.active{background:var(--dh-accent-soft); border-color:rgba(0,97,164,.3); color:var(--dh-accent); font-weight:600;}
+  .modal-right{padding:10px;}
+  .form-row{display:flex; gap:7px; margin-bottom:7px;}
+  .form-row label{font-size:10px; color:var(--dh-text-muted); width:42px; flex:0 0 auto; padding-top:6px;}
+  .stru-preview{font-size:10px; color:var(--dh-text-muted); background:var(--dh-surface-muted); border:1px dashed var(--dh-border); border-radius:6px; padding:7px 9px; margin-top:8px; font-family:var(--mono); line-height:1.8;}
+
+  /* —— 单作品页 —— */
+  .mode-group{display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;}
+  .mode-btn{font-size:11px; border:1px solid var(--dh-border); background:var(--dh-surface); border-radius:7px; padding:5px 11px; color:var(--dh-text-secondary); cursor:pointer; display:flex; align-items:center; gap:5px;}
+  .mode-btn.primary{background:var(--dh-accent); color:#fff; border-color:var(--dh-accent);}
+  .settings-block{background:var(--dh-surface); border:1px solid var(--dh-border); border-radius:var(--dh-radius-sm); padding:12px;}
+  .form-group{margin-bottom:10px;}
+  .form-group label{font-size:11px; font-weight:600; display:flex; align-items:center; gap:6px; margin-bottom:5px; color:var(--dh-text-secondary);}
+  .form-group label small{font-weight:400;}
+  .info-box{background:var(--dh-surface-muted); border:1px solid var(--dh-border); border-radius:6px; padding:9px 11px; margin-top:8px;}
+  .info-grid{display:grid; grid-template-columns:1fr 1fr; gap:7px 14px; font-size:11px;}
+  .info-grid .k{color:var(--dh-text-muted);} .info-grid .v{font-weight:600; color:var(--dh-text-secondary);}
+  .info-grid .v.mono{font-family:var(--mono);}
+
+  /* ===== 关联链路 ===== */
+  .flow{display:grid; grid-template-columns:1fr auto 1fr auto 1fr; gap:0; align-items:stretch; margin-top:8px;}
+  @media(max-width:980px){.flow{grid-template-columns:1fr;}}
+  .flow-node{background:var(--dh-surface); border:1px solid var(--dh-border); border-radius:var(--dh-radius-sm); padding:14px; text-align:center;}
+  .flow-node .fn-ic{width:34px;height:34px;border-radius:9px; margin:0 auto 8px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:16px;}
+  .flow-node.src .fn-ic{background:var(--dh-violet);} .flow-node.cons .fn-ic{background:var(--dh-green);}
+  .flow-node h4{margin:0 0 4px; font-size:13px;} .flow-node p{margin:0; font-size:11px; color:var(--dh-text-muted);}
+  .flow-arrow{display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0 10px; color:var(--dh-text-muted); font-size:11px; min-width:70px;}
+  .flow-arrow .ar{font-size:20px; color:var(--dh-accent); line-height:1;}
+  .flow-arrow b{color:var(--dh-text-secondary); font-size:10.5px; margin-top:3px; max-width:64px; text-align:center;}
+  @media(max-width:980px){.flow-arrow{flex-direction:row; min-width:0; padding:8px 0;} .flow-arrow .ar{transform:rotate(90deg);} .flow-arrow b{margin:0 0 0 8px;}}
+
+  .inherit-card{background:var(--dh-accent-soft); border:1px solid rgba(0,97,164,.25); border-radius:var(--dh-radius-sm); padding:12px 14px; margin-top:16px; font-size:12.5px; color:var(--dh-text-secondary);}
+  .inherit-card b{color:var(--dh-accent);}
+
+  /* ===== 改进方案 ===== */
+  .improve{display:grid; grid-template-columns:1fr 1fr; gap:20px;}
+  @media(max-width:980px){.improve{grid-template-columns:1fr;}}
+  .imp-card{background:var(--dh-surface); border:1px solid var(--dh-border); border-radius:var(--dh-radius); padding:16px;}
+  .imp-card h3{margin:0 0 4px; font-size:14px; display:flex; align-items:center; gap:7px;}
+  .imp-card .tag{font-size:10.5px; padding:2px 8px; border-radius:10px; background:var(--dh-surface-muted); color:var(--dh-text-muted); font-weight:600;}
+  .imp-card p.sub{margin:0 0 12px; font-size:11.5px; color:var(--dh-text-muted);}
+
+  /* 统一存储组件（改进后） */
+  .uni-storage{border:1px solid var(--dh-border); border-radius:var(--dh-radius-sm); padding:11px; background:var(--dh-surface);}
+  .uni-row{display:flex; align-items:center; gap:10px; padding:9px 10px; border:1px solid var(--dh-border); border-radius:8px; margin-bottom:8px; background:var(--dh-surface-muted);}
+  .uni-row .role{font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:11px;}
+  .uni-row .role.pri{background:rgba(0,97,164,.12); color:var(--dh-accent);}
+  .uni-row .role.sec{background:rgba(139,140,134,.15); color:var(--dh-text-secondary);}
+  .uni-row .meta{flex:1; min-width:0;}
+  .uni-row .meta .nm{font-weight:600; font-size:12px;}
+  .uni-row .meta .pt{font-size:10px; color:var(--dh-text-muted); font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .uni-row .st{font-size:10px; font-weight:600; display:flex; align-items:center; gap:4px;}
+  .uni-row .st.ok{color:var(--dh-success);} .uni-row .st.fail{color:var(--dh-danger);}
+  .uni-inherit{display:flex; align-items:center; gap:8px; font-size:11px; color:var(--dh-accent); background:var(--dh-accent-soft); border:1px dashed rgba(0,97,164,.35); border-radius:8px; padding:7px 10px; margin-bottom:8px;}
+  .uni-inherit .pill{background:var(--dh-accent); color:#fff; font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px;}
+  .uni-effective{font-size:11px; background:var(--dh-surface-muted); border-radius:8px; padding:8px 10px; border:1px solid var(--dh-border);}
+  .uni-effective .lab{color:var(--dh-text-muted);} .uni-effective b{color:var(--dh-text); font-family:var(--mono); font-size:11px;}
+
+  .prob-list{list-style:none; padding:0; margin:0; font-size:12px;}
+  .prob-list li{display:flex; gap:9px; padding:8px 0; border-bottom:1px solid var(--dh-border); align-items:flex-start;}
+  .prob-list li:last-child{border-bottom:none;}
+  .prob-list .pk{width:18px;height:18px;border-radius:50%; background:var(--dh-accent-soft); color:var(--dh-accent); font-size:11px; font-weight:700; display:flex;align-items:center;justify-content:center; flex:0 0 auto; margin-top:1px;}
+  .prob-list .pt{color:var(--dh-text-secondary);}
+  .prob-list .pt b{color:var(--dh-text);}
+
+  /* 可编辑存储方案卡片（原型示意） */
+  .ss-card{border:1px solid var(--dh-border); border-radius:8px; padding:9px 10px; margin-bottom:8px; background:var(--dh-surface);}
+  .ss-card.dashed{border-style:dashed; background:transparent;}
+  .ss-head{display:flex; align-items:center; gap:6px; margin-bottom:7px;}
+  .s-badge{font-size:9.5px; font-weight:700; padding:1px 7px; border-radius:10px; white-space:nowrap;}
+  .s-badge.ok{background:rgba(0,97,164,.12); color:var(--dh-accent);}
+  .s-badge.warn{background:rgba(139,140,134,.18); color:var(--dh-text-secondary);}
+  .ss-in{border:1px solid var(--dh-border); border-radius:6px; padding:4px 7px; font-size:11px; background:var(--dh-surface); color:var(--dh-text); font-family:inherit;}
+  .ss-in.wide{width:100%;}
+  .ss-sw{font-size:10px; color:var(--dh-text-muted); display:flex; align-items:center; gap:3px; margin-left:6px;}
+  .ss-act{margin-left:auto; font-size:11px; color:var(--dh-text-muted); letter-spacing:1px;}
+  .ss-row{display:grid; grid-template-columns:32px 1fr; gap:6px; align-items:center; margin-bottom:6px;}
+  .ss-lab{font-size:10.5px; font-weight:600; color:var(--dh-text-secondary);}
+  .ss-prev{font-size:10px; font-family:var(--mono); color:var(--dh-text-secondary); background:var(--dh-surface-muted); border-radius:5px; padding:4px 7px; display:flex; align-items:center; justify-content:space-between; gap:6px;}
+  .ss-copy{color:var(--dh-accent); flex:0 0 auto;}
+
+  /* 方案默认折叠 */
+  .ss-toggle{cursor:pointer;}
+  .ss-chev{margin-left:6px; transition:transform .18s; font-size:9px; color:var(--dh-text-muted);}
+  .ss-card.open .ss-chev{transform:rotate(90deg);}
+  .ss-body{display:none; margin-top:7px; padding-top:7px; border-top:1px dashed var(--dh-border);}
+  .ss-card.open .ss-body{display:block;}
+
+  /* 命名模板编辑器（统一编辑位置 · 非默认） */
+  .ne{border:1px solid var(--dh-border); border-radius:var(--dh-radius); padding:16px; background:var(--dh-surface);}
+  .ne-note{font-size:12px; color:var(--dh-warning); background:rgba(178,106,0,.08); border:1px solid rgba(178,106,0,.28); border-radius:7px; padding:9px 11px; margin-bottom:14px; line-height:1.7;}
+  .ne-cols{display:grid; grid-template-columns:1fr 1.5fr; gap:18px;}
+  @media(max-width:860px){.ne-cols{grid-template-columns:1fr;}}
+  .ne-col h4{margin:0 0 9px; font-size:12.5px; color:var(--dh-text-secondary);}
+  .ne-palette{display:flex; flex-wrap:wrap; gap:7px;}
+  .ne-chip{font-size:11.5px; border:1px solid var(--dh-border); background:var(--dh-surface-muted); border-radius:15px; padding:5px 11px; color:var(--dh-text-secondary); cursor:pointer; display:inline-flex; align-items:center; gap:5px; user-select:none;}
+  .ne-chip:hover{border-color:var(--dh-accent); color:var(--dh-accent);}
+  .ne-chip .plus{font-weight:700;}
+  .ne-current{display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-height:48px; padding:10px; border:1px dashed var(--dh-border); border-radius:8px; background:var(--dh-surface-muted);}
+  .ne-empty{color:var(--dh-text-muted); font-size:11px;}
+  .ne-item{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; background:var(--dh-surface); border:1px solid var(--dh-accent); color:var(--dh-accent); border-radius:7px; padding:4px 5px 4px 4px; cursor:grab;}
+  .ne-item.dragging{opacity:.4;}
+  .ne-item .h{font-size:12px; line-height:1; color:var(--dh-text-muted); cursor:grab;}
+  .ne-item .x{font-size:13px; color:var(--dh-text-muted); cursor:pointer; padding:0 2px;}
+  .ne-item .x:hover{color:var(--dh-danger);}
+  .ne-sep{color:var(--dh-text-muted); font-weight:700; font-size:12px;}
+  .ne-out{margin-top:14px;}
+  .ne-code{font-family:var(--mono); font-size:12px; background:var(--dh-surface-muted); border:1px solid var(--dh-border); border-radius:6px; padding:10px 12px; word-break:break-all; color:var(--dh-text);}
+  .ne-actions{display:flex; gap:10px; margin-top:10px; align-items:center; flex-wrap:wrap;}
+  .ne-copy{font-size:11.5px; border:1px solid var(--dh-accent); background:var(--dh-accent); color:#fff; border-radius:6px; padding:6px 14px; cursor:pointer; font-weight:600;}
+  .ne-copy.done{background:var(--dh-success); border-color:var(--dh-success);}
+  .ne-sep-sel{font-size:11.5px; color:var(--dh-text-secondary); display:flex; align-items:center; gap:7px; margin-top:14px;}
+  .ne-sep-sel select{border:1px solid var(--dh-border); border-radius:6px; padding:4px 7px; font-size:11.5px; background:var(--dh-surface); color:var(--dh-text); font-family:inherit;}
+
+  /* 每方案命名行（方案 B） */
+  .ss-code{font-family:var(--mono); font-size:10.5px; background:var(--dh-surface-muted); border:1px solid var(--dh-border); border-radius:5px; padding:3px 7px; color:var(--dh-accent); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .ss-code.muted{color:var(--dh-text-muted);}
+  .ss-editname{font-size:10.5px; border:1px solid var(--dh-accent); background:var(--dh-surface); color:var(--dh-accent); border-radius:6px; padding:3px 9px; cursor:pointer; white-space:nowrap; flex:0 0 auto;}
+  .ss-editname:hover{background:var(--dh-accent); color:#fff;}
+
+  footer{margin-top:50px; padding-top:16px; border-top:1px solid var(--dh-border); font-size:11.5px; color:var(--dh-text-muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>「存储方案 / 采集方案」三处位置与关联 · 改版原型</h1>
+    <p>这三者是一条<strong>上下游链路</strong>：设置页是唯一的"真相来源"（存储方案池 + 主/次标记），两个采集入口只是从对应池子里选主/次（<strong>留空回退设置页默认主/次</strong>）；<strong>命名则每个方案内嵌编辑</strong>——共用同一套命名编辑器组件（方案 B），无统一默认、<strong>无"继承"</strong>。下面先把三个真实位置框出来，再讲怎么改得更美观、关联更可见。</p>
+    <div class="legend">
+      <span><i class="dot here"></i> 本次关注区域（红框 = 高亮）</span>
+      <span><i class="dot src"></i> 源头：设置页（管池子）</span>
+      <span><i class="dot consume"></i> 下游：两个采集入口（只选、留空继承）</span>
+    </div>
+  </header>
+
+  <!-- ═══════ 第一部分：三个真实位置 ═══════ -->
+  <h2 class="section">一、三个具体位置 <small>每屏都标了"在哪个页面、哪一级菜单里"</small></h2>
+  <div class="screens">
+
+    <!-- 位置1 设置页 -->
+    <div class="screen">
+      <div class="screen-head"><span class="num">1</span> 设置页</div>
+      <div class="screen-body">
+        <span class="loc-badge">位置：设置页 › 顶部 Tab「下载与文件」› 单作品/增量 大卡 › 存储方案 分区</span>
+        <div class="tabs">
+          <span class="tab">通用</span>
+          <span class="tab active">下载与文件</span>
+          <span class="tab">内核服务</span>
+          <span class="tab">功能</span>
+        </div>
+        <div class="info-banner">文件名规则（自动生效）：分隔符 <code>-</code> · 日期 <code>20260821_123400</code> · 上限 80 字符 · 自动清洗特殊字符</div>
+
+        <div class="major-card">
+          <div class="major-head"><span class="mj-ic single">📄</span> 单作品采集 <span class="mj-sub">粘贴链接逐条下载</span></div>
+          <div class="major-body">
+            <div class="info-banner" style="margin-bottom:10px;">命名在每个存储方案内独立编辑（方案 B：每方案内嵌<strong>同一套编辑器</strong>，无统一默认、无复制粘贴）。展开下方方案 → 点「✎ 编辑命名」。</div>
+            <!-- 高亮：存储方案（可编辑） -->
+            <div class="hl"><span class="hl-tag">本次关注 · 可编辑</span>
+              <div class="dh-section-title">📥 存储方案（展开即编辑）</div>
+              <div class="ss-card">
+                <div class="ss-head ss-toggle" onclick="toggleSS(this)"><span class="s-badge ok">默认主</span><input class="ss-in" value="本地SSD" onclick="event.stopPropagation()"><label class="ss-sw" onclick="event.stopPropagation()">启用<input type="checkbox" checked></label><span class="ss-act">↑ ↓ 🗑</span><span class="ss-chev">▶</span></div>
+                <div class="ss-body">
+                  <div class="ss-row"><span class="ss-lab">路径</span><input class="ss-in wide" value="D:/DL/single"></div>
+                  <div class="ss-row"><span class="ss-lab">命名</span><code class="ss-code">{create_time}-{type}-{nickname}-{desc}</code><button class="ss-editname" title="用命名编辑器编辑">✎ 编辑命名</button></div>
+                  <div class="ss-prev"><span>↳ 2026-08-20_14-30-视频-高管专访.mp4</span><span class="ss-copy">📋</span></div>
+                </div>
+              </div>
+              <div class="ss-card dashed">
+                <div class="ss-head ss-toggle" onclick="toggleSS(this)"><span class="s-badge warn">默认次</span><input class="ss-in" value="NAS备份" onclick="event.stopPropagation()"><label class="ss-sw" onclick="event.stopPropagation()">启用<input type="checkbox" checked></label><span class="ss-act">↑ ↓ 🗑</span><span class="ss-chev">▶</span></div>
+                <div class="ss-body">
+                  <div class="ss-row"><span class="ss-lab">路径</span><input class="ss-in wide" value="//nas/backup"></div>
+                  <div class="ss-row"><span class="ss-lab">命名</span><code class="ss-code muted">（未设置）</code><button class="ss-editname" title="用命名编辑器编辑">✎ 编辑命名</button></div>
+                  <div class="ss-prev" style="color:var(--dh-text-muted);">（未编辑 → 该方案不单独命名）</div>
+                </div>
+              </div>
+              <div class="toolbar"><span class="test-btn">＋ 添加方案</span><span style="margin-left:auto;">命名：每方案自带（编辑器生成/复制），不自动继承</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="major-card">
+          <div class="major-head"><span class="mj-ic batch">▦</span> 增量采集 <span class="mj-sub">抓取整号作品</span></div>
+          <div class="major-body">
+            <div class="info-banner" style="margin-bottom:10px;">命名在每个存储方案内独立编辑（方案 B：每方案内嵌<strong>同一套编辑器</strong>，无统一默认、无复制粘贴）。展开下方方案 → 点「✎ 编辑命名」。</div>
+            <div class="hl"><span class="hl-tag">本次关注 · 可编辑</span>
+              <div class="dh-section-title">📁 存储方案（展开即编辑）</div>
+              <div class="ss-card">
+                <div class="ss-head ss-toggle" onclick="toggleSS(this)"><span class="s-badge ok">默认主</span><input class="ss-in" value="仓库盘" onclick="event.stopPropagation()"><label class="ss-sw" onclick="event.stopPropagation()">启用<input type="checkbox" checked></label><span class="ss-act">↑ ↓ 🗑</span><span class="ss-chev">▶</span></div>
+                <div class="ss-body">
+                  <div class="ss-row"><span class="ss-lab">路径</span><input class="ss-in wide" value="E:/Douyin"></div>
+                  <div class="ss-row"><span class="ss-lab">命名</span><code class="ss-code">{create_time}-{type}-{nickname}-{desc}</code><button class="ss-editname" title="用命名编辑器编辑">✎ 编辑命名</button></div>
+                  <div class="ss-prev"><span>↳ 2026-08-20_14-30-视频-竞品A-高管专访.mp4</span><span class="ss-copy">📋</span></div>
+                </div>
+              </div>
+              <div class="ss-card dashed">
+                <div class="ss-head ss-toggle" onclick="toggleSS(this)"><span class="s-badge warn">默认次</span><input class="ss-in" value="冷备盘" onclick="event.stopPropagation()"><label class="ss-sw" onclick="event.stopPropagation()">启用<input type="checkbox" checked></label><span class="ss-act">↑ ↓ 🗑</span><span class="ss-chev">▶</span></div>
+                <div class="ss-body">
+                  <div class="ss-row"><span class="ss-lab">路径</span><input class="ss-in wide" value="F:/cold"></div>
+                  <div class="ss-row"><span class="ss-lab">命名</span><code class="ss-code muted">（未设置）</code><button class="ss-editname" title="用命名编辑器编辑">✎ 编辑命名</button></div>
+                </div>
+              </div>
+              <div class="toolbar"><span class="test-btn">＋ 添加方案</span><span style="margin-left:auto;">批量方案额外含：子文件夹 / 音乐 / 封面 等开关</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 位置2 增量采集页 -->
+    <div class="screen">
+      <div class="screen-head"><span class="num">2</span> 增量采集页</div>
+      <div class="screen-body">
+        <span class="loc-badge">位置：采集页(增量) › 左侧「采集方案」面板 ＋「编辑方案」弹窗 › 存储方案 主/次</span>
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title">▦ 采集方案</span><span class="mini-btn">编辑方案</span></div>
+          <select class="mini"><option>日常 4星+（增量）</option><option>竞品监控</option></select>
+          <div style="margin-top:8px;"><span class="mini-btn">⤓ 开始采集</span></div>
+        </div>
+
+        <div class="modal">
+          <div class="modal-head"><span>▦ 采集方案（方案设置）</span></div>
+          <div class="modal-grid">
+            <div class="modal-left">
+              <div class="preset-item active">日常 4星+</div>
+              <div class="preset-item">竞品监控</div>
+              <div class="preset-item">全部账号</div>
+            </div>
+            <div class="modal-right">
+              <div class="dh-section-title" style="margin-bottom:6px;">筛选条件（等级/平台/标签…）</div>
+              <div style="font-size:10.5px;color:var(--dh-text-muted);margin-bottom:8px;">· 等级≥4 · 平台 抖音 · 标签 个人</div>
+              <!-- 高亮：存储方案 -->
+              <div class="hl"><span class="hl-tag">本次关注</span>
+                <div class="dh-section-title">📥 存储方案（主/次并排）</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                  <div><div style="font-size:10.5px;font-weight:600;color:var(--dh-text-secondary);margin-bottom:4px;">主存储</div><select class="mini"><option>仓库盘（默认主）</option><option>冷备盘</option><option>— 留空 —</option></select></div>
+                  <div><div style="font-size:10.5px;font-weight:600;color:var(--dh-text-secondary);margin-bottom:4px;">次存储</div><select class="mini"><option>冷备盘（默认次）</option><option>仓库盘</option><option>— 留空 —</option></select></div>
+                </div>
+                <div style="font-size:10px;color:var(--dh-text-muted);margin-top:6px;">主连不上自动切次；两档均留空 = 用设置页默认主/次</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 位置3 单作品采集页 -->
+    <div class="screen">
+      <div class="screen-head"><span class="num">3</span> 单作品采集页</div>
+      <div class="screen-body">
+        <span class="loc-badge">位置：单作品采集页 › 右上「采集方案」按钮展开 › 主存储/次存储 ＋ 方案信息</span>
+        <div class="mode-group">
+          <span class="mode-btn primary">🔍 解析</span>
+          <span class="mode-btn">⚡ 一键下载</span>
+          <span class="mode-btn">🔗 API请求</span>
+          <span class="mode-btn">▦ 采集方案</span>
+        </div>
+        <div class="settings-block">
+          <!-- 高亮：主/次存储 -->
+          <div class="hl"><span class="hl-tag">本次关注</span>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div><div style="font-size:10.5px;font-weight:600;color:var(--dh-text-secondary);margin-bottom:4px;display:flex;align-items:center;gap:5px;">📁 主存储</div><select class="mini"><option>本地SSD（默认主）</option><option>NAS备份</option><option>— 留空 —</option></select></div>
+              <div><div style="font-size:10.5px;font-weight:600;color:var(--dh-text-secondary);margin-bottom:4px;display:flex;align-items:center;gap:5px;">📂 次存储</div><select class="mini"><option>NAS备份（默认次）</option><option>本地SSD</option><option>— 留空 —</option></select></div>
+            </div>
+            <div style="font-size:10px;color:var(--dh-text-muted);margin-top:6px;">主连不上自动切换；命名 = 所选存储方案的命名（在设置页该方案里编辑）</div>
+          </div>
+          <div class="info-box">
+            <div class="info-grid">
+              <div><span class="k">保存目录</span><br><span class="v">D:/DL/single</span></div>
+              <div><span class="k">命名模板</span><br><span class="v mono">{time} {author} {title}</span></div>
+              <div style="grid-column:1/-1;"><span class="k">文件名预览</span><br><span class="v mono">2026-08-20_14-30-视频-高管专访.mp4</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════ 第二部分：关联链路 ═══════ -->
+  <h2 class="section">二、它们的关联 <small>设置页是唯一源头，两个采集入口只做"选择 + 继承"</small></h2>
+  <div class="flow">
+    <div class="flow-node src">
+      <div class="fn-ic">⚙</div>
+      <h4>设置页 · 下载与文件</h4>
+      <p>定义两套存储方案池（单作品池 / 增量池）+ 默认命名；标记"默认主/默认次"</p>
+    </div>
+    <div class="flow-arrow"><span class="ar">→</span><b>预填 + 留空继承</b></div>
+    <div class="flow-node cons">
+      <div class="fn-ic">▦</div>
+      <h4>增量采集页 · 采集方案</h4>
+      <p>从「增量池」选主/次；两档留空 = 用设置页默认主/次</p>
+    </div>
+    <div class="flow-arrow"><span class="ar">→</span><b>预填 + 留空继承</b></div>
+    <div class="flow-node cons">
+      <div class="fn-ic">📄</div>
+      <h4>单作品采集页 · 采集方案</h4>
+      <p>从「单作品池」选主/次；命名留空 = 继承默认命名</p>
+    </div>
+  </div>
+  <div class="inherit-card">
+    <b>继承规则（当前只埋在灰色说明文字里，用户感知不到）：</b><br>
+    ① 采集入口的主/次下拉<strong>预填</strong>设置页标记好的"默认主/次"；② 用户若把某档改成"留空"，运行时回退到设置页默认；③ 命名模板留空则继承设置页对应套的默认命名。三处本质共用同一个"存储方案"概念，但<strong>当前形状不统一、继承不可见</strong>。
+  </div>
+
+  <!-- ═══════ 第三部分：问题与改进 ═══════ -->
+  <h2 class="section">三、问题 + 改进方案 <small>纯视觉统一，不动数据逻辑</small></h2>
+  <div class="improve">
+
+    <div class="imp-card">
+      <h3>🔍 当前真问题 <span class="tag">4 项</span></h3>
+      <p class="sub">基于三处真实代码核对</p>
+      <ul class="prob-list">
+        <li><span class="pk">1</span><span class="pt"><b>同一概念三处形状不同</b>：设置页是带角色胶囊的可编辑行；弹窗与单作品面板是裸 <code>&lt;select&gt;</code> + 灰色说明，眼睛认不出"这是同一个存储方案"。</span></li>
+        <li><span class="pk">2</span><span class="pt"><b>继承关系埋在灰字里</b>："两档均留空时用设置页默认主/次"只是说明文字，用户不知道自己当前实际会落到哪个盘。</span></li>
+        <li><span class="pk">3</span><span class="pt"><b>硬编码语义色违规</b>：存储行写了 <code>#16A34A/#DC2626/#d97706/rgba(0,97,164,.1)</code>，没走 <code>--dh-success/--dh-danger/--dh-warning/--dh-accent-soft</code>，暗色模式不跟随。</span></li>
+        <li><span class="pk">4</span><span class="pt"><b>内联样式散落</b>：弹窗 select 一长串 <code>style=...</code>，与单作品面板用的 <code>.template-select</code> 类不统一。</span></li>
+      </ul>
+    </div>
+
+    <div class="imp-card">
+      <h3>🎨 统一存储组件（改进后） <span class="tag">三处共用</span></h3>
+      <p class="sub">角色胶囊 + 名称 + 路径 + 状态点 + 继承指示 + 实际生效预览</p>
+      <div class="uni-inherit"><span class="pill">继承</span> 本档留空 → 自动使用「设置页·下载与文件」标记的默认主/次</div>
+      <div class="uni-storage">
+        <div class="uni-row">
+          <span class="role pri">默认主</span>
+          <div class="meta"><div class="nm">本地SSD</div><div class="pt">D:/DL/single</div></div>
+          <span class="st ok">● 可用</span>
+        </div>
+        <div class="uni-row">
+          <span class="role sec">默认次</span>
+          <div class="meta"><div class="nm">NAS备份</div><div class="pt">//nas/backup</div></div>
+          <span class="st fail">● 不可达</span>
+        </div>
+      </div>
+      <div class="uni-effective" style="margin-top:8px;">
+        <span class="lab">实际生效：</span> 主 <b>本地SSD</b> → 次 <b>NAS备份</b>（主不可达时自动切换，整套命名/开关随之生效）
+      </div>
+      <p class="sub" style="margin-top:12px;">落地动作：① 三处共用该组件（角色胶囊/状态点/路径格式一致）；② "继承设置页默认"做成可见胶囊 + "实际生效"预览；③ 修硬编码色、收口内联样式。低风险、不动布局。</p>
+    </div>
+
+  </div>
+
+  <!-- ═══════ 第四部分：命名模板编辑器 ═══════ -->
+  <h2 class="section">四、命名编辑器组件（每方案内嵌 · 共用一套交互/逻辑） <small>字段可增减 · 可拖动排序 · 无统一默认</small></h2>
+  <div class="ne">
+    <div class="ne-note">⚠ <strong>方案 B：每方案内嵌，共用同一套编辑器组件</strong>。这一套编辑器会被嵌入<strong>每一个存储方案</strong>（单作品池 + 增量池），以及单作品 / 增量采集页里的命名位置；改这一处逻辑，所有地方同步更新。无统一默认、无"留空继承"——每个方案在此直接编辑并保存自己的命名代码。下方「复制」仅为跨方案复用提供便利，不是必需流程。</div>
+    <div class="ne-cols">
+      <div class="ne-col">
+        <h4>① 可选字段（点击 ＋ 添加）</h4>
+        <div class="ne-palette">
+          <span class="ne-chip" data-k="create_time"><span class="plus">＋</span>创建时间</span>
+          <span class="ne-chip" data-k="type"><span class="plus">＋</span>类型</span>
+          <span class="ne-chip" data-k="nickname"><span class="plus">＋</span>账号昵称</span>
+          <span class="ne-chip" data-k="desc"><span class="plus">＋</span>描述</span>
+          <span class="ne-chip" data-k="id"><span class="plus">＋</span>作品ID</span>
+          <span class="ne-chip" data-k="uid"><span class="plus">＋</span>用户ID</span>
+          <span class="ne-chip" data-k="mark"><span class="plus">＋</span>备注</span>
+        </div>
+        <div class="ne-sep-sel">② 字段间分隔符
+          <select id="ne-sep"><option value="-">- 短横</option><option value="_">_ 下划线</option><option value=" ">空格</option><option value="">无</option></select>
+        </div>
+      </div>
+      <div class="ne-col">
+        <h4>③ 当前组成（拖动 ⠿ 排序，× 删除）</h4>
+        <div class="ne-current" id="ne-current"></div>
+        <div class="ne-out">
+          <h4>④ 生成命名代码</h4>
+          <div class="ne-code" id="ne-code"></div>
+          <div class="ne-actions">
+            <button class="ne-copy" id="ne-copy">复制命名代码</button>
+            <span style="font-size:11px;color:var(--dh-text-muted);">复制到剪贴板 → 粘贴进方案「命名」框 / 或方案里点 ✎ 直接编辑</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="inherit-card" style="margin-top:18px;">
+    <b>已定方案 · B（每方案内嵌，共用同一组件）</b><br>
+    命名编辑器作为<strong>单一可复用组件</strong>，嵌入每个存储方案（单作品池 / 增量池）以及单作品、增量采集页的命名位置。一处逻辑更新，全局同步。无统一默认、无复制粘贴负担，每个方案各自保存命名代码。下一步据此改造真实代码：把现有 settings.html 的命名弹窗抽成共用组件，下沉到每个方案的「命名」行（✎ 触发），并让单作品 / 增量页复用同一组件。
+  </div>
+
+  <footer>
+    原型说明：位置 1/2/3 高亮框（红框 + "本次关注"标签）即对话里说的"下载与文件 / 增量采集的采集方案 / 单作品采集的采集方案"三处；存储方案默认折叠（点表头展开）；命名已改为「每方案内嵌的共用编辑器组件（方案 B）」，下方第四部分是其可交互原型。链路与改进方案基于对话结论（设置页管池子、两入口只选主/次且留空回退；命名各方案内嵌编辑、无默认继承）绘制，而非直接 dump 代码。
+  </footer>
+
+</div>
+<script>
+  function toggleSS(el){el.closest('.ss-card').classList.toggle('open');}
+  var NF={create_time:'创建时间',type:'类型',nickname:'账号昵称',desc:'描述',id:'作品ID',uid:'用户ID',mark:'备注'};
+  var order=['create_time','type','nickname','desc'];
+  function renderNE(){
+    var cur=document.getElementById('ne-current');
+    var sep=document.getElementById('ne-sep').value;
+    cur.innerHTML='';
+    if(order.length===0){cur.innerHTML='<span class="ne-empty">（尚未添加字段，点击左侧 ＋ 添加）</span>';}
+    order.forEach(function(k,i){
+      var item=document.createElement('div');
+      item.className='ne-item'; item.draggable=true;
+      item.innerHTML='<span class="h">⠿</span>'+NF[k]+'<span class="x" data-x="'+i+'">×</span>';
+      item.addEventListener('dragstart',function(e){e.dataTransfer.setData('text/plain',String(i));});
+      item.addEventListener('dragover',function(e){e.preventDefault();});
+      item.addEventListener('drop',function(e){
+        e.preventDefault();
+        var from=parseInt(e.dataTransfer.getData('text/plain'),10);
+        var to=i; if(from===to)return;
+        var m=order.splice(from,1)[0];
+        order.splice(to,0,m); renderNE();
+      });
+      cur.appendChild(item);
+      if(i<order.length-1){var s=document.createElement('span');s.className='ne-sep';s.textContent=sep;cur.appendChild(s);}
+    });
+    var code=order.map(function(k){return '{'+k+'}';}).join(sep);
+    document.getElementById('ne-code').textContent=code;
+    window.__necode=code;
+    Array.prototype.forEach.call(cur.querySelectorAll('.x'),function(x){
+      x.addEventListener('click',function(e){e.stopPropagation();order.splice(parseInt(x.dataset.x,10),1);renderNE();});
+    });
+  }
+  document.querySelectorAll('.ne-chip').forEach(function(c){
+    c.addEventListener('click',function(){order.push(c.dataset.k);renderNE();});
+  });
+  document.getElementById('ne-sep').addEventListener('change',renderNE);
+  document.getElementById('ne-copy').addEventListener('click',function(){
+    var t=window.__necode||'';
+    if(navigator.clipboard){navigator.clipboard.writeText(t);}
+    this.textContent='✓ 已复制'; this.classList.add('done');
+    var self=this; setTimeout(function(){self.textContent='复制命名代码';self.classList.remove('done');},1500);
+  });
+  renderNE();
+</script>
+</body>
+</html>

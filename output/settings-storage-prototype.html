@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设置 · 下载与文件（存储方案融合原型 v0.2 · 全项补全）</title>
+<style>
+:root{
+  --dh-bg:#FBFAF7; --dh-surface:#FFFFFF; --dh-surface-muted:#F5F2EC;
+  --dh-accent:#0061A4; --dh-accent-soft:#E6F1FB; --dh-border:#ECE7DF;
+  --dh-text:#1F2328; --dh-text-secondary:#4B5563; --dh-text-muted:#8A9199;
+  --dh-green:#2E8B57; --dh-green-soft:#EAF3E2;
+  --dh-red:#C0392B; --dh-red-soft:#FCEBEA;
+  --dh-gray:#8A9199; --dh-gray-soft:#F1EFE8;
+  --dh-radius:16px; --dh-radius-sm:8px;
+  --dh-font:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--dh-bg);color:var(--dh-text);font-family:var(--dh-font);font-size:13.5px;line-height:1.6;}
+.topbar{background:var(--dh-surface);border-bottom:1px solid var(--dh-border);padding:11px 26px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:60;}
+.topbar .logo{width:24px;height:24px;border-radius:7px;background:var(--dh-accent);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+.topbar .crumb{font-size:12.5px;color:var(--dh-text-muted);}
+.topbar .crumb b{color:var(--dh-text);font-weight:600;}
+.page{max-width:960px;margin:0 auto;padding:18px 26px 60px;}
+.page h1{font-size:19px;font-weight:600;margin-bottom:2px;}
+.page .page-sub{font-size:12.5px;color:var(--dh-text-muted);margin-bottom:14px;}
+.tabs-wrap{position:sticky;top:47px;z-index:55;background:color-mix(in srgb,var(--dh-bg) 88%,transparent);padding:8px 0;backdrop-filter:blur(8px);}
+.tabs{display:inline-flex;align-items:center;gap:4px;padding:3px;background:var(--dh-surface-muted);border:1px solid var(--dh-border);border-radius:999px;}
+.tab{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:var(--dh-text-secondary);padding:6px 15px;border:none;background:none;border-radius:999px;cursor:pointer;white-space:nowrap;font-family:inherit;transition:all .15s;}
+.tab:hover{color:var(--dh-text);background:rgba(0,0,0,.04);}
+.tab.active{background:var(--dh-accent);color:#fff;}
+.group{display:none;}
+.group.active{display:block;}
+.group-label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--dh-text-muted);margin:10px 0 12px;display:flex;align-items:center;gap:8px;}
+.group-label::after{content:'';flex:1;height:1px;background:var(--dh-border);}
+.placeholder{background:var(--dh-surface);border:1px dashed var(--dh-border);border-radius:var(--dh-radius);padding:34px;text-align:center;color:var(--dh-text-muted);font-size:13px;}
+.card{background:var(--dh-surface);border:1px solid var(--dh-border);border-radius:var(--dh-radius);margin-bottom:16px;overflow:hidden;box-shadow:0 1px 3px rgba(31,35,40,.04);}
+.card-head{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--dh-border);}
+.card-head .ic{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;}
+.card-head.single .ic{background:var(--dh-accent-soft);color:var(--dh-accent);}
+.card-head.batch .ic{background:var(--dh-green-soft);color:var(--dh-green);}
+.card-head h2{font-size:14px;font-weight:600;}
+.card-head .sub{color:var(--dh-text-muted);font-size:12px;margin-left:2px;}
+.card-body{padding:16px 18px 18px;}
+.info-banner{background:var(--dh-surface-muted);border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);padding:10px 14px;font-size:12.5px;color:var(--dh-text-muted);line-height:1.75;margin-bottom:14px;}
+.info-banner b{color:var(--dh-text-secondary);}
+.info-banner code{background:var(--dh-surface);border:1px solid var(--dh-border);border-radius:4px;padding:0 5px;font-size:11.5px;font-family:ui-monospace,Consolas,monospace;}
+.dh-section{margin-bottom:22px;}
+.dh-section:last-child{margin-bottom:0;}
+.dh-section-title{font-size:12.5px;font-weight:700;color:var(--dh-text-secondary);margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+.dh-section-title::before{content:'';width:3px;height:12px;border-radius:2px;background:var(--dh-accent);}
+.fallback-note{display:flex;gap:8px;background:var(--dh-surface-muted);border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);padding:9px 12px;font-size:12px;color:var(--dh-text-secondary);line-height:1.7;margin-bottom:12px;}
+.fallback-note b{color:var(--dh-text);}
+.profile-row{display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);margin-bottom:8px;background:var(--dh-surface);transition:opacity .15s;}
+.profile-row:last-of-type{margin-bottom:0;}
+.profile-row.disabled{opacity:.5;}
+.idx{width:23px;height:23px;border-radius:50%;background:var(--dh-accent-soft);color:var(--dh-accent);font-size:11.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-size:11.5px;line-height:1.5;font-weight:500;flex-shrink:0;white-space:nowrap;}
+.badge .dot{width:6px;height:6px;border-radius:50%;}
+.badge.ok{background:var(--dh-green-soft);color:var(--dh-green);}.badge.ok .dot{background:var(--dh-green);}
+.badge.fail{background:var(--dh-red-soft);color:var(--dh-red);}.badge.fail .dot{background:var(--dh-red);}
+.badge.none{background:var(--dh-gray-soft);color:var(--dh-gray);}.badge.none .dot{background:var(--dh-gray);}
+.profile-row input[type=text]{border:1px solid var(--dh-border);border-radius:6px;padding:6px 9px;font-size:12.5px;background:var(--dh-surface);color:var(--dh-text);outline:none;font-family:var(--dh-font);min-width:0;}
+.profile-row input[type=text]:focus{border-color:var(--dh-accent);box-shadow:0 0 0 2px rgba(0,97,164,.12);}
+.in-name{width:108px;flex-shrink:0;}
+.in-path{flex:2;}
+.in-nfmt{flex:1.15;}
+.switch{position:relative;width:34px;height:19px;flex-shrink:0;}
+.switch input{opacity:0;width:0;height:0;}
+.switch .slider{position:absolute;inset:0;background:#D6D3CC;border-radius:999px;cursor:pointer;transition:.15s;}
+.switch .slider::before{content:"";position:absolute;width:15px;height:15px;border-radius:50%;background:#fff;top:2px;left:2px;transition:.15s;}
+.switch input:checked + .slider{background:var(--dh-accent);}
+.switch input:checked + .slider::before{transform:translateX(15px);}
+.row-ops{display:flex;gap:4px;flex-shrink:0;}
+.icon-btn{width:26px;height:26px;border:1px solid var(--dh-border);background:var(--dh-surface);border-radius:6px;cursor:pointer;color:var(--dh-text-secondary);font-size:13px;display:flex;align-items:center;justify-content:center;transition:.12s;font-family:var(--dh-font);}
+.icon-btn:hover:not(:disabled){border-color:var(--dh-accent);color:var(--dh-accent);background:var(--dh-accent-soft);}
+.icon-btn.danger:hover:not(:disabled){border-color:var(--dh-red);color:var(--dh-red);background:var(--dh-red-soft);}
+.icon-btn:disabled{opacity:.35;cursor:not-allowed;}
+.toolbar{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap;}
+.btn{border:1px solid var(--dh-border);background:var(--dh-surface);color:var(--dh-text-secondary);border-radius:7px;padding:7px 13px;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:.12s;font-family:var(--dh-font);}
+.btn:hover{border-color:var(--dh-accent);color:var(--dh-accent);}
+.btn.primary{background:var(--dh-accent);border-color:var(--dh-accent);color:#fff;}
+.btn.primary:hover{background:#00518A;color:#fff;}
+.btn.sm{padding:5px 10px;font-size:12px;}
+.use-row{display:flex;align-items:center;gap:10px;background:var(--dh-surface-muted);border:1px dashed var(--dh-border);border-radius:var(--dh-radius-sm);padding:10px 14px;margin-top:12px;flex-wrap:wrap;}
+.use-row .lab{font-size:12.5px;font-weight:600;color:var(--dh-text-secondary);white-space:nowrap;}
+.use-row select{border:1px solid var(--dh-border);border-radius:6px;padding:6px 9px;font-size:12.5px;background:var(--dh-surface);color:var(--dh-text);outline:none;min-width:210px;font-family:var(--dh-font);}
+.use-row select:focus{border-color:var(--dh-accent);}
+.use-row .hint{font-size:11.5px;color:var(--dh-text-muted);}
+.nfmt-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.nfmt-row input{flex:1;min-width:220px;border:1px solid var(--dh-border);border-radius:6px;padding:8px 11px;font-size:12.5px;font-family:ui-monospace,Consolas,monospace;outline:none;background:var(--dh-surface);color:var(--dh-text);}
+.nfmt-row input:focus{border-color:var(--dh-accent);}
+.nfmt-demo{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--dh-text-secondary);background:var(--dh-surface-muted);border:1px dashed var(--dh-border);border-radius:var(--dh-radius-sm);padding:8px 12px;margin-top:8px;word-break:break-all;}
+.small-note{font-size:11.5px;color:var(--dh-text-muted);margin-top:6px;line-height:1.65;}
+.opt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;}
+.opt-item{display:flex;align-items:center;gap:9px;border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);padding:9px 12px;font-size:12.5px;color:var(--dh-text-secondary);background:var(--dh-surface);}
+.opt-item .t{flex:1;}
+.opt-item .tag{font-size:10px;font-weight:600;color:var(--dh-text-muted);background:var(--dh-gray-soft);border-radius:999px;padding:1px 8px;white-space:nowrap;}
+.opt-item input[type=number]{width:70px;border:1px solid var(--dh-border);border-radius:6px;padding:5px 8px;font-size:12.5px;outline:none;font-family:var(--dh-font);}
+.opt-item input[type=number]:focus{border-color:var(--dh-accent);}
+.opt-item .unit{font-size:11px;color:var(--dh-text-muted);}
+.structure{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--dh-text-secondary);background:var(--dh-surface-muted);border:1px dashed var(--dh-border);border-radius:var(--dh-radius-sm);padding:10px 14px;line-height:1.8;margin-top:10px;word-break:break-all;white-space:pre-wrap;}
+.folder-row{display:flex;align-items:center;gap:12px;border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);padding:10px 14px;margin-top:12px;background:var(--dh-surface);}
+.folder-row .nm{font-size:13px;font-weight:600;color:var(--dh-text);display:flex;align-items:center;gap:6px;}
+.folder-row .nm .mini{font-size:10px;font-weight:600;color:var(--dh-text-muted);background:var(--dh-gray-soft);border-radius:999px;padding:1px 7px;}
+.folder-row small{display:block;font-size:11.5px;color:var(--dh-text-muted);margin-top:1px;}
+.folder-row .switch{margin-left:auto;}
+/* 命名模板弹窗 */
+.overlay{position:fixed;inset:0;background:rgba(31,35,40,.45);z-index:200;display:none;align-items:center;justify-content:center;padding:20px;}
+.overlay.show{display:flex;}
+.nmodal{background:var(--dh-surface);border-radius:var(--dh-radius);width:560px;max-width:100%;max-height:88vh;overflow:auto;border:1px solid var(--dh-border);box-shadow:0 16px 50px rgba(0,0,0,.2);}
+.nmodal-head{display:flex;align-items:center;justify-content:space-between;padding:15px 20px;border-bottom:1px solid var(--dh-border);}
+.nmodal-head h3{font-size:14px;font-weight:600;display:flex;align-items:center;gap:7px;}
+.nmodal-close{border:none;background:none;font-size:16px;color:var(--dh-text-muted);cursor:pointer;line-height:1;padding:4px;}
+.nmodal-body{padding:18px 20px;}
+.nmodal-body .lab{font-size:12px;font-weight:600;color:var(--dh-text-secondary);margin:0 0 7px;display:block;}
+.tpl-fields{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;}
+.tpl-chip{font-size:12px;padding:5px 12px;border:1px solid var(--dh-border);border-radius:999px;background:var(--dh-surface);color:var(--dh-text-secondary);cursor:pointer;transition:all .12s;font-family:var(--dh-font);}
+.tpl-chip:hover{border-color:var(--dh-accent);color:var(--dh-accent);}
+.tpl-chip[data-on]{background:var(--dh-accent-soft);border-color:var(--dh-accent);color:var(--dh-accent);font-weight:600;}
+.fixed-note{background:var(--dh-surface-muted);border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);padding:9px 12px;font-size:11.5px;color:var(--dh-text-muted);line-height:1.7;margin-top:14px;}
+.nmodal-foot{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--dh-border);}
+.toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--dh-text);color:#fff;padding:9px 18px;border-radius:8px;font-size:12.5px;opacity:0;transition:.25s;z-index:300;box-shadow:0 6px 20px rgba(0,0,0,.18);}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.prototype-tag{position:fixed;right:16px;bottom:14px;background:var(--dh-accent);color:#fff;font-size:11px;font-weight:600;border-radius:999px;padding:5px 12px;opacity:.85;z-index:80;}
+@media(max-width:860px){ .profile-row{flex-wrap:wrap;} .in-name{width:100%;} }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">D</div>
+  <span class="crumb">DoukHub / <b>设置</b></span>
+</div>
+
+<div class="page">
+  <h1>设置</h1>
+  <div class="page-sub">原型 v0.2：存储方案融合进「下载与文件」两个大卡 · 原有设置项全部保留</div>
+
+  <div class="tabs-wrap">
+    <nav class="tabs">
+      <button type="button" class="tab" data-target="group-doukhub" onclick="switchTab(this)">DoukHub配置</button>
+      <button type="button" class="tab active" data-target="group-download" onclick="switchTab(this)">下载与文件</button>
+      <button type="button" class="tab" data-target="group-service" onclick="switchTab(this)">内核服务</button>
+      <button type="button" class="tab" data-target="group-feature" onclick="switchTab(this)">功能配置</button>
+    </nav>
+  </div>
+
+  <!-- ═══ 下载与文件 ═══ -->
+  <div class="group active" id="group-download">
+    <div class="group-label">下载与文件</div>
+
+    <div class="info-banner">
+      <b>文件名规则（自动生效，无需配置）</b><br>
+      • 分隔符：<code>-</code>（连字符） · 日期格式：<code>20260823_001200</code> · 总长度上限：<code>80</code> 字符（NAS/SMB 安全阈值）<br>
+      • 自动清洗：Emoji、特殊字符、全角符号、零宽字符、Windows 非法字符 · 仅可变字段截断：作者 ≤20 字符、标题 ≤38 字符
+    </div>
+
+    <!-- ═══ 单作品大卡 ═══ -->
+    <div class="card">
+      <div class="card-head single">
+        <div class="ic">单</div>
+        <h2>单作品采集</h2>
+        <div class="sub">粘贴链接逐条下载 · 直存到指定目录</div>
+      </div>
+      <div class="card-body">
+        <!-- 存储方案 -->
+        <div class="dh-section">
+          <div class="dh-section-title">存储方案</div>
+          <div class="fallback-note">按上→下顺序探测，「可用」即落盘；前一个连不上自动切下一个（远程路径探测带超时，不卡死）。全部失败则报错停止。</div>
+          <div id="single-list"></div>
+          <div class="toolbar">
+            <button class="btn primary" onclick="addProfile('single')">＋ 新建方案</button>
+            <button class="btn" onclick="testAll('single')">测试全部连接</button>
+            <span style="font-size:11.5px;color:var(--dh-text-muted);margin-left:auto;">命名留空 = 继承下方全局默认</span>
+          </div>
+          <div class="use-row">
+            <span class="lab">使用方式</span>
+            <select id="single-use" onchange="onUseChange('single')"></select>
+            <span class="hint" id="single-use-hint"></span>
+          </div>
+          <div class="folder-row">
+            <div>
+              <span class="nm">每作品独立子文件夹 <span class="mini">单作品</span></span>
+              <small>开启后每个作品下载到以其文件名命名的子文件夹（与增量采集一致）</small>
+            </div>
+            <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+          </div>
+        </div>
+        <!-- 命名 -->
+        <div class="dh-section">
+          <div class="dh-section-title">命名（默认命名模板）</div>
+          <div class="nfmt-row">
+            <input id="single-nfmt-input" value="{create_time} {author} {title}" oninput="onNfmtInput('single',this.value)">
+            <button class="btn sm" onclick="openNameModal('single')">编辑字段</button>
+            <button class="btn sm" onclick="dupToBatch()" title="把单作品默认命名映射字段后复制为增量默认命名">复制为增量命名</button>
+          </div>
+          <div class="nfmt-demo" id="single-nfmt-demo">2026-08-23_00-12 - 竞品A - 高管专访抢先看.mp4</div>
+          <div class="small-note">命名模板决定文件名规则；方案内命名留空时使用此默认。修改后自动保存。</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ 增量大卡 ═══ -->
+    <div class="card">
+      <div class="card-head batch">
+        <div class="ic">增</div>
+        <h2>增量采集</h2>
+        <div class="sub">方案 / 定时任务抓取整号作品 · 自动建 平台/账号 目录</div>
+      </div>
+      <div class="card-body">
+        <!-- 存储方案 -->
+        <div class="dh-section">
+          <div class="dh-section-title">存储方案</div>
+          <div class="fallback-note">定时任务同样使用本列表：凌晨家里 NAS 关机时自动落到本地，不中断任务。</div>
+          <div id="batch-list"></div>
+          <div class="toolbar">
+            <button class="btn primary" onclick="addProfile('batch')">＋ 新建方案</button>
+            <button class="btn" onclick="testAll('batch')">测试全部连接</button>
+            <span style="font-size:11.5px;color:var(--dh-text-muted);margin-left:auto;">命名留空 = 继承下方全局默认</span>
+          </div>
+          <div class="use-row">
+            <span class="lab">使用方式</span>
+            <select id="batch-use" onchange="onUseChange('batch')"></select>
+            <span class="hint" id="batch-use-hint"></span>
+          </div>
+          <!-- 目录结构预览：跟随当前生效方案 -->
+          <div class="small-note" style="margin-top:12px;">目录结构预览（跟随当前生效方案）：</div>
+          <div class="structure" id="batch-structure"></div>
+          <div class="folder-row">
+            <div>
+              <span class="nm">每作品独立子文件夹 <span class="mini">仅增量</span></span>
+              <small>开启后每个作品下载到以其文件名命名的子文件夹</small>
+            </div>
+            <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+          </div>
+        </div>
+        <!-- 命名 -->
+        <div class="dh-section">
+          <div class="dh-section-title">命名（默认命名模板）</div>
+          <div class="nfmt-row">
+            <input id="batch-nfmt-input" value="{create_time} {type} {nickname} {desc}" oninput="onNfmtInput('batch',this.value)">
+            <button class="btn sm" onclick="openNameModal('batch')">编辑字段</button>
+          </div>
+          <div class="nfmt-demo" id="batch-nfmt-demo">2026-08-23_00-12 - 视频 - 竞品A - 高管专访抢先看.mp4</div>
+          <div class="small-note">方案内命名留空时使用此默认。目录结构仍为 根目录/平台/账号昵称，由系统自动创建。</div>
+        </div>
+        <!-- 附属下载 -->
+        <div class="dh-section">
+          <div class="dh-section-title">附属下载</div>
+          <div class="opt-grid">
+            <div class="opt-item"><span class="t">下载音乐</span><span class="tag">.mp3</span><label class="switch"><input type="checkbox"><span class="slider"></span></label></div>
+            <div class="opt-item"><span class="t">动态封面</span><span class="tag">.webp</span><label class="switch"><input type="checkbox"><span class="slider"></span></label></div>
+            <div class="opt-item"><span class="t">静态封面</span><span class="tag">.jpeg</span><label class="switch"><input type="checkbox"><span class="slider"></span></label></div>
+            <div class="opt-item"><span class="t">文件大小上限</span><input type="number" value="0" min="0"><span class="unit">MB（0=不限）</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 其他分组（占位） ═══ -->
+  <div class="group" id="group-doukhub"><div class="group-label">DoukHub配置</div><div class="placeholder">沿用现有设置内容（本原型聚焦「下载与文件」）</div></div>
+  <div class="group" id="group-service"><div class="group-label">内核服务</div><div class="placeholder">沿用现有设置内容（本原型聚焦「下载与文件」）</div></div>
+  <div class="group" id="group-feature"><div class="group-label">功能配置</div><div class="placeholder">沿用现有设置内容（本原型聚焦「下载与文件」）</div></div>
+</div>
+
+<!-- ═══ 命名模板编辑器弹窗 ═══ -->
+<div class="overlay" id="nmodal">
+  <div class="nmodal">
+    <div class="nmodal-head">
+      <h3 id="nmodal-title">编辑命名模板</h3>
+      <button class="nmodal-close" onclick="closeNameModal()">×</button>
+    </div>
+    <div class="nmodal-body">
+      <label class="lab">点击字段添加 / 移除（顺序即文件名顺序）</label>
+      <div class="tpl-fields" id="nmodal-fields"></div>
+      <label class="lab">示例</label>
+      <div class="nfmt-demo" id="nmodal-demo" style="margin-top:0;">-</div>
+      <div class="fixed-note">
+        分隔符 <code>-</code>、日期格式 <code>20260823_001200</code>、总长度上限 <code>80</code>、作者 ≤20 字符 / 标题 ≤38 字符截断、自动清洗非法字符——均为固化规则，无需配置。
+      </div>
+    </div>
+    <div class="nmodal-foot">
+      <button class="btn" onclick="closeNameModal()">取消</button>
+      <button class="btn primary" onclick="saveNameModal()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="prototype-tag">UI 原型 · 未接后端</div>
+<div class="toast" id="toast"></div>
+
+<script>
+var FIELDS = [
+  { k:'create_time', t:'时间' }, { k:'type', t:'类型' }, { k:'nickname', t:'作者' },
+  { k:'desc', t:'标题' }, { k:'id', t:'作品ID' }, { k:'uid', t:'UID' }, { k:'mark', t:'备注' }
+];
+var DEMO = { create_time:'2026-08-23_00-12', type:'视频', nickname:'竞品A', desc:'高管专访抢先看', id:'7390001', uid:'MS4wLjAB', mark:'爆款' };
+var DB = {
+  single: {
+    use: 'auto', defaultNfmt: '{create_time} {author} {title}',
+    profiles: [
+      { name:'本地下载', path:'D:\\DoukHub\\Download\\单作品', nfmt:'', enabled:true, status:'none' },
+      { name:'家里 NAS',  path:'\\\\nas\\downloads\\single',   nfmt:'{create_time} {author} {title}', enabled:true, status:'none' },
+      { name:'备用网盘',  path:'E:\\backup\\single',           nfmt:'', enabled:false, status:'none' }
+    ]
+  },
+  batch: {
+    use: 'auto', defaultNfmt: '{create_time} {type} {nickname} {desc}',
+    profiles: [
+      { name:'本地下载', path:'D:\\DoukHub\\Download', nfmt:'', enabled:true, status:'none' },
+      { name:'家里 NAS',  path:'\\\\nas\\downloads\\batch',    nfmt:'{create_time} {type} {nickname} {desc}', enabled:true, status:'none' }
+    ]
+  }
+};
+var modalScope = 'single';
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function liveDemo(tpl){
+  var map = {};
+  FIELDS.forEach(function(f){ map['{'+f.k+'}'] = DEMO[f.k] || f.k; });
+  var out = tpl.replace(/\{\w+\}/g, function(m){ return map[m] || m; }).replace(/[\\\/:*?"<>|]/g,'-');
+  return (out || '（空）') + '.mp4';
+}
+/* 方案列表 */
+function renderList(key){
+  var box = document.getElementById(key + '-list');
+  var arr = DB[key].profiles;
+  var html = '';
+  arr.forEach(function(p, i){
+    var st = p.status === 'ok' ? '<span class="badge ok"><span class="dot"></span>可用</span>'
+          : p.status === 'fail' ? '<span class="badge fail"><span class="dot"></span>不可用</span>'
+          : '<span class="badge none"><span class="dot"></span>未检测</span>';
+    html +=
+    '<div class="profile-row' + (p.enabled ? '' : ' disabled') + '">' +
+      '<div class="idx">' + (i + 1) + '</div>' +
+      '<input class="in-name" type="text" value="' + esc(p.name) + '" placeholder="方案名" oninput="setField(\'' + key + '\',' + i + ',\'name\',this.value)">' +
+      '<input class="in-path" type="text" value="' + esc(p.path) + '" placeholder="下载路径（远程如 \\\\nas\\share）" oninput="setField(\'' + key + '\',' + i + ',\'path\',this.value)">' +
+      '<input class="in-nfmt" type="text" value="' + esc(p.nfmt) + '" placeholder="留空=继承全局" oninput="setField(\'' + key + '\',' + i + ',\'nfmt\',this.value)">' +
+      st +
+      '<label class="switch" title="参与故障转移"><input type="checkbox" ' + (p.enabled ? 'checked' : '') + ' onchange="toggleProfile(\'' + key + '\',' + i + ')"><span class="slider"></span></label>' +
+      '<div class="row-ops">' +
+        '<button class="icon-btn" title="上移" ' + (i === 0 ? 'disabled' : '') + ' onclick="moveProfile(\'' + key + '\',' + i + ',-1)">↑</button>' +
+        '<button class="icon-btn" title="下移" ' + (i === arr.length - 1 ? 'disabled' : '') + ' onclick="moveProfile(\'' + key + '\',' + i + ',1)">↓</button>' +
+        '<button class="icon-btn danger" title="删除" onclick="delProfile(\'' + key + '\',' + i + ')">×</button>' +
+      '</div>' +
+    '</div>';
+  });
+  if(!arr.length) html = '<div style="padding:16px;text-align:center;color:var(--dh-text-muted);border:1px dashed var(--dh-border);border-radius:8px;">还没有方案，点「新建方案」添加（第一个方案即默认兜底）。</div>';
+  box.innerHTML = html;
+  renderUse(key);
+  renderStructure();
+}
+function renderUse(key){
+  var sel = document.getElementById(key + '-use');
+  var arr = DB[key].profiles.filter(function(p){ return p.enabled; });
+  var html = '<option value="auto">自动（按顺序故障转移）</option>';
+  arr.forEach(function(p, i){ html += '<option value="p' + i + '">指定：' + esc(p.name) + '</option>'; });
+  sel.innerHTML = html;
+  sel.value = DB[key].use;
+  onUseChange(key);
+}
+function onUseChange(key){
+  var hint = document.getElementById(key + '-use-hint');
+  if(DB[key].use === 'auto'){
+    hint.textContent = '启动时依次探测，第一个可用即落盘；全部失败报错停止。';
+  } else {
+    var idx = parseInt(DB[key].use.replace('p',''), 10);
+    var p = DB[key].profiles.filter(function(x){ return x.enabled; })[idx];
+    hint.textContent = '强制使用「' + (p ? p.name : '?') + '」，不再自动切换。';
+  }
+  if(key === 'batch') renderStructure();
+}
+function activeProfile(key){
+  var arr = DB[key].profiles.filter(function(p){ return p.enabled && p.path; });
+  if(!arr.length) return null;
+  if(DB[key].use === 'auto') return arr[0];
+  var idx = parseInt(DB[key].use.replace('p',''), 10);
+  var list = DB[key].profiles.filter(function(p){ return p.enabled; });
+  return list[idx] || arr[0];
+}
+function renderStructure(){
+  var p = activeProfile('batch');
+  var box = document.getElementById('batch-structure');
+  if(!p){ box.textContent = '（暂无可用方案，目录预览待路径配置后显示）'; return; }
+  var root = p.path || '（根目录）';
+  box.textContent = root + '\\\n├── douyin\\（平台，自动创建）\n│   └── 账号昵称\\\n│       └── 2026-08-23_00-12 - 视频 - 竞品A - 高管专访抢先看.mp4\n└── tiktok\\（如启用）';
+}
+function setField(key, i, f, v){ DB[key].profiles[i][f] = v; DB[key].profiles[i].status = 'none'; renderList(key); }
+function toggleProfile(key, i){ DB[key].profiles[i].enabled = !DB[key].profiles[i].enabled; renderList(key); }
+function moveProfile(key, i, d){
+  var arr = DB[key].profiles, j = i + d;
+  if(j < 0 || j >= arr.length) return;
+  var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  renderList(key); toast('已调整优先级：' + arr[i].name + ' ⇄ ' + arr[j].name);
+}
+function delProfile(key, i){
+  if(!confirm('删除「' + DB[key].profiles[i].name + '」？')) return;
+  DB[key].profiles.splice(i, 1); renderList(key); toast('已删除');
+}
+function addProfile(key){
+  DB[key].profiles.push({ name:'新方案', path:'', nfmt:'', enabled:true, status:'none' });
+  renderList(key); toast('已添加，请填写路径');
+}
+function testAll(key){
+  var arr = DB[key].profiles, hit = false;
+  arr.forEach(function(p){
+    if(!p.enabled){ p.status = 'none'; return; }
+    if(!p.path){ p.status = 'fail'; return; }
+    p.status = hit ? 'fail' : 'ok';
+    if(p.status === 'ok') hit = true;
+  });
+  renderList(key);
+  toast('探测完成：' + (DB[key].use === 'auto' ? '将使用第一个可用方案' : '指定模式不参与探测'));
+}
+/* 命名 */
+function onNfmtInput(key, v){
+  DB[key].defaultNfmt = v;
+  document.getElementById(key + '-nfmt-demo').textContent = liveDemo(v);
+}
+function dupToBatch(){
+  var tpl = DB.single.defaultNfmt;
+  tpl = tpl.replace(/\{author\}/g, '{nickname}').replace(/\{title\}/g, '{desc}');
+  DB.batch.defaultNfmt = tpl;
+  document.getElementById('batch-nfmt-input').value = tpl;
+  document.getElementById('batch-nfmt-demo').textContent = liveDemo(tpl);
+  toast('已复制为增量默认命名');
+}
+/* 命名弹窗 */
+function openNameModal(scope){
+  modalScope = scope;
+  document.getElementById('nmodal-title').textContent = '编辑命名模板 · ' + (scope === 'single' ? '单作品' : '增量');
+  var cur = DB[scope].defaultNfmt;
+  var fields = document.getElementById('nmodal-fields');
+  fields.innerHTML = '';
+  FIELDS.forEach(function(f){
+    var chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'tpl-chip';
+    chip.textContent = f.t + ' ' + f.k;
+    chip.dataset.on = cur.indexOf('{' + f.k + '}') >= 0 ? '1' : '';
+    chip.onclick = function(){ chip.dataset.on = chip.dataset.on ? '' : '1'; renderModalDemo(); };
+    fields.appendChild(chip);
+  });
+  renderModalDemo();
+  document.getElementById('nmodal').classList.add('show');
+}
+function renderModalDemo(){
+  var tpl = '';
+  document.querySelectorAll('#nmodal-fields .tpl-chip').forEach(function(c){
+    if(c.dataset.on) tpl += '{' + c.textContent.trim().split(' ')[1] + '} ';
+  });
+  document.getElementById('nmodal-demo').textContent = liveDemo(tpl.trim());
+  document.getElementById('nmodal-demo').dataset.tpl = tpl.trim();
+}
+function saveNameModal(){
+  var tpl = document.getElementById('nmodal-demo').dataset.tpl || '';
+  DB[modalScope].defaultNfmt = tpl;
+  document.getElementById(modalScope + '-nfmt-input').value = tpl;
+  document.getElementById(modalScope + '-nfmt-demo').textContent = liveDemo(tpl);
+  closeNameModal();
+  toast('命名模板已保存');
+}
+function closeNameModal(){ document.getElementById('nmodal').classList.remove('show'); }
+/* Tab */
+function switchTab(el){
+  document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+  el.classList.add('active');
+  document.querySelectorAll('.group').forEach(function(g){ g.classList.remove('active'); });
+  document.getElementById(el.dataset.target).classList.add('active');
+}
+var toastTimer;
+function toast(msg){
+  var el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ el.classList.remove('show'); }, 2200);
+}
+renderList('single');
+renderList('batch');
+</script>
+</body>
+</html>

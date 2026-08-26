@@ -38,3 +38,17 @@ Download/
 node_modules/
 package.json
 package-lock.json
+
+# 开发调试残留（临时脚本/截图/预览，保留在磁盘但不跟踪）
+_dbg_*.js
+_shot_*
+_fix_*.py
+_redo_*.py
+_gen_*.py
+_drag_*
+_tablecheck.js
+_tagcheck.js
+_tmp_*.js
+_preview_*.html
+.rundata/
+backup/

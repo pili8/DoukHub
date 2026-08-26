@@ -87,6 +87,27 @@ DEFAULT_CONFIG = {
     "collection_defaults": {
         "folder_name": "Download",
         "name_format": "create_time type nickname desc",
+        "split": "-",
+        "date_format": "%Y%m%d_%H%M%S",
+        "folder_mode": False,
+        "music": False,
+        "dynamic_cover": False,
+        "static_cover": False,
+        "max_size": 0,
+        "storage_format": "",
+    },
+    # 存储方案（2026-08-23 v3）：单作品/增量各自一份方案列表，
+    # 每个方案可标记 role: primary(主)/secondary(次)/空(自由指定)，支持任意多个方案
+    # choice: "auto"（主→次）| "p:<id>"（指定方案）| "primary" | "secondary"
+    "storage_profiles": {
+        "single": {
+            "default_name_format": "{create_time} {author} {title}",
+            "profiles": [],
+        },
+        "batch": {
+            "default_name_format": "create_time type nickname desc",
+            "profiles": [],
+        },
     },
 }
 
@@ -181,15 +202,31 @@ class Config:
 
     @property
     def collection_defaults(self) -> dict:
-        """增量采集的全局默认设置（folder_name + name_format）"""
+        """增量采集的全局默认设置（folder_name + name_format + 引擎参数）"""
         return self._data.get("collection_defaults", {
             "folder_name": "Download",
             "name_format": "create_time type nickname desc",
+            "split": "-",
+            "date_format": "%Y%m%d_%H%M%S",
+            "folder_mode": False,
+            "music": False,
+            "dynamic_cover": False,
+            "static_cover": False,
+            "max_size": 0,
+            "storage_format": "",
         })
 
     @property
     def concurrent_accounts(self) -> int:
         return self._data.get("concurrent_accounts", 3)
+
+    @property
+    def storage_profiles(self) -> dict:
+        """存储方案（single/batch 两套有序列表）"""
+        return self._data.get("storage_profiles", {
+            "single": {"use": "auto", "default_name_format": "{create_time} {author} {title}", "profiles": []},
+            "batch": {"use": "auto", "default_name_format": "create_time type nickname desc", "profiles": []},
+        })
 
     @property
     def api_config(self) -> dict:

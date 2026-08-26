@@ -2,7 +2,8 @@
 {% block title %}设置 - DoukHub{% endblock %}
 {% block content %}
 <style>
-/* 设置页:折叠卡片。卡片用白色表面(--surface-raised)，与米色页面背景(--dh-background)形成层次 */
+/* 设置页:折叠卡片。默认全部展开（open 态），用户可手动折叠。
+   卡片用白色表面(--surface-raised)，与米色页面背景(--dh-background)形成层次 */
 .settings-card { background: var(--surface-raised, var(--bg-input)); border: 1px solid var(--border-default); border-radius: var(--radius-lg); margin-bottom: 14px; overflow: hidden; box-shadow: var(--shadow-sm); }
 .settings-card-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
@@ -17,51 +18,89 @@
 .settings-card-head .card-arrow { margin-left: auto; color: var(--text-muted); transition: transform .15s; }
 .settings-card.open .settings-card-head .card-arrow svg[data-lucide] { transform: rotate(180deg); }
 .settings-card-body { padding: 4px 18px 18px; border-top: 1px solid var(--border-default); }
-.settings-card:not(.open) .settings-card-body { display: none; }
-/* 文件名模板字段 chips */
-.tpl-fields { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
-.tpl-chip {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 12px; padding: 4px 11px;
-  border: 1px solid var(--border-strong, var(--border-default)); border-radius: 9999px;
-  background: var(--surface-overlay, var(--bg-input)); color: var(--text-secondary); cursor: pointer;
-  transition: all .12s;
-}
-.tpl-chip:hover { border-color: var(--accent); color: var(--accent); }
-.tpl-chip[data-added] { background: var(--dh-accent-soft, var(--accent-active, #E7F0F8)); border-color: var(--accent); color: var(--accent); font-weight: 600; }
-.tpl-chip .x { color: var(--text-muted); font-size: 11px; cursor: pointer; }
-.tpl-chip .x:hover { color: var(--danger); }
-.tpl-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
-.tpl-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-sm);
-  background: var(--bg-muted); font-size: 12.5px; color: var(--text-secondary);
-}
-.tpl-row .grip { color: var(--text-muted); cursor: grab; display: flex; }
-.tpl-row .grip svg[data-lucide] { width: 14px; height: 14px; }
-.tpl-row .val { font-weight: 600; color: var(--text-primary); flex: 1; }
-.tpl-row .demo { color: var(--text-muted); font-family: var(--font-mono); font-size: 11.5px; }
-.tpl-row button { border: none; background: none; color: var(--text-muted); cursor: pointer; display: flex; padding: 2px; }
-.tpl-row button:hover { color: var(--danger); }
-.tpl-row button svg[data-lucide] { width: 14px; height: 14px; }
-.tpl-empty { padding: 8px 12px; font-size: 12px; color: var(--text-muted); border: 1px dashed var(--border-strong, var(--border-default)); border-radius: var(--radius-sm); }
-.tpl-preview {
-  padding: 10px 12px; border: 1px dashed var(--border-strong, var(--border-default)); border-radius: var(--radius-sm);
-  font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); background: var(--surface-overlay, var(--bg-muted));
-  word-break: break-all;
-}
-/* 目录结构预览 */
-.structure {
-  margin-top: 4px; padding: 12px 14px; background: var(--bg-muted);
-  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
-  font-family: var(--font-mono); font-size: 12px; line-height: 1.9; color: var(--text-secondary);
-  overflow-x: auto; white-space: nowrap;
-}
-.structure b { color: var(--text-primary); font-weight: 600; }
-.structure .dep { color: var(--text-muted); }
-.structure .note { color: var(--accent); }
+/* 默认展开：仅显式折叠(.collapsed)时隐藏正文 */
+.settings-card.collapsed .settings-card-body { display: none; }
+/* 折叠态箭头反转（与展开态视觉一致：collapsed 显示为未旋转的下箭头） */
+.settings-card.collapsed .settings-card-head .card-arrow svg[data-lucide] { transform: rotate(0deg); }
 
-/* ===== 经典开关（最朴素版：灰底→蓝底 + 白色圆钮，仅开关本体可点，置于行尾） ===== */
+/* ===== 分组 Tab 导航（替代长滚动：点击切换，每组一张面板） ===== */
+.settings-tabs-wrap {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--dh-background, var(--bg-muted, #f5f5f0));
+  padding: 10px 0 8px; margin-bottom: 6px;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--dh-background, #f5f5f0) 88%, transparent);
+}
+.settings-tabs {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px;
+  background: var(--surface-overlay, var(--bg-muted));
+  border: 1px solid var(--border-default);
+  border-radius: 9999px;
+  max-width: 100%; overflow-x: auto; scrollbar-width: none;
+}
+.settings-tabs::-webkit-scrollbar { display: none; }
+.settings-tab {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12.5px; font-weight: 600; color: var(--text-secondary);
+  padding: 6px 14px; border: none; background: none;
+  border-radius: 9999px; cursor: pointer; white-space: nowrap;
+  transition: all .15s; font-family: inherit;
+}
+.settings-tab:hover { color: var(--text-primary); background: var(--menu-hover, var(--bg-hover)); }
+.settings-tab.active {
+  background: var(--accent); color: #fff;
+}
+.settings-tab.active svg[data-lucide] { color: #fff; }
+.settings-tab svg[data-lucide] { width: 13px; height: 13px; flex-shrink: 0; }
+
+/* ===== 分组面板：只有当前组显示 ===== */
+.settings-group { display: none; }
+.settings-group.active { display: block; }
+.settings-group-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted); margin: 6px 0 10px; padding-left: 2px;
+  display: flex; align-items: center; gap: 8px;
+}
+.settings-group-label::after {
+  content: ''; flex: 1; height: 1px; background: var(--border-default);
+}
+.settings-group-label svg[data-lucide] { width: 13px; height: 13px; }
+
+/* ===== 影响范围标签 ===== */
+.scope-tag {
+  display: inline-flex; align-items: center;
+  font-size: 10px; font-weight: 600; padding: 1px 7px;
+  border-radius: 9999px; margin-left: 6px; vertical-align: middle;
+  white-space: nowrap;
+}
+.scope-tag[data-scope="global"] { background: rgba(0,97,164,0.1); color: var(--accent); border: 1px solid rgba(0,97,164,0.2); }
+.scope-tag[data-scope="batch"] { background: rgba(22,163,74,0.1); color: #16A34A; border: 1px solid rgba(22,163,74,0.2); }
+.scope-tag[data-scope="single"] { background: rgba(168,85,247,0.1); color: #A855F7; border: 1px solid rgba(168,85,247,0.2); }
+
+/* 命名 chips / 摘要行样式已随旧版方案卡移除（命名编辑统一走共享 name_editor 弹窗） */
+/* 目录结构预览样式已并入存储调度台（Storage Deck）样式块 */
+/* ===== 高级折叠区 ===== */
+.advanced-toggle {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 600; color: var(--text-secondary);
+  cursor: pointer; padding: 8px 0; border: none; background: none; width: 100%;
+  font-family: inherit;
+}
+.advanced-toggle svg[data-lucide] { width: 14px; height: 14px; transition: transform .15s; color: var(--text-muted); }
+.advanced-toggle.open svg[data-lucide] { transform: rotate(90deg); }
+.advanced-body { display: none; padding-top: 8px; }
+.advanced-body.open { display: block; }
+
+/* ===== 设置行网格 ===== */
+.settings-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px;
+}
+@media (max-width: 600px) {
+  .settings-grid { grid-template-columns: 1fr; }
+}
+
+/* ===== 经典开关 ===== */
 .switch-row {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   width: 100%; min-height: 30px;
@@ -94,7 +133,7 @@
   outline: 2px solid var(--dh-accent-soft, #E7F0F8); outline-offset: 2px;
 }
 
-/* ===== 设置页按钮配色分层（组内主按钮蓝色、次级中性灰） ===== */
+/* ===== 设置页按钮配色分层 ===== */
 .settings-actions {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
@@ -111,6 +150,8 @@
 }
 .settings-actions .btn-primary:hover { background: var(--accent-hover, #004F8A); }
 .size-settings { min-height: 30px; padding: 0 12px; font-size: 12px; }
+
+/* dh-major 旧分区卡样式已移除（被 Storage Deck 取代） */
 </style>
 
 <form onsubmit="saveSettings(event)">
@@ -126,6 +167,20 @@
         </div>
     </div>
 
+    <!-- ===== 分组 Tab 导航（点击切换面板，不滚动长页） ===== -->
+    <div class="settings-tabs-wrap">
+      <nav class="settings-tabs" id="settings-tabs">
+        <button type="button" class="settings-tab active" data-target="group-doukhub" onclick="switchSettingsTab(this)"><i data-lucide="sliders-horizontal"></i> DoukHub配置</button>
+        <button type="button" class="settings-tab" data-target="group-download" onclick="switchSettingsTab(this)"><i data-lucide="folder-down"></i> 存储方案</button>
+        <button type="button" class="settings-tab" data-target="group-service" onclick="switchSettingsTab(this)"><i data-lucide="cpu"></i> 内核服务</button>
+        <button type="button" class="settings-tab" data-target="group-feature" onclick="switchSettingsTab(this)"><i data-lucide="webhook"></i> 功能配置</button>
+      </nav>
+    </div>
+
+    <!-- ═══ 分组: DoukHub配置 ═══ -->
+    <div class="settings-group active" id="group-doukhub">
+    <div class="settings-group-label"><i data-lucide="sliders-horizontal"></i> DoukHub配置</div>
+
     <!-- 卡片:配置路径 -->
     <div class="card settings-card open">
         <button type="button" class="settings-card-head" onclick="toggleCard(this)">
@@ -140,6 +195,286 @@
             <small style="color:var(--text-muted);margin-top:6px;display:block;">配置存储在用户目录, 更新 DoukHub 不会被覆盖</small>
         </div>
     </div>
+
+    </div><!-- /group-doukhub -->
+
+    <!-- ═══ 分组: 下载与文件 ═══ -->
+    <style>
+    /* ===== 存储方案 · Storage Deck（2026-08-24 重做）
+       双层隐喻：展示层 = 深色机柜调度台（明暗主题下恒定深色）；
+       编辑层 = 随主题的纸质「工单」。机器管状态，人管维护。 */
+#storage-bay {
+  /* 跟随全站层级：页面底 → 调度台（卡片 surface）→ 机柜（内嵌 muted）→ 机位行（surface） */
+  --bay-bg: var(--dh-surface, #FFFFFF);
+  --bay-panel: var(--dh-surface-muted, #F5F2EC);
+  --bay-slot: var(--dh-surface, #FFFFFF);
+  --bay-line: var(--dh-border, #ECE7DF);
+  --bay-line-strong: var(--dh-border-strong, #D9D3C8);
+  --bay-text: var(--dh-text, #1F1B17);
+  --bay-text-2: var(--dh-text-secondary, #5C564E);
+  --bay-dim: var(--dh-text-muted, #A39E96);
+  --bay-accent: var(--dh-accent, #0061A4);
+  --bay-amber: #D97706;
+  --bay-green: #16A34A;
+  --bay-red: #DC2626;
+  --bay-violet: #A855F7;
+  --bay-chip-bg: rgba(31,27,23,.05);
+  --bay-hover-bg: rgba(31,27,23,.07);
+  --bay-edit-bg: transparent;
+  background: var(--bay-bg);
+  border: 1px solid var(--bay-line-strong);
+  border-radius: var(--radius-lg);
+  padding: 18px 18px 16px;
+  color: var(--bay-text);
+  position: relative;
+}
+[data-theme="dark"] #storage-bay {
+  --bay-bg: #211C17; --bay-panel: #2A241D; --bay-slot: #211C17;
+  --bay-line: rgba(237,233,227,.12); --bay-line-strong: rgba(237,233,227,.26);
+  --bay-text: #EDE9E3; --bay-text-2: #B9B2A7; --bay-dim: #857F75;
+  --bay-accent: #6FB3E8; --bay-amber: #E8A33D; --bay-green: #57C97E;
+  --bay-red: #EF6E6E; --bay-violet: #B49BF5;
+  --bay-chip-bg: rgba(255,255,255,.05);
+  --bay-hover-bg: rgba(255,255,255,.05);
+  --bay-edit-bg: transparent;
+}
+
+/* —— 台头：双细线蓝图规整感 —— */
+.bay-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; padding-bottom:11px; margin-bottom:13px; border-bottom:1px solid var(--bay-line); position:relative; }
+.bay-head::after { content:''; position:absolute; left:0; bottom:-4px; width:100%; border-bottom:1px solid var(--bay-line); }
+.bay-head-l { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; min-width:0; }
+.bay-title { margin:0; font-size:21px; font-weight:800; letter-spacing:.01em; color:var(--bay-text); line-height:1.2; }
+
+/* 保存状态胶囊（机房内配色） */
+.save-chip { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:500; padding:2px 10px; border-radius:999px; }
+.save-chip:empty { display:none; }
+#storage-bay .save-chip { font-family:var(--font-mono); font-size:10.5px; }
+#storage-bay .save-chip.saving { color:var(--bay-dim); background:var(--bay-chip-bg); }
+#storage-bay .save-chip.ok { color:var(--bay-green); background:color-mix(in srgb, var(--bay-green) 14%, transparent); }
+#storage-bay .save-chip.err { color:var(--bay-red); background:color-mix(in srgb, var(--bay-red) 14%, transparent); }
+
+/* —— 文件名规则：mono 读数条 —— */
+.bay-specs { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; margin-bottom:14px; }
+.bay-specs-k { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:700; color:var(--bay-text-2); margin-right:2px; }
+.bay-specs-k svg[data-lucide] { width:13px; height:13px; color:var(--bay-accent); }
+.bay-chip { font-family:var(--font-mono); font-size:10.5px; color:var(--bay-text-2); background:var(--bay-chip-bg); border:1px solid var(--bay-line); border-radius:6px; padding:2px 8px; white-space:nowrap; }
+.bay-chip b { color:var(--bay-accent); font-weight:600; }
+.bay-specs-note { font-size:10.5px; color:var(--bay-dim); }
+
+/* —— 机柜（rack）：scope 色轨道 —— */
+#storage-bay .rack { --sc: var(--bay-violet); position:relative; background:var(--bay-panel); border:1px solid var(--bay-line); border-radius:12px; padding:13px 13px 12px; }
+#storage-bay .rack[data-scope="batch"] { --sc: var(--bay-green); margin-top:14px; }
+.rack-head { display:flex; align-items:center; gap:10px; margin-bottom:10px; position:relative; }
+.rack-title { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.rack-name { font-size:14.5px; font-weight:700; color:var(--bay-text); display:flex; align-items:center; gap:8px; }
+.rack-name::before { content:''; width:8px; height:8px; border-radius:2px; background:var(--sc); box-shadow:0 0 9px var(--sc); flex-shrink:0; }
+.rack-sub { font-size:11.5px; color:var(--bay-dim); }
+
+/* —— 主→次自动切换链（实况可视化） —— */
+.fo-strip { display:flex; align-items:center; flex-wrap:wrap; gap:7px; margin-bottom:10px; }
+.fo-label { display:inline-flex; align-items:center; gap:5px; font-family:var(--font-mono); font-size:10px; letter-spacing:.1em; color:var(--bay-dim); }
+.fo-label svg[data-lucide] { width:12px; height:12px; }
+.fo-node { font-size:11.5px; font-weight:600; padding:2px 10px; border-radius:4px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fo-node.primary { color:var(--bay-accent); background:color-mix(in srgb, var(--bay-accent) 12%, transparent); border:1px solid color-mix(in srgb, var(--bay-accent) 45%, transparent); }
+.fo-node.secondary { color:var(--bay-amber); background:color-mix(in srgb, var(--bay-amber) 12%, transparent); border:1px solid color-mix(in srgb, var(--bay-amber) 45%, transparent); }
+.fo-node.is-empty { color:var(--bay-dim); border:1px dashed var(--bay-line-strong); background:none; font-weight:500; }
+.fo-link { position:relative; width:30px; height:1px; flex-shrink:0; background:repeating-linear-gradient(90deg, var(--bay-line-strong) 0 5px, transparent 5px 10px); }
+.fo-link::after { content:''; position:absolute; right:0; top:50%; width:5px; height:5px; border-top:1px solid var(--bay-line-strong); border-right:1px solid var(--bay-line-strong); transform:translateY(-50%) rotate(45deg); }
+.fo-note { margin-left:auto; font-size:10.5px; color:var(--bay-dim); }
+
+/* —— 方案机位（收纳态）：序号 + LED + 读数，整行可点 —— */
+.rack-slots { display:flex; flex-direction:column; gap:6px; }
+.bay-slot { position:relative; display:grid; grid-template-columns:30px minmax(0,1fr) 22px; align-items:center; column-gap:10px; padding:9px 12px 9px 10px; border:1px solid var(--bay-line); border-radius:10px; background:var(--bay-slot); cursor:pointer; transition:border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+.bay-slot:hover { border-color:var(--bay-line-strong); background:var(--bay-hover-bg); }
+.bay-slot[data-role="primary"] { border-left:2px solid var(--bay-accent); }
+.bay-slot[data-role="secondary"] { border-left:2px solid var(--bay-amber); }
+.bay-slot.is-off { opacity:.5; }
+.bay-slot.editing { display:block; cursor:default; background:var(--bay-edit-bg); border-color:var(--bay-line-strong); padding:0; }
+.bay-slot.editing:hover { background:var(--bay-edit-bg); }
+.bay-slot.editing.is-off { opacity:1; }
+.bay-slot:focus-visible { outline:2px solid var(--bay-accent); outline-offset:2px; }
+.bs-idx { font-family:var(--font-mono); font-size:12px; color:var(--bay-dim); text-align:center; font-variant-numeric:tabular-nums; }
+.bs-body { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.bs-line1 { display:flex; align-items:center; gap:7px; min-width:0; }
+.bs-name { font-size:13.5px; font-weight:650; color:var(--bay-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.bs-line2 { display:flex; align-items:center; gap:8px; min-width:0; font-family:var(--font-mono); font-size:11.5px; color:var(--bay-dim); }
+.bs-path { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bs-path .is-warn { color:var(--bay-amber); }
+.bs-dash { opacity:.55; letter-spacing:.05em; }
+.bs-sep { flex-shrink:0; opacity:.5; }
+.bs-nfmt { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; opacity:.8; }
+.bs-arrow { color:var(--bay-dim); display:flex; align-items:center; justify-content:center; transition:color .15s ease; }
+
+
+/* —— 展开态：暗色导轨头 + 纸质工单 —— */
+.bs-open-head { display:flex; align-items:center; gap:10px; padding:9px 12px; border-bottom:1px solid var(--bay-line); }
+.bs-open-title { font-size:12.5px; font-weight:600; letter-spacing:.02em; color:var(--bay-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bs-open-head .spacer { margin-left:auto; }
+.bs-open-head .slot-arrow { cursor:pointer; display:flex; align-items:center; justify-content:center; width:26px; height:26px; color:var(--bay-text-2); border:1px solid var(--bay-line); border-radius:6px; transition:color .15s, border-color .15s; flex-shrink:0; }
+.bs-open-head .slot-arrow:hover { color:var(--bay-accent); border-color:var(--bay-accent); }
+.bs-open-head .slot-arrow:focus-visible { outline:2px solid var(--bay-accent); outline-offset:1px; }
+
+/* 工单（编辑层）：主题化纸面，顶部 scope 色标签条 */
+.sheet { position:relative; margin:10px 10px 12px; background:var(--surface-raised, var(--bg-surface)); border:1px solid var(--border-default); border-radius:10px; padding:14px 16px; box-shadow:0 8px 22px -12px rgba(0,0,0,.35); color:var(--text-primary); animation:sheetIn .3s cubic-bezier(.16,1,.3,1); }
+@keyframes sheetIn { from { opacity:0; transform:translateY(-8px); } }
+.sheet-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:4px; }
+.sheet .btn:focus-visible, .sheet input:focus-visible, .sheet select:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+
+/* 徽标（pill 基础款：工单纸面用） */
+.s-badge { display:inline-flex; align-items:center; gap:5px; flex-shrink:0; padding:1.5px 8px 1.5px 7px; border-radius:999px; font-size:10.5px; font-weight:600; letter-spacing:.01em; white-space:nowrap; border:none; }
+.s-badge::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; flex-shrink:0; }
+.s-badge.lead { background:var(--dh-accent-soft, rgba(0,97,164,.1)); color:var(--accent); }
+.s-badge.warn { background:rgba(217,119,6,.1); color:#D97706; }
+.s-badge.ok { background:rgba(22,163,74,.1); color:#16A34A; }
+.s-badge.fail { background:rgba(220,38,38,.1); color:#DC2626; }
+.s-badge.none { background:var(--bg-muted); color:var(--text-muted); }
+.s-badge.none:empty { display:none; }
+.s-badge.draft { background:rgba(245,158,11,.08); color:#D97706; border:1px dashed rgba(217,119,6,.5); }
+
+/* —— 工单内排版（沿用属性面板范式） —— */
+.sheet .sf-title { margin-top:8px; }
+.sheet .sf-title input { border:none; background:none; outline:none; border-radius:0; padding:2px 0 4px; font-size:15.5px; font-weight:650; color:var(--text-primary); font-family:inherit; width:100%; box-sizing:border-box; border-bottom:1px solid transparent; transition:border-color .12s ease; }
+.sheet .sf-title input:hover { border-bottom-color:var(--border-default); }
+.sheet .sf-title input:focus { border-bottom-color:var(--accent); }
+.sheet .sf-prop { display:grid; grid-template-columns:64px minmax(0,1fr); column-gap:12px; align-items:start; margin-top:13px; }
+.sheet .sf-k { font-size:11.5px; letter-spacing:.03em; color:var(--text-muted); padding-top:3px; white-space:nowrap; }
+.sheet .sf-v { min-width:0; }
+.sheet .sf-prop input[type=text] { border:none; background:none; outline:none; border-radius:0; padding:2px 0 4px; font-size:12.5px; color:var(--text-primary); font-family:var(--font-mono, monospace); min-width:0; width:100%; box-sizing:border-box; border-bottom:1px solid transparent; transition:border-color .12s ease; }
+.sheet .sf-prop input[type=text]:hover { border-bottom-color:var(--border-default); }
+.sheet .sf-prop input[type=text]:focus { border-bottom-color:var(--accent); }
+.sheet .sf-prop input[type=text]::placeholder { color:var(--text-muted); opacity:.55; }
+.sheet .sf-eff { font-family:var(--font-mono, monospace); font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:1px 0 2px; }
+.sheet .sf-code-row { display:flex; gap:14px; align-items:center; margin-top:3px; }
+.sheet .sf-code-row input { border:none; background:none; outline:none; border-radius:0; flex:1; min-width:0; padding:2px 0 4px; font-size:12px; color:var(--accent); font-family:var(--font-mono, monospace); border-bottom:1px solid transparent; transition:border-color .12s ease; }
+.sheet .sf-code-row input:hover { border-bottom-color:var(--border-default); }
+.sheet .sf-code-row input:focus { border-bottom-color:var(--accent); }
+.sheet .sf-code-row input::placeholder { color:var(--text-muted); opacity:.55; }
+.sheet .sf-quiet { border:none; background:none; padding:2px 0; cursor:pointer; font-family:inherit; font-size:11.5px; color:var(--text-muted); display:inline-flex; align-items:center; gap:4px; white-space:nowrap; transition:color .12s ease; }
+.sheet .sf-quiet:hover { color:var(--accent); }
+.sheet .sf-quiet svg[data-lucide] { width:12px; height:12px; }
+.sheet .sf-wide { margin-top:17px; }
+/* 其他参数：分区头加重醒目 */
+.sheet .sf-sec-toggle { display:inline-flex; align-items:center; gap:6px; border:none; background:none; padding:0; font-size:12.5px; font-weight:700; letter-spacing:.02em; color:var(--text-secondary); cursor:pointer; font-family:inherit; transition:color .12s ease; }
+.sheet .sf-sec-toggle:hover { color:var(--accent); }
+.sheet .sf-sec-toggle .sec-ic { width:14px; height:14px; color:var(--accent); }
+.sheet .sf-sec-toggle .chev { width:13px; height:13px; color:var(--text-muted); }
+.sheet .sf-sec-toggle .chev { display:flex; transition:transform .15s ease; }
+.sheet .sf-sec-toggle[aria-expanded="true"] .chev { transform:rotate(180deg); }
+.sheet .sf-eng { margin-top:2px; padding-top:12px; border-top:1px solid var(--border-default); }
+/* 参数卡网格：每项一张小卡（名称左 · 控件右），开关一行、字段一行 */
+.eng-grid { display:grid; gap:8px; margin-top:10px; }
+.eng-grid:first-child { margin-top:0; }
+.eng-grid-sw { grid-template-columns:repeat(4, minmax(0,1fr)); }
+.eng-grid-fld { grid-template-columns:1.25fr 1fr 1.45fr; }
+.eng-card { display:flex; align-items:center; gap:8px; min-width:0; background:var(--bg-muted, var(--surface-overlay)); border:1px solid var(--border-default); border-radius:8px; padding:6px 11px; box-sizing:border-box; }
+.eng-name { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-primary); white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.eng-ic { width:12px; height:12px; color:var(--text-muted); flex-shrink:0; stroke-width:1.5; }
+.eng-ctl { margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex-shrink:0; min-width:0; }
+.eng-card .switch-item { width:34px; height:19px; }
+.eng-card .switch-item input[type=checkbox] { width:34px; height:19px; border-radius:10px; }
+.eng-card .switch-item input[type=checkbox]::after { width:15px; height:15px; }
+.eng-card .switch-item input[type=checkbox]:checked::after { transform:translateX(15px); }
+.eng-card input[type=number], .eng-card select { border:1px solid var(--border-default); border-radius:6px; background:var(--bg-input, var(--surface-raised)); padding:3px 7px; font-size:12.5px; color:var(--text-primary); outline:none; font-family:inherit; min-width:0; width:100%; box-sizing:border-box; transition:border-color .12s ease; }
+.eng-card input[type=number] { width:64px; text-align:right; }
+.eng-card input[type=number]:focus, .eng-card select:focus { border-color:var(--accent); }
+.eng-card select option { background:var(--bg-surface, #fff); color:var(--text-primary); }
+@media (max-width: 720px) { .eng-grid-sw { grid-template-columns:1fr 1fr; } .eng-grid-fld { grid-template-columns:1fr; } }
+.sheet .sf-foot { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:14px; padding-top:11px; border-top:1px solid var(--border-default); }
+.sheet .sf-foot .spacer { margin-left:auto; }
+.sheet .sf-foot .btn { font-size:12px; }
+.sheet .sf-foot-switch { display:inline-flex; align-items:center; gap:7px; margin-left:4px; }
+.sheet .sf-foot-switch .sf-k { font-size:11.5px; letter-spacing:.03em; color:var(--text-muted); }
+.bs-open-head { flex-wrap:wrap; row-gap:6px; }
+
+/* 图标幽灵按钮（上移/下移/删除） */
+.slot-icon-btn { width:28px; height:26px; border:1px solid transparent; background:none; border-radius:6px; color:var(--text-muted); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; transition:background .12s ease, color .12s ease; }
+.slot-icon-btn svg[data-lucide] { width:14px; height:14px; }
+.slot-icon-btn:hover:not(:disabled) { background:var(--bg-muted); color:var(--text-primary); }
+.slot-icon-btn.danger:hover:not(:disabled) { color:#DC2626; background:rgba(220,38,38,.08); }
+.slot-icon-btn:disabled { opacity:.35; cursor:default; }
+.btn.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+.btn.danger { color:#dc2626; border-color:rgba(220,38,38,.35); }
+.btn.danger:hover { background:rgba(220,38,38,.08); }
+
+/* —— 添加方案 / 空仓位 —— */
+.rack-add-bar { margin-top:8px; }
+.rack-add-btn { display:flex; align-items:center; justify-content:center; gap:7px; width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px dashed var(--bay-line-strong); border-radius:10px; background:none; color:var(--bay-text-2); font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit; transition:border-color .15s ease, color .15s ease, background .15s ease; }
+.rack-add-btn svg[data-lucide] { width:15px; height:15px; transition:transform .2s ease; }
+.rack-add-btn .ra-hint { font-size:11px; font-weight:400; color:var(--bay-dim); }
+.rack-add-btn:hover { border-color:var(--bay-accent); color:var(--bay-accent); background:color-mix(in srgb, var(--bay-accent) 8%, transparent); }
+.rack-add-btn:hover svg[data-lucide] { transform:rotate(90deg); }
+.bay-empty { padding:22px 16px; text-align:center; font-size:12.5px; color:var(--bay-dim); border:1.5px dashed var(--bay-line-strong); border-radius:10px; }
+
+
+/* —— 入场：切到该分组时机柜错峰浮现 —— */
+#group-download .rack { animation:bayRise .45s cubic-bezier(.16,1,.3,1) both; }
+#group-download .rack + .rack { animation-delay:.07s; }
+@keyframes bayRise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion: reduce) {
+  #group-download .rack, .sheet { animation:none !important; }
+}
+
+@media (max-width: 640px) {
+  #storage-bay { padding:14px 12px; }
+  .bay-title { font-size:18px; }
+  .bay-slot { grid-template-columns:20px minmax(0,1fr) 18px; column-gap:8px; }
+  .fo-note { margin-left:0; width:100%; }
+  .sheet .sf-prop { grid-template-columns:1fr; row-gap:3px; margin-top:11px; }
+  .sheet .sf-k { padding-top:0; }
+}
+    </style>
+
+    <div class="settings-group" id="group-download">
+    <!-- 存储调度台：机器层（深色机柜）+ 人工层（纸质工单） -->
+    <div class="bay" id="storage-bay">
+        <div class="bay-head">
+            <div class="bay-head-l">
+                <h2 class="bay-title">存储方案</h2>
+            </div>
+            <span id="storage-save-status" class="save-chip" role="status" aria-live="polite"></span>
+        </div>
+
+        <!-- 文件名规则：mono 读数条（自动生效，无需配置） -->
+        <div class="bay-specs" title="文件名规则（自动生效，无需配置）">
+            <span class="bay-specs-k"><i data-lucide="file-code"></i> 文件名规则</span>
+            <span class="bay-chip">分隔符 <b>-</b></span>
+            <span class="bay-chip">日期 <b>20260821_123400</b></span>
+            <span class="bay-chip">总长 <b>≤80</b></span>
+            <span class="bay-chip">作者 <b>≤20</b> · 标题 <b>≤38</b></span>
+            <span class="bay-chip">清洗 Emoji/特殊字符</span>
+            <span class="bay-specs-note">自动生效 · 仅可变字段截断，日期/作品ID 完整保留</span>
+        </div>
+
+        <!-- 机柜 01：单作品采集 -->
+        <section class="rack" data-scope="single">
+            <div class="rack-head">
+                <div class="rack-title">
+                    <span class="rack-name">单作品采集</span>
+                    <span class="rack-sub">粘贴链接逐条下载 · 主/次方案直存指定目录</span>
+                </div>
+            </div>
+            <div class="fo-strip" id="fo-single"></div>
+            <div class="rack-slots" id="single-storage-slots"></div>
+        </section>
+
+        <!-- 机柜 02：增量采集 -->
+        <section class="rack" data-scope="batch">
+            <div class="rack-head">
+                <div class="rack-title">
+                    <span class="rack-name">增量采集</span>
+                    <span class="rack-sub">方案 / 定时任务抓取整号作品 · 自动建 平台/账号 目录</span>
+                </div>
+            </div>
+            <div class="fo-strip" id="fo-batch"></div>
+            <div class="rack-slots" id="batch-storage-slots"></div>
+        </section>
+    </div>
+    </div><!-- /group-download -->
+
+
+    <!-- ═══ 分组: 内核服务 ═══ -->
+    <div class="settings-group" id="group-service">
+    <div class="settings-group-label"><i data-lucide="cpu"></i> 内核服务</div>
 
     <!-- 卡片:云端配置 -->
     <div class="card settings-card">
@@ -185,48 +520,10 @@
         </div>
     </div>
 
-    <!-- 卡片:下载设置(默认展开) -->
-    <div class="card settings-card open" id="card-download">
-        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
-            <i data-lucide="folder"></i><span class="card-title">下载设置</span>
-            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
-        </button>
-        <div class="settings-card-body">
-            <div class="form-group">
-                <label>下载根目录</label>
-                <div style="display:flex;gap:8px;">
-                    <input type="text" name="local.download_path" id="download_path" value="{{ config.local.download_path or '' }}" style="flex:1;">
-                    <button type="button" class="btn btn-secondary" onclick="openDirBrowser()"><i data-lucide="folder-open"></i> 浏览</button>
-                </div>
-                <small>默认: DoukHub 文件夹下的 Download 目录</small>
-            </div>
-            <div id="dir-browser" style="display:none;max-height:300px;overflow-y:auto;border:1px solid var(--border-default);border-radius:var(--radius);padding:12px;margin-bottom:16px;background:var(--bg-muted);">
-                <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                    <span id="dir-current" style="font-weight:600;font-size:13px;"></span>
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="closeDirBrowser()">关闭</button>
-                </div>
-                <div id="dir-list"></div>
-            </div>
-
-            <div class="form-group">
-                <label>文件名模板 <small style="font-weight:400;color:var(--text-muted);">点击字段追加 · 拖动排序 · 点击 ✕ 移除</small></label>
-                <div class="tpl-fields" id="tpl-fields"></div>
-                <div class="tpl-list" id="tpl-list"></div>
-                <div class="tpl-preview" id="tpl-preview"></div>
-                <small>决定保存的每个视频文件名；与下载根目录共同构成全局统一存储位置</small>
-            </div>
-
-            <div class="form-group">
-                <div style="font-size:12.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">自动目录层级（无需配置）</div>
-                <div class="structure" id="structure-preview"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 卡片:服务 -->
+    <!-- 卡片:内核服务 -->
     <div class="card settings-card">
         <button type="button" class="settings-card-head" onclick="toggleCard(this)">
-            <i data-lucide="cpu"></i><span class="card-title">服务</span>
+            <i data-lucide="cpu"></i><span class="card-title">内核服务</span>
             <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
         </button>
         <div class="settings-card-body">
@@ -272,40 +569,41 @@
         </div>
     </div>
 
-    <!-- 卡片:Cookie -->
+    <!-- 卡片:采集与Cookie (合并) -->
     <div class="card settings-card">
         <button type="button" class="settings-card-head" onclick="toggleCard(this)">
-            <i data-lucide="cookie"></i><span class="card-title">Cookie</span>
+            <i data-lucide="cookie"></i><span class="card-title">采集与 Cookie</span>
             <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
         </button>
         <div class="settings-card-body">
-            <div class="form-group">
-                <label>轮换模式</label>
-                <select name="cookie.rotation_mode">
-                    <option value="random" {{ 'selected' if config.cookie.rotation_mode == 'random' }}>随机</option>
-                    <option value="sequential" {{ 'selected' if config.cookie.rotation_mode == 'sequential' }}>顺序</option>
-                </select>
+            <div class="settings-grid">
+                <div class="form-group" style="margin:0;">
+                    <label>并发采集账号数</label>
+                    <input type="number" name="concurrent_accounts" value="{{ config.concurrent_accounts or 3 }}" min="1" max="10">
+                    <small>同时下载的账号数</small>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label>Cookie 轮换模式</label>
+                    <select name="cookie.rotation_mode">
+                        <option value="random" {{ 'selected' if config.cookie.rotation_mode == 'random' }}>随机</option>
+                        <option value="sequential" {{ 'selected' if config.cookie.rotation_mode == 'sequential' }}>顺序</option>
+                    </select>
+                    <small>多 Cookie 轮换策略</small>
+                </div>
             </div>
-            <div class="form-group">
+            <div class="form-group" style="margin-top:12px;">
                 <label>单个 Cookie 使用次数上限</label>
                 <input type="number" name="cookie.usage_limit" value="{{ config.cookie.usage_limit or 10 }}">
+                <small>超过此次数后轮换到下一个 Cookie</small>
             </div>
         </div>
     </div>
 
-    <!-- 卡片:采集 -->
-    <div class="card settings-card">
-        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
-            <i data-lucide="zap"></i><span class="card-title">采集</span>
-            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
-        </button>
-        <div class="settings-card-body">
-            <div class="form-group">
-                <label>并发采集账号数</label>
-                <input type="number" name="concurrent_accounts" value="{{ config.concurrent_accounts or 3 }}" min="1" max="10">
-            </div>
-        </div>
-    </div>
+    </div><!-- /group-service -->
+
+    <!-- ═══ 分组: 功能配置 ═══ -->
+    <div class="settings-group" id="group-feature">
+    <div class="settings-group-label"><i data-lucide="webhook"></i> 功能配置</div>
 
     <!-- 卡片:API 模式 -->
     <div class="card settings-card">
@@ -366,9 +664,14 @@
             <small>示例: 个=个人 | 图=图集 | 街拍=街拍 | 太多=多</small>
         </div>
     </div>
+    </div><!-- /group-feature -->
 </form>
+
+{# ═══ 命名模板编辑器弹窗（共享组件：设置页 / 单作品 / 增量 三页共用） ═══ #}
+{% include "partials/name_editor_modal.html" %}
 {% endblock %}
 {% block scripts %}
+<script src="/static/js/name_editor.js?v=3"></script>
 <script>
     // ===== 工具函数 =====
     function escapeHtml(value) {
@@ -377,113 +680,550 @@
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    // ===== 折叠卡片 =====
+    // ===== 折叠卡片（默认展开；点击头部折叠/展开） =====
     function toggleCard(btn) {
-        btn.closest('.settings-card').classList.toggle('open');
+        var card = btn.closest('.settings-card');
+        // 默认展开：显式折叠用 .collapsed 记录，.open 保持兼容（open = 非 collapsed）
+        if (card.classList.contains('collapsed')) {
+            card.classList.remove('collapsed');
+            card.classList.add('open');
+        } else {
+            card.classList.add('collapsed');
+            card.classList.remove('open');
+        }
         if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     }
 
-    // ===== 文件名模板编辑器 =====
-    var TPL_FIELDS = [
-        ['create_time', '发布时间'], ['type', '作品类型'], ['nickname', '账号昵称'],
-        ['desc', '作品描述'], ['id', '作品ID'], ['uid', '账号UID'], ['mark', '账号标识']
-    ];
-    var TPL_EXAMPLES = {
-        create_time: '2026-08-20_14-30', type: '视频', nickname: '竞品A',
-        desc: '高管专访抢先看', id: '7390001', uid: 'MS4wLjAB', mark: 'douyin_739'
+    // ===== 分组 Tab：点击切换面板 =====
+    function switchSettingsTab(btn) {
+        var targetId = btn.dataset.target;
+        document.querySelectorAll('.settings-tab').forEach(function(item) { item.classList.remove('active'); });
+        btn.classList.add('active');
+        document.querySelectorAll('.settings-group').forEach(function(g) {
+            g.classList.toggle('active', g.id === targetId);
+        });
+        // 切到下载与文件时刷新图标
+        if (targetId === 'group-download') {
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+        }
+    }
+
+    // 恢复原有锚点跳转（供外部链接如采集页「管理模板」使用）
+    function scrollToGroup(btn) {
+        switchSettingsTab(btn);
+        var target = document.getElementById(btn.dataset.target);
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    // 由 URL hash 定位分组（如 #group-download）
+    function initSettingsHash() {
+        var hash = (location.hash || '').replace('#', '');
+        if (!hash) return;
+        var tab = document.querySelector('.settings-tab[data-target="' + hash + '"]');
+        if (tab) switchSettingsTab(tab);
+    }
+
+    // ===== 命名模板编辑器已抽离为共享组件 =====
+    // 代码：app/static/js/name_editor.js（TPL 常量 / openNameEditor / 字段增删拖动 / 复制代码）
+    // 弹窗：partials/name_editor_modal.html（三页 include 复用）
+    // 每个存储方案通过 openProfileNameEditor(scope, idx) 调用；单作品 / 增量页同理复用同一组件。
+
+    // 打开某存储方案的命名编辑器（写回该方案的 name_format，不再有"默认继承"）
+    function openProfileNameEditor(scope, idx) {
+        var list = scopeProfiles(scope);
+        var p = list[idx];
+        if (!p) return;
+        openNameEditor({
+            scope: scope,
+            title: '编辑命名 · ' + (p.name || '未命名方案'),
+            getFormat: function () { return p.name_format || ''; },
+            setFormat: function (fmt) { setProfileField(scope, idx, 'name_format', fmt); }
+        });
+    }
+
+    // ===== 存储方案 v2（单作品/增量各一套主/次方案）=====
+    var storageState = {
+        single: { default_name_format: '{create_time} {author} {title}', profiles: [] },
+        batch:  { default_name_format: 'create_time type nickname desc', profiles: [] },
     };
-    var tplParts = [];        // 已选字段 key 数组（有序）
-    var tplDragIndex = null;  // 拖拽起始索引
 
-    function renderTemplateBuilder() {
-        // 可选字段 chips（已选的标记 data-added，点击移除）
-        var fieldHtml = TPL_FIELDS.map(function(f) {
-            var key = f[0], label = f[1];
-            var added = tplParts.indexOf(key) !== -1;
-            return '<span class="tpl-chip' + (added ? ' data-added' : '') + '" onclick="toggleTemplateField(\'' + key + '\')">' +
-                (added ? '<span class="x" title="移除">✕</span>' : '') +
-                escapeHtml(label) + '</span>';
-        }).join('');
-        document.getElementById('tpl-fields').innerHTML = fieldHtml;
+// ========== 存储方案 v2：主/次方案 ==========
 
-        // 已选字段有序列表（拖动排序）
-        var list = document.getElementById('tpl-list');
-        if (!tplParts.length) {
-            list.innerHTML = '<div class="tpl-empty">未选择字段，默认使用 create_time type nickname desc</div>';
-        } else {
-            list.innerHTML = tplParts.map(function(key, index) {
-                var label = (TPL_FIELDS.find(function(f){ return f[0] === key; }) || [key, key])[1];
-                var demo = TPL_EXAMPLES[key] || '';
-                return '<div class="tpl-row" draggable="true" ' +
-                    'ondragstart="templateDragStart(event,' + index + ')" ' +
-                    'ondragover="event.preventDefault()" ' +
-                    'ondrop="templateDrop(event,' + index + ')">' +
-                    '<span class="grip"><i data-lucide="grip-vertical"></i></span>' +
-                    '<span class="val">' + escapeHtml(label) + '</span>' +
-                    '<span class="demo">' + (demo ? '示例: ' + escapeHtml(demo) : '') + '</span>' +
-                    '<button type="button" title="移除" onclick="removeTemplateField(' + index + ')"><i data-lucide="x"></i></button>' +
-                '</div>';
-            }).join('');
+// ========== 存储方案 v3：多方案列表 + 主/次标记 ==========
+
+    function _normProfile(p, scope) {
+        if (!p || typeof p !== 'object') return null;
+        var out = {
+            id: p.id || ('sp_' + Math.random().toString(16).slice(2)),
+            name: p.name || '未命名方案',
+            path: p.path || '',
+            name_format: p.name_format || '',
+            role: (p.role === 'primary' || p.role === 'secondary') ? p.role : '',
+            enabled: p.enabled !== false,
+            // 保存往返时保留界面状态（编辑中/探测结果/采集参数展开）
+            _editing: !!p._editing, _engOpen: !!p._engOpen, _status: p._status,
+        };
+        if (scope === 'batch') {
+            out.folder_mode = !!p.folder_mode;
+            out.music = !!p.music;
+            out.dynamic_cover = !!p.dynamic_cover;
+            out.static_cover = !!p.static_cover;
+            out.max_size = p.max_size || 0;
+            out.storage_format = p.storage_format || '';
+            out.max_pages = parseInt(p.max_pages, 10) || 0;
+        }
+        return out;
+    }
+
+    function _normScope(item, defNfmt) {
+        var list = [];
+        if (item && Array.isArray(item.profiles)) {
+            list = item.profiles.map(function(p){ return _normProfile(p, item._scope || 'single'); });
+            if (item._scope === 'batch') {
+                list = item.profiles.map(function(p){ return _normProfile(p, 'batch'); });
+            }
+        }
+        return {
+            default_name_format: ((item && item.default_name_format) || '').trim() || defNfmt,
+            profiles: list,
+        };
+    }
+
+    function _profilePayload(p, scope) {
+        if (!p) return null;
+        var o = {
+            id: p.id, name: p.name, path: p.path, name_format: p.name_format,
+            role: p.role, enabled: p.enabled,
+        };
+        if (scope === 'batch') {
+            o.folder_mode = !!p.folder_mode; o.music = !!p.music; o.dynamic_cover = !!p.dynamic_cover;
+            o.static_cover = !!p.static_cover; o.max_size = p.max_size || 0; o.storage_format = p.storage_format || '';
+            o.max_pages = parseInt(p.max_pages, 10) || 0;
+        }
+        return o;
+    }
+
+    function scopeProfiles(scope) { return storageState[scope].profiles; }
+
+    function scopePrimary(scope) {
+        var list = scopeProfiles(scope);
+        for (var i = 0; i < list.length; i++) { if (list[i].role === 'primary') return list[i]; }
+        return list[0] || null;
+    }
+    function scopeSecondary(scope) {
+        var list = scopeProfiles(scope);
+        for (var i = 0; i < list.length; i++) { if (list[i].role === 'secondary') return list[i]; }
+        return null;
+    }
+
+    async function loadStorageState() {
+        try {
+            var data = await apiCall('/api/collection/storage', 'GET');
+            if (data && data.single) {
+                data.single._scope = 'single';
+                storageState.single = _normScope(data.single, '{create_time} {author} {title}');
+            }
+            if (data && data.batch) {
+                data.batch._scope = 'batch';
+                storageState.batch = _normScope(data.batch, 'create_time type nickname desc');
+            }
+        } catch(e) { /* 使用默认值 */ }
+        // 命名编辑器为共享组件（name_editor.js），按需打开时按方案解析 name_format，无需预载
+        renderStorageList('single');
+        renderStorageList('batch');
+    }
+
+    // ---- 方案列表渲染 ----
+
+    function _pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+    function renderStorageList(scope) {
+        var box = document.getElementById(scope + '-storage-slots');
+        if (!box) return;
+        var list = scopeProfiles(scope);
+        var html = '';
+        if (!list.length) {
+            html = '<div class="bay-empty">仓位空置 —— 点击下方「添加方案」登记第一个存储位置。</div>';
+        }
+        for (var i = 0; i < list.length; i++) {
+            html += _profileCard(scope, list[i], i, list.length);
+        }
+        html += '<div class="rack-add-bar">' +
+            '<button type="button" class="rack-add-btn" onclick="addProfile(\'' + scope + '\')"><i data-lucide="plus"></i> 添加方案<span class="ra-hint">· 默认主/次供采集入口预填，也可任选方案</span></button>' +
+        '</div>';
+        box.innerHTML = html;
+        renderProfilePreview(scope, list);
+        renderFailoverStrip(scope);
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(box);
+    }
+
+    // 主→次自动切换链（机柜顶部实况：把文字规则变成看得见的链路）
+    function renderFailoverStrip(scope) {
+        var el = document.getElementById('fo-' + scope);
+        if (!el) return;
+        var pri = scopePrimary(scope), sec = scopeSecondary(scope);
+        function node(p, role) {
+            if (!p) return '<span class="fo-node is-empty">未设默认' + (role === 'primary' ? '主' : '次') + '</span>';
+            return '<span class="fo-node ' + role + '" title="默认' + (role === 'primary' ? '主' : '次') + '：' + escapeHtml(p.path || '（待配置路径）') + '">' + escapeHtml(p.name) + '</span>';
+        }
+        el.innerHTML =
+            '<span class="fo-label"><i data-lucide="git-branch"></i>自动切换链</span>' +
+            node(pri, 'primary') +
+            '<span class="fo-link" aria-hidden="true"></span>' +
+            node(sec, 'secondary') +
+            '<span class="fo-note">' + (scope === 'batch'
+                ? '定时任务按默认主/次执行；主不可用整套切次'
+                : '主存储连不上自动切次；全部失败报错停止') + '</span>';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(el);
+    }
+
+    function _sampleFileName(scope, nfmt) {
+        if (scope === 'single') {
+            var t = nfmt || '{create_time} {author} {title}';
+            var smp = { create_time: '20260821_123400', author: '示例作者', title: '示例标题', id: '123456', type: '视频', platform: 'douyin' };
+            var name = t.replace(/\{(\w+)\}/g, function(m, k) { return smp[k] !== undefined ? smp[k] : m; });
+            return name.replace(/\.(mp4|jpeg|webp|mp3|jpg)$/i, '') + '.mp4';
+        }
+        var map = { create_time: '20260821_123400', type: '视频', nickname: '示例账号', desc: '示例标题', id: '123456', uid: '1234567890123', mark: '示例' };
+        var keys = (nfmt || 'create_time type nickname desc').trim().split(/\s+/).filter(Boolean);
+        var parts = keys.map(function(k) { return map[k] !== undefined ? map[k] : k; });
+        return parts.join('-').replace(/\.(mp4|jpeg|webp|mp3|jpg)$/i, '') + '.mp4';
+    }
+
+    function renderProfilePreview(scope, list) {
+        for (var i = 0; i < list.length; i++) {
+            var el = document.getElementById('slot-preview-' + scope + '-' + i);
+            if (!el) continue;
+            var nfmt = (list[i].name_format || '').trim() || storageState[scope].default_name_format || '';
+            el.textContent = _sampleFileName(scope, nfmt);
+        }
+    }
+
+    // 复制命名代码（可迁移：粘贴到其他方案的命名框即可直接识别）
+    function copyProfilePreview(scope, idx) {
+        var p = scopeProfiles(scope)[idx];
+        if (!p) return;
+        var txt = (p.name_format || '').trim() || storageState[scope].default_name_format || '';
+        if (!txt) return;
+        function done() { showToast('已复制命名代码，可粘贴到其他方案'); }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(txt).then(done, function(){ _copyFallback(txt); done(); });
+        } else { _copyFallback(txt); done(); }
+    }
+    function _copyFallback(txt) {
+        var ta = document.createElement('textarea');
+        ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch(e) {}
+        document.body.removeChild(ta);
+    }
+
+    // 手风琴：展开某张卡前收起同 scope 其他卡
+    function _collapseOthers(scope, keepIdx) {
+        scopeProfiles(scope).forEach(function(q, i) { if (i !== keepIdx) q._editing = false; });
+    }
+
+    // 折叠/展开方案卡（整卡可点；编辑态点卡头收起）
+    function toggleSlotEdit(scope, idx, evt) {
+        var p = scopeProfiles(scope)[idx];
+        if (!p) return;
+        if (evt) { evt.stopPropagation(); }
+        p._editing = !p._editing;
+        if (p._editing) _collapseOthers(scope, idx);
+        renderStorageList(scope);
+    }
+
+    function _profileCard(scope, p, idx, total) {
+        var draft = !(p.path || '').trim();
+        var statusText = p._status === 'ok' ? '可用' : (p._status === 'fail' ? '不可用' : '');
+        var statusBadge = '<span class="s-badge ' + (p._status === 'ok' ? 'ok' : p._status === 'fail' ? 'fail' : 'none') + '" id="slot-status-' + scope + '-' + idx + '">' + statusText + '</span>';
+        var badges =
+            (p.role === 'primary' ? '<span class="s-badge lead">默认主</span>' : '') +
+            (p.role === 'secondary' ? '<span class="s-badge warn">默认次</span>' : '') +
+            statusBadge +
+            (draft ? '<span class="s-badge draft">待配置路径</span>' : '') +
+            (!p.enabled ? '<span class="s-badge none">已停用</span>' : '');
+        var cls = 'bay-slot' + (!p.enabled ? ' is-off' : '') + (p._editing ? ' editing' : '');
+        var roleAttr = ' data-role="' + (p.role || '') + '"';
+
+        // —— 收纳态：一行机位（序号 + LED + 名称/铭牌 + 路径/命名读数），整行可点 ——
+        if (!p._editing) {
+            var pathHtml = (p.path || '').trim()
+                ? escapeHtml(p.path)
+                : '<span class="bs-dash">—— 未登记 ——</span>';
+            return '<div class="' + cls + '"' + roleAttr + ' id="storage-slot-' + scope + '-' + idx + '" onclick="toggleSlotEdit(\'' + scope + '\',' + idx + ',event)" role="button" tabindex="0" aria-expanded="false" aria-label="展开编辑方案「' + escapeHtml(p.name) + '」" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleSlotEdit(\'' + scope + '\',' + idx + ',event);}">' +
+                '<span class="bs-idx">' + _pad2(idx + 1) + '</span>' +
+                '<span class="bs-body">' +
+                    '<span class="bs-line1"><span class="bs-name">' + escapeHtml(p.name) + '</span>' + badges + '</span>' +
+                    '<span class="bs-line2"><span class="bs-path">' + pathHtml + '</span><span class="bs-sep" aria-hidden="true">·</span><span class="bs-nfmt" id="slot-preview-' + scope + '-' + idx + '"></span></span>' +
+                '</span>' +
+                '<span class="bs-arrow"><i data-lucide="chevron-right"></i></span>' +
+            '</div>';
         }
 
-        // 实时预览
-        var preview = document.getElementById('tpl-preview');
-        var tpl = tplParts.length ? tplParts.join(' ') : 'create_time type nickname desc';
-        var demoName = tplParts.length
-            ? tplParts.map(function(key){ return TPL_EXAMPLES[key] || '<' + key + '>'; }).join('_')
-            : '2026-08-20_14-30_视频_竞品A_高管专访抢先看';
-        preview.innerHTML = '<span style="color:var(--text-muted);">文件名示例: </span>' + escapeHtml(demoName) + '.mp4';
-        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+        // —— 展开态：导轨头（身份三件套：主/次/启用，整头可点收起）+ 纸质工单 ——
+        var roleCtrl = '' +
+            '<button type="button" class="btn btn-secondary btn-sm' + (p.role === 'primary' ? ' on' : '') + '" title="采集入口「主存储」下拉的默认选项" onclick="event.stopPropagation();setProfileRole(\'' + scope + '\',' + idx + ',\'primary\')">' + (p.role === 'primary' ? '默认主 ✓' : '设为主') + '</button>' +
+            '<button type="button" class="btn btn-secondary btn-sm' + (p.role === 'secondary' ? ' on' : '') + '" title="主存储不可用时的自动切换目标" onclick="event.stopPropagation();setProfileRole(\'' + scope + '\',' + idx + ',\'secondary\')">' + (p.role === 'secondary' ? '默认次 ✓' : '设为次') + '</button>';
+        var moveCtrl = '' +
+            '<button type="button" class="slot-icon-btn" title="上移" aria-label="上移方案" ' + (idx === 0 ? 'disabled' : '') + ' onclick="moveProfile(\'' + scope + '\',' + idx + ',-1)"><i data-lucide="arrow-up"></i></button>' +
+            '<button type="button" class="slot-icon-btn" title="下移" aria-label="下移方案" ' + (idx >= total - 1 ? 'disabled' : '') + ' onclick="moveProfile(\'' + scope + '\',' + idx + ',1)"><i data-lucide="arrow-down"></i></button>';
+        var deleteCtrl = '<button type="button" class="slot-icon-btn danger" title="删除方案" aria-label="删除方案「' + escapeHtml(p.name) + '」" onclick="removeProfile(\'' + scope + '\',' + idx + ')"><i data-lucide="trash"></i></button>';
+        return '<div class="' + cls + '"' + roleAttr + ' id="storage-slot-' + scope + '-' + idx + '">' +
+            '<div class="bs-open-head" onclick="toggleSlotEdit(\'' + scope + '\',' + idx + ',event)" title="点击收起" role="button" tabindex="0" aria-label="收起方案「' + escapeHtml(p.name) + '」" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleSlotEdit(\'' + scope + '\',' + idx + ',event);}">' +
+                '<span class="bs-idx">' + _pad2(idx + 1) + '</span>' +
+                '<span class="bs-open-title">' + escapeHtml(p.name) + '</span>' +
+                '<span class="spacer"></span>' +
+                '<span class="slot-arrow" title="收起" role="button" tabindex="0" aria-label="收起方案「' + escapeHtml(p.name) + '」" onclick="toggleSlotEdit(\'' + scope + '\',' + idx + ',event)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleSlotEdit(\'' + scope + '\',' + idx + ',event);}"><i data-lucide="chevron-up"></i></span>' +
+            '</div>' +
+            '<div class="sheet">' +
+                '<div class="sheet-head">' + badges + '</div>' +
+                '<div class="sf-title"><input id="slot-name-' + scope + '-' + idx + '" class="s-name" type="text" value="' + escapeHtml(p.name) + '" placeholder="方案名" aria-label="方案名" oninput="setProfileField(\'' + scope + '\',' + idx + ',\'name\',this.value)"></div>' +
+                '<div class="sf-prop">' +
+                    '<span class="sf-k">路径</span>' +
+                    '<input id="slot-path-' + scope + '-' + idx + '" class="s-path" type="text" value="' + escapeHtml(p.path) + '" placeholder="本机或远程路径，如 \\\\nas\\share" aria-label="存储路径" oninput="setProfileField(\'' + scope + '\',' + idx + ',\'path\',this.value)">' +
+                '</div>' +
+                '<div class="sf-prop">' +
+                    '<span class="sf-k">命名</span>' +
+                    '<div class="sf-v">' +
+                        '<div class="sf-eff" id="slot-preview-' + scope + '-' + idx + '" title="示例效果：系统按下方代码生成"></div>' +
+                        '<div class="sf-code-row">' +
+                            '<input class="s-nfmt" type="text" id="slot-nfmt-' + scope + '-' + idx + '" value="' + escapeHtml(p.name_format) + '" placeholder="' + escapeHtml(storageState[scope].default_name_format) + '" aria-label="命名代码，系统按它生成上方效果，可复制到其他方案复用" oninput="setProfileField(\'' + scope + '\',' + idx + ',\'name_format\',this.value)">' +
+                            '<button type="button" class="sf-quiet" title="可视化编辑（字段增减 / 拖动排序）" onclick="openProfileNameEditor(\'' + scope + '\',' + idx + ')"><i data-lucide="pencil"></i>编辑</button>' +
+                            '<button type="button" class="sf-quiet" title="复制命名代码，可直接粘贴到其他方案的命名框复用" onclick="copyProfilePreview(\'' + scope + '\',' + idx + ')"><i data-lucide="copy"></i>复制代码</button>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+                (scope === 'batch' ? _profileEngineFields(scope, idx, p) : '') +
+                '<div class="sf-foot">' +
+                    '<span class="sf-foot-switch" title="启用/停用该方案"><span class="sf-k">启用</span><label class="switch-item"><input type="checkbox" aria-label="启用或停用该方案" ' + (p.enabled ? 'checked' : '') + ' onchange="setProfileField(\'' + scope + '\',' + idx + ',\'enabled\',this.checked)"></label></span>' + roleCtrl +
+                    '<span class="spacer"></span>' + moveCtrl + deleteCtrl +
+                '</div>' +
+            '</div>' +
+        '</div>';
     }
 
-    function toggleTemplateField(key) {
-        var idx = tplParts.indexOf(key);
-        if (idx === -1) tplParts.push(key); else tplParts.splice(idx, 1);
-        renderTemplateBuilder();
-    }
-    function removeTemplateField(index) { tplParts.splice(index, 1); renderTemplateBuilder(); }
-    function templateDragStart(e, index) { tplDragIndex = index; e.dataTransfer.effectAllowed = 'move'; }
-    function templateDrop(e, index) {
-        e.preventDefault();
-        if (tplDragIndex === null || tplDragIndex === index) return;
-        var item = tplParts.splice(tplDragIndex, 1)[0];
-        tplParts.splice(index, 0, item);
-        tplDragIndex = null;
-        renderTemplateBuilder();
+    function _profileEngineFields(scope, idx, p) {
+        var unit = '1048576';
+        var n = p.max_size || 0;
+        if (n >= 1073741824) { unit = '1073741824'; }
+        else if (n >= 1048576) { unit = '1048576'; }
+        else if (n >= 1024) { unit = '1024'; }
+        else unit = '1';
+        var num = unit === '1073741824' ? n / 1073741824 : unit === '1048576' ? n / 1048576 : unit === '1024' ? n / 1024 : n;
+        var swCard = function(label, field, tip, icon) {
+            return '<span class="eng-card" title="' + tip + '">' +
+                '<span class="eng-name">' + (icon ? '<i data-lucide="' + icon + '" class="eng-ic"></i>' : '') + label + '</span>' +
+                '<label class="switch-item eng-ctl"><input type="checkbox" aria-label="' + label + '" ' + (p[field] ? 'checked' : '') + ' onchange="setProfileField(\'' + scope + '\',' + idx + ',\'' + field + '\',this.checked)"></label>' +
+            '</span>';
+        };
+        var fldCard = function(label, tip, icon, ctlHtml, extraCls) {
+            return '<span class="eng-card eng-fld' + (extraCls ? ' ' + extraCls : '') + '" title="' + tip + '">' +
+                '<span class="eng-name">' + (icon ? '<i data-lucide="' + icon + '" class="eng-ic"></i>' : '') + label + '</span>' +
+                '<span class="eng-ctl">' + ctlHtml + '</span>' +
+            '</span>';
+        };
+        var openStyle = p._engOpen ? '' : ' style="display:none;"';
+        return '<div class="sf-wide">' +
+            '<button type="button" class="sf-sec-toggle" aria-expanded="' + (p._engOpen ? 'true' : 'false') + '" aria-controls="slot-eng-' + scope + '-' + idx + '" onclick="toggleSlotEngine(\'' + scope + '\',' + idx + ',this)"><i data-lucide="sliders-horizontal" class="sec-ic"></i><i data-lucide="chevron-down" class="chev"></i> 其他参数</button>' +
+        '<div class="sf-eng" id="slot-eng-' + scope + '-' + idx + '"' + openStyle + '>' +
+            '<div class="eng-grid eng-grid-sw">' +
+                swCard('下载音乐', 'music', '音乐保存为 .mp3', 'music') +
+                swCard('动态封面', 'dynamic_cover', '动态封面保存为 .webp', 'film') +
+                swCard('静态封面', 'static_cover', '静态封面保存为 .jpeg', 'image') +
+                swCard('独立子文件夹', 'folder_mode', '每个作品下载到以其文件名命名的子文件夹', 'folder') +
+            '</div>' +
+            '<div class="eng-grid eng-grid-fld">' +
+                fldCard('数据导出', '采集的作品/评论/用户数据导出为文件，保存在当前方案目录的 Data 文件夹内', 'table',
+                    '<select id="slot-export-' + scope + '-' + idx + '" onchange="setProfileField(\'' + scope + '\',' + idx + ',\'storage_format\',this.value)">' +
+                        '<option value=""' + (!p.storage_format ? ' selected' : '') + '>不导出</option>' +
+                        '<option value="csv"' + (p.storage_format === 'csv' ? ' selected' : '') + '>CSV</option>' +
+                        '<option value="xlsx"' + (p.storage_format === 'xlsx' ? ' selected' : '') + '>Excel</option>' +
+                        '<option value="sql"' + (p.storage_format === 'sql' ? ' selected' : '') + '>SQLite</option>' +
+                    '</select>') +
+                fldCard('最大页数', '限制单账号采集页数，0 = 不限制', 'layers',
+                    '<input type="number" min="0" value="' + (p.max_pages || 0) + '" placeholder="0" aria-label="每账号最大页数" onchange="setProfileField(\'' + scope + '\',' + idx + ',\'max_pages\',parseInt(this.value,10)||0)">') +
+                fldCard('文件上限', '超过此大小的文件跳过下载，0 = 不限制', 'scale',
+                    '<input type="number" min="0" id="slot-maxsize-' + scope + '-' + idx + '" value="' + num + '" placeholder="0" onchange="setProfileMaxSize(\'' + scope + '\',' + idx + ')">' +
+                    '<select id="slot-maxunit-' + scope + '-' + idx + '" onchange="setProfileMaxSize(\'' + scope + '\',' + idx + ')">' +
+                        '<option value="1"' + (unit === '1' ? ' selected' : '') + '>B</option>' +
+                        '<option value="1024"' + (unit === '1024' ? ' selected' : '') + '>KB</option>' +
+                        '<option value="1048576"' + (unit === '1048576' ? ' selected' : '') + '>MB</option>' +
+                        '<option value="1073741824"' + (unit === '1073741824' ? ' selected' : '') + '>GB</option>' +
+                    '</select>') +
+            '</div>' +
+        '</div>' +
+        '</div>';
     }
 
-    // 加载全局默认(name_format 来自 collection_defaults)
-    var globalDefaultFolder = '';
-    async function loadNameFormat() {
+
+    // ---- 方案编辑 ----
+    // 文本/开关类字段只更新数据与受影响的小区域，不重建列表 DOM（避免输入框丢焦点、打断中文输入法）
+    function setProfileField(scope, idx, field, value) {
+        var list = scopeProfiles(scope);
+        var p = list[idx];
+        if (!p) return;
+        p[field] = value;
+        scheduleStorageSave();
+        if (field === 'name' || field === 'path' || field === 'name_format') {
+            p._status = undefined;
+            var stEl = document.getElementById('slot-status-' + scope + '-' + idx);
+            if (stEl) { stEl.textContent = ''; stEl.className = 's-badge none'; }
+            if (field === 'name_format') {
+                renderProfilePreview(scope, list);
+                // 命名代码输入框与效果同步（可视化编辑器写回时更新输入框；手动输入时输入框已是源头，不覆盖）
+                var inEl = document.getElementById('slot-nfmt-' + scope + '-' + idx);
+                if (inEl && document.activeElement !== inEl) inEl.value = value;
+            }
+        }
+        if (field === 'enabled') {
+            var slotEl = document.getElementById('storage-slot-' + scope + '-' + idx);
+            if (slotEl) slotEl.classList.toggle('is-off', !value);
+            // 联动：停用担任主/次的方案 → 摘除徽标，由后端补主并提示
+            if (!value && p.role) {
+                var roleName = p.role === 'primary' ? '默认主' : '默认次';
+                p.role = '';
+                showToast('「' + p.name + '」已停用，默认' + (roleName === '默认主' ? '主' : '次') + '徽标已摘除', 'info');
+                renderStorageList(scope);
+            }
+        }
+    }
+
+    // 采集参数折叠（仅增量方案）
+    function toggleSlotEngine(scope, idx, btn) {
+        var p = scopeProfiles(scope)[idx];
+        if (!p) return;
+        p._engOpen = !p._engOpen;
+        var body = document.getElementById('slot-eng-' + scope + '-' + idx);
+        if (body) body.style.display = p._engOpen ? '' : 'none';
+        if (btn) btn.setAttribute('aria-expanded', p._engOpen ? 'true' : 'false');
+    }
+    function setProfileMaxSize(scope, idx) {
+        var p = scopeProfiles(scope)[idx];
+        if (!p) return;
+        var numEl = document.getElementById('slot-maxsize-' + scope + '-' + idx);
+        var unitEl = document.getElementById('slot-maxunit-' + scope + '-' + idx);
+        if (!numEl || !unitEl) return;
+        var num = parseInt(numEl.value, 10) || 0;
+        var unit = parseInt(unitEl.value, 10) || 1;
+        p.max_size = num * unit;
+        scheduleStorageSave();
+    }
+    // 设主/次：角色已被其他方案占按时先弹确认
+    async function setProfileRole(scope, idx, role) {
+        var list = scopeProfiles(scope);
+        if (!list[idx]) return;
+        var cur = list[idx].role;
+        if (cur === role) { list[idx].role = ''; }  // 再点取消
+        else {
+            // 主/次唯一：已有其他方案担任该角色 → 确认替换
+            var holder = null;
+            for (var i = 0; i < list.length; i++) {
+                if (i !== idx && list[i].role === role) { holder = list[i]; break; }
+            }
+            if (holder) {
+                var roleName = role === 'primary' ? '默认主' : '默认次';
+                var ok = await confirmDialog(
+                    '「' + holder.name + '」当前是' + roleName + '，是否替换为「' + list[idx].name + '」？',
+                    { title: '替换' + roleName, confirmText: '替换', danger: false }
+                );
+                if (!ok) return;
+                holder.role = '';
+            }
+            list[idx].role = role;
+            // 联动：设主/次的方案若处于停用 → 自动恢复启用
+            if (!list[idx].enabled) {
+                list[idx].enabled = true;
+                showToast('「' + list[idx].name + '」已自动启用（担任' + (role === 'primary' ? '默认主' : '默认次') + '）', 'info');
+            }
+        }
+        renderStorageList(scope);
+        scheduleStorageSave();
+    }
+    function moveProfile(scope, idx, dir) {
+        var list = scopeProfiles(scope);
+        var j = idx + dir;
+        if (j < 0 || j >= list.length) return;
+        var t = list[idx]; list[idx] = list[j]; list[j] = t;
+        renderStorageList(scope);
+        scheduleStorageSave();
+    }
+    function addProfile(scope) {
+        var list = scopeProfiles(scope);
+        var p = {
+            id: 'sp_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+            name: '新方案' + (list.length + 1),
+            path: '', name_format: '', role: '', enabled: true,
+        };
+        if (scope === 'batch') {
+            p.folder_mode = false; p.music = false; p.dynamic_cover = false;
+            p.static_cover = false; p.max_size = 0; p.storage_format = ''; p.max_pages = 0;
+        }
+        list.push(p);
+        // 新建即展开：手风琴收起其他卡，直接进入编辑态等填路径
+        p._editing = true;
+        _collapseOthers(scope, list.length - 1);
+        renderStorageList(scope);
+        scheduleStorageSave();
+        showToast('已添加方案，请填写名称与路径（路径留空可稍后补，不会丢失）');
+    }
+    async function removeProfile(scope, idx) {
+        var p = scopeProfiles(scope)[idx];
+        if (!p) return;
+        if (!await confirmDialog('删除方案「' + p.name + '」？该操作不可撤销。', { title: '删除确认', confirmText: '删除', danger: true })) return;
+        storageState[scope].profiles.splice(idx, 1);
+        renderStorageList(scope);
+        scheduleStorageSave();
+    }
+
+
+
+    // ---- 保存（防抖 + 状态可见化）----
+    var _storageSaveTimer = null;
+    function _setSaveChip(state, text) {
+        var chip = document.getElementById('storage-save-status');
+        if (!chip) return;
+        chip.className = 'save-chip ' + state;
+        chip.textContent = text;
+    }
+    function scheduleStorageSave() {
+        clearTimeout(_storageSaveTimer);
+        _setSaveChip('saving', '保存中…');
+        _storageSaveTimer = setTimeout(function() { saveStorageState(); }, 500);
+    }
+    // 后端被动转正提示（补主但可见）
+    function _notifyAutoPromotions(data) {
+        var notes = (data && data._auto_promoted) || [];
+        if (!notes.length) return;
+        notes.forEach(function(n) {
+            showToast('方案「' + n.name + '」已接任' + (n.role === 'primary' ? '默认主' : '默认次'), 'info');
+        });
+        renderStorageList('single'); renderStorageList('batch');
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(document);
+    }
+
+    async function saveStorageState() {
         try {
-            var data = await apiCall('/api/collection/defaults', 'GET');
-            var d = data.defaults || {};
-            globalDefaultFolder = d.folder_name || '';
-            var tpl = (d.name_format || '').trim();
-            tplParts = tpl ? tpl.split(/\s+/).filter(Boolean) : [];
-            // 仅保留合法字段，未知 token 忽略
-            var valid = TPL_FIELDS.map(function(f){ return f[0]; });
-            tplParts = tplParts.filter(function(k){ return valid.indexOf(k) !== -1; });
-        } catch(e) { tplParts = []; }
-        renderTemplateBuilder();
-        renderStructurePreview();
+            var payload = { single: {}, batch: {} };
+            ['single', 'batch'].forEach(function(scope) {
+                var st = storageState[scope];
+                payload[scope] = {
+                    default_name_format: st.default_name_format,
+                    profiles: st.profiles.map(function(p){ return _profilePayload(p, scope); }),
+                };
+            });
+            var data = await apiCall('/api/collection/storage', 'PUT', payload);
+            if (data && data.single) storageState.single = _normScope(data.single, '{create_time} {author} {title}');
+            if (data && data.batch) storageState.batch = _normScope(data.batch, 'create_time type nickname desc');
+            _setSaveChip('ok', '已保存');
+            _notifyAutoPromotions(data);
+            // 保存后不重置展开状态（防抖保存频繁触发，重置会打断编辑）
+        } catch(e) {
+            _setSaveChip('err', '保存失败');
+            showToast('存储方案保存失败: ' + (e.message || ''), 'error');
+        }
     }
 
-    // 目录结构预览（平台目录 douyin/tiktok/xhs 自动创建）
-    function renderStructurePreview() {
-        var root = (document.getElementById('download_path').value || '').trim() || 'DoukHub/Download';
-        document.getElementById('structure-preview').innerHTML =
-            escapeHtml(root) + '\\<br>' +
-            '&nbsp;&nbsp;&nbsp;├─ <b>douyin</b>\\ <span class="dep">（平台自动创建）</span><br>' +
-            '&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;└─ <b>账号昵称</b>\\<br>' +
-            '&nbsp;&nbsp;&nbsp;├─ <b>tiktok</b>\\<br>' +
-            '&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;└─ <b>账号昵称</b>\\<br>' +
-            '&nbsp;&nbsp;&nbsp;└─ <b>xhs</b>\\<br>' +
-            '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ <b>账号昵称</b>\\' +
-            '<div style="margin-top:6px"><span class="note">同一账号永远落在同一位置，方案交叉不会产生重复下载</span></div>';
-    }
-
-    // ===== 保存 =====
+    // ===== 保存全部设置 =====
     async function saveSettings(e) {
         e.preventDefault();
         const form = e.target;
@@ -496,6 +1236,8 @@
             if (input.type === 'checkbox') value = input.checked;
             else if (input.type === 'number') value = parseInt(input.value) || 0;
             else value = input.value;
+        // single_download_path 无 name 属性，不会进入此循环；目录通过 oninput → onSingleTplDirChange 持久化
+
             const parts = key.split('.');
             let obj = data;
             for (let i = 0; i < parts.length - 1; i++) {
@@ -514,13 +1256,12 @@
                 if (key && value) data.tags[key] = value;
             }
         });
-        // 文件名模板独立保存到 collection_defaults
+
+        // 存储方案（主/次 + 引擎参数）已由防抖自动保存，此处显式再保存一次兜底
         try {
-            await apiCall('/api/collection/defaults', 'PUT', {
-                folder_name: globalDefaultFolder,
-                name_format: tplParts.join(' '),
-            });
-        } catch(e) { /* 静默，主保存仍继续 */ }
+            await saveStorageState();
+        } catch(e) { /* 存储方案已由防抖保存，此处兜底 */ }
+
         const resp = await apiCall('/api/settings', 'POST', data);
         showToast(resp.message || '保存成功');
     }
@@ -561,41 +1302,6 @@
             status.style.color = allOk ? 'var(--success)' : 'var(--danger)';
         }
     }
-    function openDirBrowser() {
-        document.getElementById('dir-browser').style.display = 'block';
-        const current = document.getElementById('download_path').value || '';
-        loadDirs(current);
-    }
-    function closeDirBrowser() { document.getElementById('dir-browser').style.display = 'none'; }
-    async function loadDirs(path) {
-        const resp = await fetch(`/api/browse-dir?path=${encodeURIComponent(path)}`);
-        const data = await resp.json();
-        document.getElementById('dir-current').textContent = '当前位置: ' + (data.current || '选择驱动器');
-        let html = '';
-        html += `<div style="display:flex;gap:6px;margin-bottom:8px;">`;
-        if (data.home) html += `<button class="btn btn-secondary btn-sm" onclick="loadDirs('${data.home.replace(/\\/g, '\\\\')}')" title="回到主目录"><i data-lucide="house"></i> 主目录</button>`;
-        if (data.parent) html += `<button class="btn btn-secondary btn-sm" onclick="loadDirs('${data.parent.replace(/\\/g, '\\\\')}')" title="上级目录"><i data-lucide="arrow-up"></i> 上级</button>`;
-        html += `</div>`;
-        if (data.current) {
-            html += `<div style="padding:10px;margin-bottom:8px;background:var(--success-light);border-radius:var(--radius-sm);display:flex;justify-content:space-between;align-items:center;border:1px solid var(--success);">
-                <span style="font-size:13px;">选择此文件夹作为下载路径</span>
-                <button class="btn btn-primary btn-sm" onclick="selectDir('${data.current.replace(/\\/g, '\\\\')}')"><i data-lucide="check"></i> 选择</button>
-            </div>`;
-        }
-        for (const dir of data.dirs) {
-            const name = dir.split(/[/\\]/).pop() || dir;
-            html += `<div style="padding:8px 10px;cursor:pointer;border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:6px;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''" onclick="loadDirs('${dir.replace(/\\/g, '\\\\')}')"><i data-lucide="folder"></i> ${name}</div>`;
-        }
-        if (!data.dirs || data.dirs.length === 0) html += '<div style="color:var(--text-muted);padding:8px;font-size:13px;">此目录下没有子文件夹</div>';
-        document.getElementById('dir-list').innerHTML = html;
-        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-    }
-    function selectDir(path) {
-        document.getElementById('download_path').value = path;
-        closeDirBrowser();
-        renderStructurePreview();
-        showToast('已选择: ' + path);
-    }
     function copyApiKey() {
         var key = document.getElementById('api-key-display').value;
         if (!key) { showToast('暂无 API Key，请先生成', 'error'); return; }
@@ -612,8 +1318,8 @@
         } catch(e) { showToast(e.message || '生成失败', 'error'); }
     }
 
-    // 初始化：加载文件名模板 + 目录预览
-    loadNameFormat();
-    document.getElementById('download_path').addEventListener('input', renderStructurePreview);
+    // 初始化
+    loadStorageState();
+    initSettingsHash();
 </script>
 {% endblock %}

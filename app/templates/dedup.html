@@ -1,0 +1,476 @@
+{% extends "base.html" %}
+{% block title %}文件查重 - DoukHub{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>文件查重</h2>
+    <div class="page-header-actions">
+        <button class="btn btn-secondary" onclick="loadRecycle(); showCard('recycle-card');"><i class="ph ph-archive"></i> 回收区</button>
+    </div>
+</div>
+
+<!-- 扫描设置 -->
+<div class="card dedup-card">
+    <h3><i class="ph ph-radar"></i> 扫描范围</h3>
+
+    <!-- 方案目录（按 scope 分组） -->
+    <div id="scope-groups" style="margin-top:12px;"><span style="color:var(--text-muted);font-size:13px;">加载中...</span></div>
+
+    <!-- 自定义目录 -->
+    <div class="dedup-section">
+        <div class="dedup-section-label"><i class="ph ph-folder-plus"></i> 自定义目录</div>
+        <div style="display:flex;gap:8px;">
+            <input type="text" id="custom-path" placeholder="输入绝对路径，或点右侧「浏览」选择文件夹" style="flex:1;">
+            <button class="btn btn-secondary btn-sm" onclick="browseFolder()"><i class="ph ph-folder-open"></i> 浏览</button>
+            <button class="btn btn-secondary btn-sm" onclick="addCustomPath()">追加</button>
+        </div>
+        <div id="custom-slots" style="margin-top:8px;"></div>
+    </div>
+
+    <!-- 文件类型 -->
+    <div class="dedup-section">
+        <div class="dedup-section-label"><i class="ph ph-files"></i> 文件类型 <span class="label-note">（默认全选）</span></div>
+        <div class="ext-row">
+            <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="video"><span>视频</span></label>
+            <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="image"><span>图片</span></label>
+            <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="audio"><span>音频</span></label>
+            <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="meta"><span>描述文件(.json/.txt)</span></label>
+        </div>
+    </div>
+
+    <!-- 回收区目录 -->
+    <div class="dedup-section">
+        <div class="dedup-section-label"><i class="ph ph-archive"></i> 回收区目录 <span class="label-note">（移出的重复文件放这里，留空用默认）</span></div>
+        <div style="display:flex;gap:8px;">
+            <input type="text" id="recycle-dir-input" placeholder="默认 ~/.doukhub/dedup_recycle" style="flex:1;">
+            <button class="btn btn-secondary btn-sm" onclick="saveRecycleDir()">保存</button>
+        </div>
+    </div>
+
+    <div class="dedup-action-row">
+        <button class="btn btn-primary" id="scan-btn" onclick="startScan()"><i class="ph ph-magnifying-glass"></i> 开始扫描（<span id="sel-dir-count">0</span> 个目录）</button>
+    </div>
+    <div id="scan-progress" style="margin-top:14px;display:none;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-muted);margin-bottom:6px;"><span id="scan-msg">...</span><span id="scan-pct">0%</span></div>
+        <div class="progress-track"><div id="scan-bar" class="progress-bar"></div></div>
+    </div>
+</div>
+
+<!-- 扫描结果 -->
+<div class="card dedup-card" id="result-card" style="display:none;">
+    <h3><i class="ph ph-copy"></i> 重复文件组</h3>
+    <div class="result-toolbar">
+        <span style="font-size:13px;color:var(--text-muted);" id="result-summary"></span>
+        <span style="font-size:13px;">保留规则：</span>
+        <select id="keep-rule" class="keep-select">
+            <option value="manual">手动勾选</option>
+            <option value="path_short">保留路径最短</option>
+            <option value="path_long">保留路径最长</option>
+            <option value="time_early">保留创建最早</option>
+            <option value="time_late">保留创建最晚</option>
+            <option value="name_short">保留文件名最短</option>
+            <option value="name_long">保留文件名最长</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="applyRule()">应用规则</button>
+        <span style="flex:1;"></span>
+        <button class="btn btn-danger" onclick="moveSelected()"><i class="ph ph-tray-arrow-down"></i> 移到回收区 (<span id="sel-count">0</span>)</button>
+    </div>
+    <div id="groups" style="margin-top:10px;"></div>
+</div>
+
+<!-- 回收区 -->
+<div class="card dedup-card" id="recycle-card" style="display:none;">
+    <h3><i class="ph ph-archive"></i> 回收区</h3>
+    <p class="recycle-tip">
+        回收区目录：<code id="recycle-dir" style="font-family:var(--font-mono);">...</code>
+        — 核对无误后，点「打开文件夹」在资源管理器中删除（系统会移入回收站，可恢复）
+    </p>
+    <div class="recycle-actions">
+        <button class="btn btn-secondary btn-sm" onclick="restoreSelected()"><i class="ph ph-arrow-counter-clockwise"></i> 还原选中</button>
+        <button class="btn btn-secondary btn-sm" onclick="openRecycle()"><i class="ph ph-folder-open"></i> 打开文件夹</button>
+    </div>
+    <div id="recycle-list"></div>
+</div>
+
+<style>
+/* ===== 文件查重页样式（随 content 一起渲染） ===== */
+.dedup-card h3 { display:flex; align-items:center; gap:8px; }
+.dedup-card h3 i { color:var(--accent); }
+.dedup-section { margin-top:16px; padding-top:16px; border-top:1px solid var(--border-default); }
+.dedup-section-label { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:var(--text-primary); margin-bottom:8px; }
+.dedup-section-label i { color:var(--text-muted); font-size:15px; }
+.label-note { color:var(--text-muted); font-weight:400; font-size:12px; }
+.dedup-action-row { margin-top:18px; }
+
+/* 方案分组 */
+.scope-group { margin-bottom:14px; }
+.scope-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.scope-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.scope-dot.single { background:#8b5cf6; }
+.scope-dot.batch { background:#10b981; }
+.scope-title { font-size:13.5px; font-weight:600; color:var(--text-primary); }
+.scope-count { font-size:12px; color:var(--text-muted); }
+.scope-checkall { margin-left:auto; font-size:12px; color:var(--accent); background:none; border:none; cursor:pointer; padding:2px 8px; border-radius:6px; }
+.scope-checkall:hover { background:var(--accent-light); }
+
+/* 方案卡片 */
+.scan-slot { display:flex; align-items:center; gap:10px; padding:11px 14px; border:1px solid var(--border-default); border-radius:12px; background:var(--surface-raised); margin-bottom:8px; cursor:pointer; transition:border-color .15s, box-shadow .15s, background .15s; }
+.scan-slot:hover { border-color:var(--accent); box-shadow:0 2px 10px rgba(0,0,0,.07); }
+.scan-slot.checked { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 6%, var(--surface-raised)); }
+.scan-slot[data-role="primary"] { border-left:3px solid #8b5cf6; }
+.scan-slot[data-role="secondary"] { border-left:3px solid #f59e0b; }
+.scan-slot input[type=checkbox] { flex-shrink:0; width:16px; height:16px; accent-color:var(--accent); cursor:pointer; }
+.scan-slot-main { flex:1; min-width:0; }
+.scan-slot-name { font-size:13.5px; font-weight:600; color:var(--text-primary); display:flex; align-items:center; gap:6px; }
+.scan-slot-path { font-size:12px; color:var(--text-muted); word-break:break-all; margin-top:2px; font-family:var(--font-mono); }
+.scan-badge { font-size:10.5px; padding:1px 8px; border-radius:99px; border:1px solid; line-height:1.6; flex-shrink:0; font-weight:600; }
+.scan-badge.primary { color:#8b5cf6; border-color:#8b5cf6; background:color-mix(in srgb, #8b5cf6 10%, transparent); }
+.scan-badge.secondary { color:#f59e0b; border-color:#f59e0b; background:color-mix(in srgb, #f59e0b 10%, transparent); }
+.scan-remove { background:none; border:none; color:var(--text-muted); cursor:pointer; padding:2px 6px; font-size:16px; line-height:1; flex-shrink:0; border-radius:6px; }
+.scan-remove:hover { color:var(--danger); background:var(--bg-muted); }
+
+/* 文件类型胶囊 */
+.ext-row { display:flex; flex-wrap:wrap; }
+.ext-pill { display:inline-flex; align-items:center; gap:6px; padding:6px 13px; border:1px solid var(--border-default); border-radius:999px; font-size:13px; color:var(--text-secondary); cursor:pointer; margin-right:8px; margin-bottom:8px; transition:border-color .15s, background .15s; user-select:none; }
+.ext-pill:hover { border-color:var(--accent); }
+.ext-pill input[type=checkbox] { width:15px; height:15px; accent-color:var(--accent); cursor:pointer; }
+
+/* 进度条 */
+.progress-track { height:6px; background:var(--bg-muted); border-radius:3px; overflow:hidden; }
+.progress-bar { height:100%; width:0; background:var(--accent); border-radius:3px; transition:width .3s; }
+
+/* 结果工具栏 */
+.result-toolbar { display:flex; align-items:center; gap:10px; margin:8px 0 4px; flex-wrap:wrap; }
+.keep-select { font-size:13px; padding:5px 8px; border-radius:var(--radius-sm); border:1px solid var(--border-default); background:var(--surface-raised); color:var(--text-primary); }
+
+/* 重复组卡片 */
+.dp-group { border:1px solid var(--border-default); border-radius:12px; margin-bottom:10px; overflow:hidden; background:var(--surface-raised); }
+.dp-group .gp-head { display:flex; align-items:center; gap:8px; padding:11px 14px; background:var(--bg-muted); cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); }
+.dp-group .gp-head .gp-arrow { color:var(--text-muted); font-size:14px; transition:transform .15s; }
+.dp-group .gp-files { padding:6px 14px 10px; }
+.dp-file { display:flex; align-items:center; gap:10px; padding:8px 4px; border-bottom:1px dashed var(--border-default); font-size:13px; word-break:break-all; }
+.dp-file:last-child { border-bottom:none; }
+.dp-file input[type=checkbox] { width:16px; height:16px; accent-color:var(--accent); cursor:pointer; flex-shrink:0; }
+.dp-file .fp-path { flex:1; min-width:0; color:var(--text-primary); }
+.dp-file .fp-meta { color:var(--text-muted); font-size:12px; flex-shrink:0; font-family:var(--font-mono); }
+
+/* 回收区 */
+.recycle-tip { font-size:13px; color:var(--text-muted); margin:6px 0 12px; line-height:1.6; }
+.recycle-actions { display:flex; gap:8px; margin-bottom:12px; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const EXT_MAP = {
+        video: ['.mp4','.mov','.m4v','.mkv','.webm','.avi','.flv','.ts'],
+        image: ['.jpg','.jpeg','.png','.webp','.heic','.bmp','.gif'],
+        audio: ['.mp3','.m4a','.wav','.aac'],
+        meta: ['.json','.txt'],
+    };
+    let dirItems = [];        // 所有目录项 {path, name, role, scope, custom, checked}
+    let resultData = null;
+    let pollTimer = null;
+
+    function fmtSize(b) {
+        if (!b) return '0 B';
+        const u = ['B','KB','MB','GB','TB'];
+        const i = Math.floor(Math.log(b) / Math.log(1024));
+        return (b / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + u[i];
+    }
+    function esc(s) {
+        return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function showCard(id) {
+        ['result-card','recycle-card'].forEach(x => { document.getElementById(x).style.display = (x === id) ? '' : 'none'; });
+    }
+
+    // ---------- 目录选择 ----------
+    async function loadScope() {
+        const data = await apiCall('/api/dedup/scope', 'GET');
+        dirItems = (data.profiles || []).map(p => ({
+            path: p.path, name: p.name, role: p.role || '', scope: p.scope, custom: false, checked: true,
+        }));
+        renderScopeGroups();
+    }
+    function renderScopeGroups() {
+        const wrap = document.getElementById('scope-groups');
+        const scopes = [['single', '单作品方案', 'single'], ['batch', '批量方案', 'batch']];
+        const html = scopes.map(([scope, title, cls]) => {
+            const items = dirItems.filter(d => d.scope === scope);
+            if (items.length === 0) return '';
+            const checked = items.filter(i => i.checked).length;
+            return `<div class="scope-group">
+                <div class="scope-head">
+                    <span class="scope-dot ${cls}"></span>
+                    <span class="scope-title">${title}</span>
+                    <span class="scope-count">${checked}/${items.length} 个目录</span>
+                    <button class="scope-checkall" onclick="toggleScope('${scope}')">${checked === items.length ? '全不选' : '全选'}</button>
+                </div>
+                ${items.map((d, i) => slotHtml(d, scope + '-' + i)).join('')}
+            </div>`;
+        }).join('');
+        wrap.innerHTML = html || '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">存储方案里还没有目录，请在下方自定义添加。</div>';
+        renderCustomSlots();
+        updateDirCount();
+    }
+    function slotHtml(d, key) {
+        const badge = d.role === 'primary' ? '<span class="scan-badge primary">主</span>' : (d.role === 'secondary' ? '<span class="scan-badge secondary">次</span>' : '');
+        return `<label class="scan-slot ${d.checked ? 'checked' : ''}" data-role="${d.role}">
+            <input type="checkbox" ${d.checked ? 'checked' : ''} onchange="toggleDir('${key}')">
+            <span class="scan-slot-main">
+                <span class="scan-slot-name">${esc(d.name)} ${badge}</span>
+                <span class="scan-slot-path">${esc(d.path)}</span>
+            </span>
+        </label>`;
+    }
+    function renderCustomSlots() {
+        const wrap = document.getElementById('custom-slots');
+        const items = dirItems.filter(d => d.custom);
+        wrap.innerHTML = items.map((d, i) => {
+            const key = 'custom-' + i;
+            return `<div class="scan-slot ${d.checked ? 'checked' : ''}" style="border-left:3px solid var(--text-muted);">
+                <input type="checkbox" ${d.checked ? 'checked' : ''} onchange="toggleDir('${key}')">
+                <span class="scan-slot-main">
+                    <span class="scan-slot-name">自定义</span>
+                    <span class="scan-slot-path">${esc(d.path)}</span>
+                </span>
+                <button class="scan-remove" title="移除" onclick="removeCustom(${i})"><i class="ph ph-x"></i></button>
+            </div>`;
+        }).join('');
+    }
+    function findDir(key) {
+        if (key.startsWith('custom-')) {
+            const idx = parseInt(key.replace('custom-', ''));
+            const items = dirItems.filter(d => d.custom);
+            return items[idx];
+        }
+        const [scope, idx] = key.split('-');
+        return dirItems.filter(d => d.scope === scope)[parseInt(idx)];
+    }
+    function toggleDir(key) {
+        const d = findDir(key);
+        if (d) { d.checked = !d.checked; renderScopeGroups(); }
+    }
+    function toggleScope(scope) {
+        const items = dirItems.filter(d => d.scope === scope);
+        const allChecked = items.every(i => i.checked);
+        items.forEach(i => i.checked = !allChecked);
+        renderScopeGroups();
+    }
+    function addCustomPath() {
+        const inp = document.getElementById('custom-path');
+        const v = inp.value.trim();
+        if (!v) return;
+        if (!dirItems.some(d => d.path === v)) {
+            dirItems.push({ path: v, name: '自定义', role: '', scope: 'custom', custom: true, checked: true });
+        }
+        inp.value = '';
+        renderScopeGroups();
+    }
+    function removeCustom(idx) {
+        const items = dirItems.filter(d => d.custom);
+        const target = items[idx];
+        if (target) { dirItems = dirItems.filter(d => d !== target); renderScopeGroups(); }
+    }
+    async function browseFolder() {
+        showToast('正在打开文件夹选择器...', 'info');
+        const data = await apiCall('/api/dedup/browse', 'POST');
+        if (data.success && data.path) {
+            if (!dirItems.some(d => d.path === data.path)) {
+                dirItems.push({ path: data.path, name: '自定义', role: '', scope: 'custom', custom: true, checked: true });
+            }
+            renderScopeGroups();
+        } else if (!data.success) {
+            showToast(data.error || '未选择', 'error');
+        }
+    }
+    function updateDirCount() {
+        document.getElementById('sel-dir-count').textContent = dirItems.filter(d => d.checked).length;
+    }
+    function getExts() {
+        const exts = [];
+        document.querySelectorAll('.ext-cb:checked').forEach(cb => exts.push(...EXT_MAP[cb.value]));
+        return exts;
+    }
+
+    // ---------- 回收区目录设置 ----------
+    async function loadSettings() {
+        const data = await apiCall('/api/dedup/settings', 'GET');
+        document.getElementById('recycle-dir-input').value = data.recycle_dir || '';
+    }
+    async function saveRecycleDir() {
+        const v = document.getElementById('recycle-dir-input').value.trim();
+        const data = await apiCall('/api/dedup/settings', 'POST', { recycle_dir: v });
+        if (data.success) { showToast('回收区目录已保存'); document.getElementById('recycle-dir-input').value = data.recycle_dir; }
+        else showToast('保存失败', 'error');
+    }
+
+    // ---------- 扫描 ----------
+    async function startScan() {
+        const roots = dirItems.filter(d => d.checked).map(d => d.path);
+        if (roots.length === 0) { showToast('请先勾选要扫描的目录', 'error'); return; }
+        const exts = getExts();
+        if (exts.length === 0) { showToast('请至少选择一种文件类型', 'error'); return; }
+        const data = await apiCall('/api/dedup/scan', 'POST', { roots, exts });
+        if (!data.success) { showToast(data.error || '启动失败', 'error'); return; }
+        document.getElementById('scan-btn').disabled = true;
+        document.getElementById('scan-progress').style.display = '';
+        pollTimer = setInterval(pollStatus, 1500);
+    }
+    async function pollStatus() {
+        const s = await apiCall('/api/dedup/status', 'GET');
+        const msg = document.getElementById('scan-msg');
+        const pct = document.getElementById('scan-pct');
+        const bar = document.getElementById('scan-bar');
+        if (s.stage === 'collecting') { msg.textContent = s.message; pct.textContent = ''; bar.style.width = '4%'; }
+        else if (s.stage === 'hashing') {
+            const p = s.total_files > 0 ? Math.round(s.scanned / s.total_files * 100) : 0;
+            msg.textContent = s.message; pct.textContent = p + '%'; bar.style.width = p + '%';
+        }
+        if (!s.running) {
+            clearInterval(pollTimer);
+            document.getElementById('scan-btn').disabled = false;
+            document.getElementById('scan-progress').style.display = 'none';
+            if (s.stage === 'error') { showToast(s.message, 'error'); return; }
+            showToast('扫描完成，发现 ' + s.groups + ' 组重复文件');
+            await loadResult();
+        }
+    }
+
+    // ---------- 结果 ----------
+    async function loadResult() {
+        const data = await apiCall('/api/dedup/result', 'GET');
+        resultData = data.result;
+        const summary = document.getElementById('result-summary');
+        if (!resultData || !resultData.groups || resultData.groups.length === 0) {
+            document.getElementById('groups').innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">未发现重复文件</div>';
+            summary.textContent = '';
+        } else {
+            renderGroups();
+            summary.textContent = `共 ${resultData.groups.length} 组重复，涉及 ${resultData.groups.reduce((a,g)=>a+g.files.length,0)} 个文件`;
+        }
+        showCard('result-card');
+    }
+    function renderGroups() {
+        const el = document.getElementById('groups');
+        el.innerHTML = resultData.groups.map((g, gi) => `
+            <div class="dp-group">
+                <div class="gp-head" onclick="toggleGroup(${gi})">
+                    <i class="ph ph-caret-right gp-arrow" id="gp-arrow-${gi}"></i>
+                    <span>组 ${gi+1}：${g.files.length} 个相同文件（每个 ${fmtSize(g.size)}）</span>
+                </div>
+                <div class="gp-files" id="gp-files-${gi}" style="display:none;">
+                    ${g.files.map((f, fi) => `
+                        <div class="dp-file" id="df-${gi}-${fi}">
+                            <input type="checkbox" id="cb-${gi}-${fi}" onchange="updSel()">
+                            <span class="fp-path" title="${esc(f.path)}">${esc(f.path)}</span>
+                            <span class="fp-meta">${fmtSize(f.size)}${f.work_id ? ' · id:'+f.work_id : ''}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `).join('');
+        updateSelCount();
+    }
+    function toggleGroup(gi) {
+        const f = document.getElementById('gp-files-' + gi);
+        const a = document.getElementById('gp-arrow-' + gi);
+        if (f.style.display === 'none') { f.style.display = ''; a.className = 'ph ph-caret-down gp-arrow'; }
+        else { f.style.display = 'none'; a.className = 'ph ph-caret-right gp-arrow'; }
+    }
+    function setChecked(gi, fi, checked) {
+        const cb = document.getElementById('cb-' + gi + '-' + fi);
+        if (cb) cb.checked = checked;
+    }
+    function applyRule() {
+        const rule = document.getElementById('keep-rule').value;
+        if (rule === 'manual') return;
+        resultData.groups.forEach((g, gi) => {
+            const idx = g.files.map((_, i) => i);
+            const sorted = [...idx].sort((a, b) => {
+                const fa = g.files[a], fb = g.files[b];
+                switch (rule) {
+                    case 'path_short': return fa.path.length - fb.path.length;
+                    case 'path_long': return fb.path.length - fa.path.length;
+                    case 'time_early': return fa.mtime - fb.mtime;
+                    case 'time_late': return fb.mtime - fa.mtime;
+                    case 'name_short': return fa.name.length - fb.name.length;
+                    case 'name_long': return fb.name.length - fa.name.length;
+                }
+            });
+            sorted.forEach((fi, rank) => setChecked(gi, fi, rank !== 0));
+        });
+        updateSelCount();
+    }
+    function selectedFiles() {
+        const out = [];
+        resultData.groups.forEach((g, gi) => {
+            g.files.forEach((f, fi) => {
+                if (document.getElementById('cb-' + gi + '-' + fi)?.checked) out.push(f.path);
+            });
+        });
+        return out;
+    }
+    function updSel() { updateSelCount(); }
+    function updateSelCount() {
+        document.getElementById('sel-count').textContent = selectedFiles().length;
+    }
+
+    async function moveSelected() {
+        const paths = selectedFiles();
+        if (paths.length === 0) { showToast('请先勾选要清理的文件', 'error'); return; }
+        const ok = await confirmDialog(`将把 ${paths.length} 个文件移动到回收区（不删除，可还原）。确定吗？`, { title: '移到回收区', confirmText: '移动' });
+        if (!ok) return;
+        const data = await apiCall('/api/dedup/move', 'POST', { paths });
+        if (data.success) {
+            showToast(`已移动 ${data.moved} 个文件到回收区`);
+            await loadResult();
+        } else {
+            showToast(`移动失败：${(data.failed[0]?.reason) || '未知错误'}`, 'error');
+        }
+    }
+
+    // ---------- 回收区 ----------
+    async function loadRecycle() {
+        const data = await apiCall('/api/dedup/recycle', 'GET');
+        document.getElementById('recycle-dir').textContent = data.recycle_dir || '';
+        const el = document.getElementById('recycle-list');
+        window._recycleItems = data.items || [];
+        const items = window._recycleItems;
+        if (items.length === 0) {
+            el.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:16px;">回收区为空</div>';
+            return;
+        }
+        el.innerHTML = items.map((it, i) => `
+            <div class="dp-file">
+                <input type="checkbox" id="rc-${i}">
+                <span class="fp-path" title="${esc(it.path)}">${esc(it.path)}</span>
+                <span class="fp-meta">${fmtSize(it.size)} · ${it.mtime}</span>
+            </div>
+        `).join('');
+    }
+    function recycleSelected() {
+        const out = [];
+        document.querySelectorAll('#recycle-list input:checked').forEach(cb => {
+            const i = parseInt(cb.id.replace('rc-', ''));
+            if (window._recycleItems && window._recycleItems[i]) out.push(window._recycleItems[i].path);
+        });
+        return out;
+    }
+    async function restoreSelected() {
+        const paths = recycleSelected();
+        if (paths.length === 0) { showToast('请先勾选要还原的文件', 'error'); return; }
+        const data = await apiCall('/api/dedup/restore', 'POST', { paths });
+        if (data.success) showToast(`已还原 ${data.restored} 个文件`);
+        else showToast(`还原失败：${data.failed[0]?.reason || '未知错误'}`, 'error');
+        await loadRecycle();
+    }
+    async function openRecycle() {
+        const data = await apiCall('/api/dedup/open-recycle', 'POST');
+        if (data && !data.success) showToast('打开失败：' + (data.error || '未知'), 'error');
+    }
+
+    loadScope();
+    loadSettings();
+</script>
+{% endblock %}

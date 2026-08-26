@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}数据备份 - DoukHub{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>数据备份</h2>
+    <div class="page-header-actions">
+        <button class="btn btn-secondary" onclick="openBackupDir()"><i class="ph ph-folder-open"></i> 打开备份目录</button>
+        <button class="btn btn-primary" onclick="createBackup()"><i class="ph ph-database"></i> 立即备份</button>
+    </div>
+</div>
+
+<div class="card">
+    <h3><i class="ph ph-cylinder"></i> 数据库状态</h3>
+    <div id="db-status" style="font-size:13px;color:var(--text-muted);padding:12px 0;">
+        <i class="ph ph-spinner"></i> 加载中...
+    </div>
+    <div style="margin-top:12px;">
+        <button class="btn btn-secondary btn-sm" onclick="vacuumDb()"><i class="ph ph-broom"></i> 压缩数据库</button>
+        <span style="font-size:12px;color:var(--text-muted);margin-left:8px;">回收删除数据后遗留的空闲空间，压缩前会自动备份</span>
+    </div>
+</div>
+
+<div class="card">
+    <h3><i class="ph ph-clock-counter-clockwise"></i> 备份记录</h3>
+    <p style="font-size:13px;color:var(--text-muted);margin:4px 0 12px;">
+        备份目录：<code id="backup-dir" style="font-family:var(--font-mono);">加载中...</code>
+        · 保留最近 7 份，更早的自动清理
+    </p>
+    <div id="backup-list" style="font-size:13px;">
+        <div style="text-align:center;color:var(--text-muted);padding:20px;"><i class="ph ph-spinner"></i> 加载中...</div>
+    </div>
+</div>
+
+<style>
+.backup-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border:1px solid var(--border-default); border-radius:var(--radius); margin-bottom:8px; background:var(--bg-muted); }
+.backup-row .bk-info { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.backup-row .bk-name { font-weight:600; color:var(--text-primary); word-break:break-all; }
+.backup-row .bk-meta { font-size:12px; color:var(--text-muted); }
+.backup-row .bk-actions { display:flex; gap:6px; flex-shrink:0; flex-wrap:wrap; }
+.db-stat-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; }
+.db-stat-grid .ds-item { padding:12px 14px; background:var(--bg-muted); border:1px solid var(--border-default); border-radius:var(--radius); }
+.db-stat-grid .ds-label { font-size:12px; color:var(--text-muted); margin-bottom:4px; }
+.db-stat-grid .ds-value { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
+.db-stat-grid .ds-value.warn { color:var(--warning); }
+@media (max-width:768px) { .db-stat-grid { grid-template-columns:repeat(2, 1fr); } .backup-row { flex-direction:column; align-items:flex-start; } }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function formatSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+    }
+
+    async function loadData() {
+        try {
+            const [stats, listData] = await Promise.all([
+                apiCall('/api/backup/stats', 'GET'),
+                apiCall('/api/backup/list', 'GET'),
+            ]);
+            renderStats(stats);
+            renderList(listData);
+        } catch (e) {
+            document.getElementById('db-status').innerHTML = '<span style="color:var(--danger);">加载失败</span>';
+        }
+    }
+
+    function renderStats(s) {
+        const el = document.getElementById('db-status');
+        const frag = (s.fragmentation || 0) >= 20;
+        const reclaim = s.reclaimable_bytes || 0;
+        el.innerHTML = `
+            <div class="db-stat-grid">
+                <div class="ds-item"><div class="ds-label">数据库大小</div><div class="ds-value">${formatSize(s.size || 0)}</div></div>
+                <div class="ds-item"><div class="ds-label">碎片率</div><div class="ds-value ${frag ? 'warn' : ''}">${s.fragmentation ?? 0}%</div></div>
+                <div class="ds-item"><div class="ds-label">可回收空间</div><div class="ds-value ${reclaim > 1048576 ? 'warn' : ''}">${formatSize(reclaim)}</div></div>
+                <div class="ds-item"><div class="ds-label">数据页数</div><div class="ds-value">${(s.page_count || 0).toLocaleString()}</div></div>
+            </div>
+        `;
+    }
+
+    function renderList(data) {
+        document.getElementById('backup-dir').textContent = data.backup_dir || '';
+        const el = document.getElementById('backup-list');
+        const backups = data.backups || [];
+        if (backups.length === 0) {
+            el.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:24px;">
+                暂无备份。<button class="btn btn-primary btn-sm" style="margin-left:8px;" onclick="createBackup()">立即创建第一份备份</button>
+            </div>`;
+            return;
+        }
+        el.innerHTML = backups.map(b => `
+            <div class="backup-row">
+                <div class="bk-info">
+                    <div class="bk-name">${b.filename}</div>
+                    <div class="bk-meta">${b.time} · ${formatSize(b.size)}</div>
+                </div>
+                <div class="bk-actions">
+                    <a class="btn btn-secondary btn-sm" href="/api/backup/download/${b.filename}" download><i class="ph ph-download-simple"></i> 下载</a>
+                    <button class="btn btn-warning btn-sm" onclick="restoreBackup('${b.filename}')"><i class="ph ph-arrow-counter-clockwise"></i> 恢复</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteBackup('${b.filename}')"><i class="ph ph-trash"></i> 删除</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function createBackup() {
+        const data = await apiCall('/api/backup/create', 'POST');
+        if (data.success) {
+            showToast('备份成功：' + data.filename);
+        } else {
+            showToast('备份失败：' + (data.error || '未知错误'), 'error');
+        }
+        loadData();
+    }
+
+    async function restoreBackup(filename) {
+        const ok = await confirmDialog('恢复将覆盖当前所有数据！\n\n当前数据库会自动先备份为「恢复前自动备份」。\n恢复后需重启应用生效。\n\n确定从「' + filename + '」恢复吗？', { title: '恢复数据', confirmText: '确定恢复' });
+        if (!ok) return;
+        const data = await apiCall('/api/backup/restore', 'POST', { filename });
+        if (data.success) {
+            showToast(data.message || '恢复成功');
+        } else {
+            showToast('恢复失败：' + (data.error || '未知错误'), 'error');
+        }
+        loadData();
+    }
+
+    async function deleteBackup(filename) {
+        const ok = await confirmDialog('确定删除备份「' + filename + '」吗？此操作不可恢复。', { title: '删除备份', confirmText: '删除' });
+        if (!ok) return;
+        const data = await apiCall('/api/backup/delete', 'POST', { filename });
+        if (data.success) {
+            showToast('已删除');
+        } else {
+            showToast('删除失败：' + (data.error || '未知错误'), 'error');
+        }
+        loadData();
+    }
+
+    async function vacuumDb() {
+        const ok = await confirmDialog('压缩数据库会回收空闲空间，压缩前会自动备份。确定继续吗？', { title: '压缩数据库', confirmText: '开始压缩' });
+        if (!ok) return;
+        showToast('压缩中，请稍候...', 'info');
+        const data = await apiCall('/api/backup/vacuum', 'POST');
+        if (data.success) {
+            showToast('压缩完成，释放 ' + formatSize(data.freed || 0));
+        } else {
+            showToast('压缩失败：' + (data.error || '未知错误'), 'error');
+        }
+        loadData();
+    }
+
+    async function openBackupDir() {
+        const data = await apiCall('/api/backup/open-dir', 'POST');
+        if (data && !data.success) {
+            showToast('打开失败：' + (data.error || '未知错误'), 'error');
+        }
+    }
+
+    loadData();
+</script>
+{% endblock %}

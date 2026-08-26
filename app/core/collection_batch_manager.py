@@ -66,6 +66,7 @@ class CollectionBatchManager:
         name_format: str = "",
         account_created_after: str = "",
         skip_recent_days: int = 0,
+        engine_params: dict | None = None,
     ) -> list[dict]:
         if self.db.get_active_collection_batch():
             if self._worker and not self._worker.done():
@@ -104,6 +105,7 @@ class CollectionBatchManager:
                 "name_format": name_format,
                 "account_created_after": account_created_after,
                 "skip_recent_days": skip_recent_days,
+                "engine_params": engine_params or {},
             }
             self.db.create_collection_batch(
                 batch_id=batch_id,
@@ -323,14 +325,17 @@ class CollectionBatchManager:
 
     def _pick_cookie(self, platform: str) -> str:
         """从数据库选取一个有效 Cookie。platform 为 douyin/tiktok。"""
-        expected = "抖音" if platform == "douyin" else "TikTok"
+        expected = platform
         cookies = self.db.get_enabled_cookies()
         candidates = [c for c in cookies if c.get("平台") == expected]
         if not candidates:
             candidates = [c for c in cookies if c.get("平台") == expected and c.get("启用")]
         if not candidates:
             return ""
-        return str(candidates[0].get("Cookie", ""))
+        chosen = candidates[0]
+        if chosen.get("record_id"):
+            self.db.record_cookie_usage(chosen["record_id"])
+        return str(chosen.get("Cookie", ""))
 
     def recover_interrupted_batches(self) -> None:
         for batch in self.db.list_active_collection_batches():
@@ -487,6 +492,7 @@ class CollectionBatchManager:
             filter_data = {}
         folder_name = filter_data.get("folder_name", "")
         name_format = filter_data.get("name_format", "")
+        engine_params = filter_data.get("engine_params", {})
         # 防御性回退：正常情况下 main.py 已注入全局默认值
         if not folder_name:
             folder_name = "Download"
@@ -525,6 +531,7 @@ class CollectionBatchManager:
                 folder_name=folder_name,
                 name_format=name_format,
                 cookie=self._pick_cookie(batch["platform"]),
+                engine_params=engine_params,
             )
         except Exception as error:
             for item in pending:

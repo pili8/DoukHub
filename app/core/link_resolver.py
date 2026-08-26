@@ -27,11 +27,11 @@ XHS_USER_PATTERNS = [
 def detect_platform(url: str) -> str:
     """根据 URL 判断平台"""
     if "douyin.com" in url or "iesdouyin.com" in url:
-        return "抖音"
+        return "douyin"
     elif "tiktok.com" in url:
-        return "TikTok"
+        return "tiktok"
     elif "xiaohongshu.com" in url or "xhslink.com" in url or "rednote.com" in url:
-        return "小红书"
+        return "xhs"
     return ""
 
 
@@ -48,12 +48,12 @@ def extract_sec_user_id(resolved_url: str, platform: str = "") -> str:
     if not platform:
         platform = detect_platform(resolved_url)
 
-    if platform == "抖音":
+    if platform == "douyin":
         for pattern in DOUYIN_USER_PATTERNS:
             m = pattern.search(resolved_url)
             if m:
                 return m.group(1)
-    elif platform == "小红书":
+    elif platform == "xhs":
         for pattern in XHS_USER_PATTERNS:
             m = pattern.search(resolved_url)
             if m:
@@ -71,9 +71,9 @@ def build_profile_url(sec_user_id: str, platform: str) -> str:
     """
     if not sec_user_id:
         return ""
-    if platform == "抖音":
+    if platform == "douyin":
         return f"https://www.douyin.com/user/{sec_user_id}"
-    elif platform == "小红书":
+    elif platform == "xhs":
         return f"https://www.xiaohongshu.com/user/profile/{sec_user_id}"
     return ""
 

@@ -9,9 +9,7 @@ var singleWorkState = {
     history: [],
     historyFilter: '',
     preferences: JSON.parse(document.getElementById('single-work-preferences').textContent),
-    selectedTemplateId: '',
-    templateParts: [],
-    draggedTemplateIndex: null
+    selectedTemplateId: ''
 };
 
 function invalidateResolvedSingleWorks() {
@@ -19,180 +17,82 @@ function invalidateResolvedSingleWorks() {
     resolvedSingleLinks = [];
 }
 
-// ====== Template logic ======
-function parseSingleTemplate(template) {
-    var parts = [];
-    var regex = /\{(\w+)\}/g;
-    var last = 0;
-    var match;
-    while ((match = regex.exec(template)) !== null) {
-        if (match.index > last) parts.push({type: 'text', value: template.slice(last, match.index)});
-        parts.push({type: 'field', value: match[1]});
-        last = regex.lastIndex;
+// ====== 单作品存储方案（主/次双下拉，空=设置页默认）======
+var singleWorkStorage = [];  // [{id,name,path,name_format,role,enabled}]
+var defaultSingleNfmt = '{create_time} {author} {title}';
+
+function getStorageIds() {
+    var selP = document.getElementById('single-storage-primary');
+    var selS = document.getElementById('single-storage-secondary');
+    return {
+        primary: selP ? selP.value : '',
+        secondary: selS ? selS.value : '',
+    };
+}
+
+function swById(id) {
+    for (var i = 0; i < singleWorkStorage.length; i++) {
+        if (singleWorkStorage[i].id === id) return singleWorkStorage[i];
     }
-    if (last < template.length) parts.push({type: 'text', value: template.slice(last)});
-    return parts;
+    return null;
 }
-
-function templatePartsToString() {
-    return singleWorkState.templateParts.map(function(p) {
-        return p.type === 'field' ? '{' + p.value + '}' : p.value;
-    }).join('');
-}
-
-function buildFilenamePreview(template, work) {
-    if (!work) work = {create_time: '2026-08-15 10-00-00', author: '作者', title: '标题', id: '123', type: '视频', platform: 'douyin'};
-    try { return template.format(work); } catch(e) { return template; }
-}
-
-String.prototype.format = function(obj) {
-    return this.replace(/\{(\w+)\}/g, function(m, key) {
-        return obj[key] !== undefined ? String(obj[key]) : m;
-    });
-};
-
-function renderTemplateBuilder() {
-    var container = document.getElementById('template-parts');
-    if (!singleWorkState.templateParts.length) {
-        container.innerHTML = '<span class="text-muted" style="padding:8px;">拖入字段或点击上方按钮</span>';
-        return;
+function swDefaultRole(role) {
+    for (var i = 0; i < singleWorkStorage.length; i++) {
+        if (singleWorkStorage[i].role === role) return singleWorkStorage[i];
     }
-    container.innerHTML = singleWorkState.templateParts.map(function(part, index) {
-        var label = part.type === 'field' ? part.value : '"' + escapeHtml(part.value) + '"';
-        var icon = part.type === 'field' ? 'code' : 'minus';
-        return '<span class="template-part" draggable="true" ondragstart="dragSingleTemplatePart(event,' + index + ')" ondragover="event.preventDefault()" ondrop="dropSingleTemplatePart(event,' + index + ',event.stopPropagation())">' +
-            '<i data-lucide="' + icon + '"></i> ' + escapeHtml(label) +
-            ' <a href="javascript:void(0)" onclick="removeTemplatePart(' + index + ')" style="margin-left:4px;">×</a></span>';
-    }).join('');
-    document.getElementById('template-live-preview').textContent = templatePartsToString();
-    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    return role === 'primary' ? (singleWorkStorage[0] || null) : null;
+}
+// 生效主方案 = 下拉选中的，没选则设置页默认主
+function swActivePrimary() {
+    var ids = getStorageIds();
+    return (ids.primary && swById(ids.primary)) || swDefaultRole('primary');
+}
+function swActiveSecondary() {
+    var ids = getStorageIds();
+    return (ids.secondary && swById(ids.secondary)) || swDefaultRole('secondary');
 }
 
-function dragSingleField(event, key) {
-    event.dataTransfer.setData('text/plain', JSON.stringify({type: 'field', value: key}));
-}
-
-function dragSingleTemplatePart(event, index) {
-    singleWorkState.draggedTemplateIndex = index;
-    event.dataTransfer.setData('text/plain', JSON.stringify({type: 'move', index: index}));
-}
-
-function dropSingleTemplatePart(event, index, stopPropagation) {
-    event.preventDefault();
-    if (stopPropagation) event.stopPropagation();
-    var raw = event.dataTransfer.getData('text/plain');
-    if (!raw) return;
-    var data; try { data = JSON.parse(raw); } catch(e) { return; }
-    if (!data) return;
-    if (data.type === 'move') {
-        var from = data.index, to = index < 0 ? singleWorkState.templateParts.length : index;
-        if (from === to) return;
-        var item = singleWorkState.templateParts.splice(from, 1)[0];
-        singleWorkState.templateParts.splice(to, 0, item);
-    } else if (data.type === 'field') {
-        singleWorkState.templateParts.splice(index < 0 ? singleWorkState.templateParts.length : index, 0, {type: 'field', value: data.value});
-    } else if (data.type === 'text') {
-        singleWorkState.templateParts.splice(index < 0 ? singleWorkState.templateParts.length : index, 0, {type: 'text', value: data.value});
-    }
-    renderTemplateBuilder();
-}
-
-function appendTemplateField(key) { singleWorkState.templateParts.push({type: 'field', value: key}); renderTemplateBuilder(); }
-function appendTemplateSeparator() { var v = document.getElementById('template-separator').value; if (!v) return; singleWorkState.templateParts.push({type: 'text', value: v}); document.getElementById('template-separator').value = ''; renderTemplateBuilder(); }
-function removeTemplatePart(index) { singleWorkState.templateParts.splice(index, 1); renderTemplateBuilder(); }
-
-function loadSelectedTemplate() {
-    var select = document.getElementById('template-library');
-    var tpl = singleWorkState.preferences.templates.find(function(t) { return t.id === select.value; });
-    if (!tpl) return;
-    document.getElementById('template-name').value = tpl.name;
-    singleWorkState.templateParts = parseSingleTemplate(tpl.template);
-    singleWorkState.selectedTemplateId = select.value;
-    renderTemplateBuilder();
-}
-
-function openTemplateModal() {
-    var select = document.getElementById('template-library');
-    select.innerHTML = singleWorkState.preferences.templates.map(function(t) {
-        return '<option value="' + escapeHtml(t.id) + '">' + escapeHtml(t.name) + '</option>';
-    }).join('');
-    if (singleWorkState.preferences.templates.length) { select.value = singleWorkState.preferences.templates[0].id; loadSelectedTemplate(); }
-    document.getElementById('template-modal').style.display = 'flex';
-    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-}
-
-function closeTemplateModal() { document.getElementById('template-modal').style.display = 'none'; }
-
-async function saveSingleTemplate() {
-    var name = document.getElementById('template-name').value.trim();
-    if (!name) { showToast('模板名称不能为空', 'error'); return; }
-    var template = templatePartsToString();
-    var id = singleWorkState.selectedTemplateId || 'new';
-    var templates = singleWorkState.preferences.templates.filter(function(t) { return t.id !== id; });
-    templates.push({id: id, name: name, template: template, is_default: false});
+async function renderTemplateSelect() {
+    var selP = document.getElementById('single-storage-primary');
+    var selS = document.getElementById('single-storage-secondary');
+    if (!selP || !selS) return;
     try {
-        var data = await apiCall('/api/collection/single-work/preferences', 'PUT', {
-            download_path: singleWorkState.preferences.download_path,
-            recent_dirs: singleWorkState.preferences.recent_dirs,
-            default_template_id: singleWorkState.preferences.default_template_id,
-            templates: templates,
+        var data = await apiCall('/api/collection/storage', 'GET');
+        if (data && data.single && Array.isArray(data.single.profiles)) {
+            singleWorkStorage = data.single.profiles
+                .filter(function(p){ return p.enabled !== false && (p.path || '').trim(); })
+                .map(function(p){
+                    return {
+                        id: p.id, name: p.name || '未命名',
+                        path: p.path || '', name_format: p.name_format || '',
+                        role: (p.role === 'primary' || p.role === 'secondary') ? p.role : '',
+                    };
+                });
+        }
+    } catch(e) { /* 保持默认 */ }
+    function buildOptions(defLabel) {
+        var html = '<option value="">' + defLabel + '</option>';
+        singleWorkStorage.forEach(function(p) {
+            var tag = p.role === 'primary' ? '（默认主）' : (p.role === 'secondary' ? '（默认次）' : '');
+            html += '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.name) + tag + '</option>';
         });
-        if (data.success) { singleWorkState.preferences = data.preferences; renderTemplateSelect(); showToast('模板已保存', 'success'); }
-        else { showToast(data.message || '保存失败', 'error'); }
-    } catch(error) { showToast(error.message || '保存失败', 'error'); }
+        return html;
+    }
+    selP.innerHTML = buildOptions('默认主方案（设置）');
+    selS.innerHTML = buildOptions('默认次方案（设置）');
+    updatePlanDisplay();
 }
 
-async function useThisTemplate() {
-    var template = templatePartsToString();
-    document.getElementById('single-template-input').value = template;
-    var select = document.getElementById('single-template-select');
-    var name = document.getElementById('template-name').value.trim() || '自定义';
-    if (!Array.from(select.options).some(function(o) { return o.value === template; }))
-        select.insertAdjacentHTML('beforeend', '<option value="' + escapeHtml(template) + '">' + escapeHtml(name) + '</option>');
-    select.value = template;
-    updateTemplatePreview();
-    closeTemplateModal();
+function onStorageSelectChange() {
+    updatePlanDisplay();
 }
 
-function renderTemplateSelect() {
-    var select = document.getElementById('single-template-select');
-    var prefs = singleWorkState.preferences;
-    select.innerHTML = prefs.templates.map(function(t) {
-        return '<option value="' + escapeHtml(t.template) + '">' + escapeHtml(t.name) + (t.id === prefs.default_template_id ? ' (默认)' : '') + '</option>';
-    }).join('');
-    var def = prefs.templates.find(function(t) { return t.id === prefs.default_template_id; });
-    if (def) { select.value = def.template; document.getElementById('single-template-input').value = def.template; }
-    updateTemplatePreview();
-}
-
-function onTemplateSelectChange() {
-    document.getElementById('single-template-input').value = document.getElementById('single-template-select').value;
-    updateTemplatePreview();
-}
-
-function updateTemplatePreview() {
-    document.getElementById('single-template-preview').textContent = '预览: ' + buildFilenamePreview(document.getElementById('single-template-input').value, null);
-}
-
-function renderRecentDirs() {
-    var select = document.getElementById('single-recent-dirs');
-    var dirs = singleWorkState.preferences.recent_dirs || [];
-    select.innerHTML = '<option value="">最近目录...</option>' + dirs.map(function(d) {
-        return '<option value="' + escapeHtml(d) + '">' + escapeHtml(d) + '</option>';
-    }).join('');
-}
-
-function useRecentSingleDir(path) { if (path) document.getElementById('single-target-dir').value = path; }
-
-async function saveRecentSingleDir(path) {
-    if (!path) return;
-    var dirs = singleWorkState.preferences.recent_dirs || [];
-    dirs = dirs.filter(function(d) { return d !== path; });
-    dirs.unshift(path); dirs = dirs.slice(0, 10);
-    singleWorkState.preferences.recent_dirs = dirs;
-    try { await apiCall('/api/collection/single-work/preferences', 'PUT', { download_path: singleWorkState.preferences.download_path, recent_dirs: dirs, default_template_id: singleWorkState.preferences.default_template_id, templates: singleWorkState.preferences.templates }); } catch(e) {}
-    renderRecentDirs();
-    updateSettingsSummary();
+// 同步命名模板到 hidden input（下载时按主方案命名）
+function updatePlanDisplay() {
+    var p = swActivePrimary();
+    var nfmt = p ? ((p.name_format || '').trim() || defaultSingleNfmt) : defaultSingleNfmt;
+    var tplInput = document.getElementById('single-template-input');
+    if (tplInput) tplInput.value = nfmt;
 }
 
 // ====== Inline status ======
@@ -441,34 +341,34 @@ async function resolveSingleWorks(event) {
     }
 }
 
-// ====== Quick Download (fast, no mode selection, local only) ======
+// ====== Quick Download (后台下载到本地，刷新不断) ======
 async function quickDownload() {
     if (currentCollectMode !== 'quick') { switchToQuickMode(); }
     var linksText = String(el('links-input').value || '');
     if (!linksText.trim()) { showToast('请先粘贴作品链接', 'error'); return; }
-    var targetDir = el('single-target-dir').value || '';
-    if (!targetDir) { showToast('请先设置保存目录', 'error'); ensureSettingsOpen(); return; }
+    var storageIds = getStorageIds();
+    if (!_singleStorageReady()) { showToast('所选方案未配置保存目录，请到设置页配置', 'error'); ensureSettingsOpen(); return; }
     var template = el('single-template-input').value || '{create_time} {author} {title}';
     var incMusic = el('opt-music').checked, incSC = el('opt-static-cover').checked, incDC = el('opt-dynamic-cover').checked;
-    var btnR = el('detail-resolve'), btnQ = el('quick-download-btn');
-    btnR.disabled = true; btnQ.disabled = true;
-    btnQ.innerHTML = '<i data-lucide="loader-circle"></i><span>下载中...</span>';
+    var folderMode = el('opt-folder-mode') ? el('opt-folder-mode').checked : !!(singleWorkState.preferences && singleWorkState.preferences.folder_mode);
+    var btnQ = el('quick-download-btn');
+    btnQ.disabled = true;
+    btnQ.innerHTML = '<i data-lucide="loader-circle"></i><span>提交中...</span>';
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-    var els = showProgressPanel('下载进度', 3);
-    el('single-work-list').innerHTML = ''; singleWorkState.works = [];
-    updateSelection();
     try {
-        var resp = await fetch('/api/collection/works/download-stream', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ links: linksText, target_dir: targetDir, filename_template: template, include_music: incMusic, include_static_cover: incSC, include_dynamic_cover: incDC }) });
-        await consumeSse(resp, els, function(data) {
-            if (data.phase === 'resolve_done' && data.work) { singleWorkState.works.push(data.work); appendWorkCard(data.work); }
-            if (data.phase === 'download_done') markWorkDownloaded(data.title, data.files);
-            if (data.phase === 'download_failed') markWorkFailed(data.message);
-        }, async function(data) { await saveRecentSingleDir(targetDir); await loadSingleWorkHistory(); });
+        var resp = await fetch('/api/collection/works/download-task', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ links: linksText, target_dir: '', storage_primary_id: storageIds.primary, storage_secondary_id: storageIds.secondary, filename_template: template, include_music: incMusic, include_static_cover: incSC, include_dynamic_cover: incDC, folder_mode: folderMode }) });
+        var data = await resp.json();
+        if (!resp.ok || !data.success) {
+            showToast(data.message || '提交失败', 'error');
+            return;
+        }
+        showToast(data.message || '已加入后台下载', 'success');
+        el('links-input').value = '';
+        await loadSingleWorkHistory();
     } catch (e) {
-        els.status.textContent = '请求失败: ' + e.message; els.status.style.color = 'var(--danger)';
-        addSseLog(els.log, '请求失败: ' + e.message, 'error'); showToast(e.message || '下载失败', 'error');
+        showToast(e.message || '提交失败', 'error');
     } finally {
-        btnR.disabled = false; btnQ.disabled = false;
+        btnQ.disabled = false;
         btnQ.innerHTML = '<i data-lucide="zap"></i><span>一键下载</span>';
         if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     }
@@ -527,11 +427,11 @@ async function doDownloadSingleAsset(link, assetIndex, els) {
         return;
     }
     var els2 = els || startDownloadProgress(1, 1);
-    var targetDir = el('single-target-dir').value || '';
-    if (!targetDir) { showToast('请先选择保存目录', 'error'); ensureSettingsOpen(); return; }
+    var storageIds = getStorageIds();
+    if (!_singleStorageReady()) { showToast('所选方案未配置保存目录，请到设置页配置', 'error'); ensureSettingsOpen(); return; }
     var template = el('single-template-input').value || '{create_time} {author} {title}';
     try {
-        var data = await apiCall('/api/collection/works/download', 'POST', { links: link, target_dir: targetDir, filename_template: template, asset_indexes: [assetIndex], work: work });
+        var data = await apiCall('/api/collection/works/download', 'POST', { links: link, target_dir: '', storage_primary_id: storageIds.primary, storage_secondary_id: storageIds.secondary, filename_template: template, asset_indexes: [assetIndex], work: work });
         if (data.success) { updateDownloadProgress(els2, true, '下载成功: ' + assetKindLabel(asset.kind)); showToast('下载成功', 'success'); }
         else { updateDownloadProgress(els2, false, data.message || '下载失败'); showToast('下载失败', 'error'); }
         await loadSingleWorkHistory();
@@ -616,12 +516,12 @@ async function doDownloadSelectedAssets(workId, shareUrl, indexes, els) {
         return;
     }
     var els2 = els || startDownloadProgress(indexes.length, indexes.length);
-    var targetDir = el('single-target-dir').value || '';
-    if (!targetDir) { showToast('请先选择保存目录', 'error'); ensureSettingsOpen(); return; }
+    var storageIds = getStorageIds();
+    if (!_singleStorageReady()) { showToast('所选方案未配置保存目录，请到设置页配置', 'error'); ensureSettingsOpen(); return; }
     var template = el('single-template-input').value || '{create_time} {author} {title}';
     try {
         var data = await apiCall('/api/collection/works/download', 'POST', {
-            links: shareUrl, target_dir: targetDir, filename_template: template, asset_indexes: indexes, work: work
+            links: shareUrl, target_dir: '', storage_primary_id: storageIds.primary, storage_secondary_id: storageIds.secondary, filename_template: template, asset_indexes: indexes, work: work
         });
         if (data.success) { updateDownloadProgress(els2, true, '下载 ' + indexes.length + ' 个资产成功'); showToast('下载 ' + indexes.length + ' 个资产成功', 'success'); }
         else { updateDownloadProgress(els2, false, data.message || '下载失败'); showToast('下载失败', 'error'); }
@@ -831,9 +731,14 @@ function renderSingleWorkHistory() {
         var files = safeParseJsonArray(row.files_json);
         var work = safeParseJson(row.work_json);
         var isOk = row.status === 'success';
+        var isRunning = row.status === 'pending' || row.status === 'running';
+        var isFail = row.status === 'failed';
+        var statusIcon = isOk ? 'check' : (isRunning ? 'loader-circle' : 'x');
+        var statusCls = isOk ? 'success' : (isRunning ? 'running' : 'failed');
+        var statusText = isOk ? '成功' : (row.status === 'pending' ? '排队中' : (row.status === 'running' ? '下载中' : '失败'));
         var sub = isOk
             ? (files.length + ' 个文件 · ' + escapeHtml(row.work_type || ''))
-            : escapeHtml(row.error || '未知错误');
+            : (isRunning ? statusText + ' · ' + escapeHtml(row.title || row.work_id || '') : escapeHtml(row.error || '未知错误'));
         // 增强信息：作者 + 平台 + 目录
         var metaLine = '';
         if (row.author || row.platform || row.target_dir) {
@@ -854,7 +759,7 @@ function renderSingleWorkHistory() {
         }
         // 操作按钮
         var actions = '<div class="hist-actions">';
-        if (!isOk) {
+        if (isFail) {
             actions += '<button type="button" class="btn btn-secondary hist-action-btn" onclick="retrySingleWorkHistory(' + row.id + ')"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i> 重试</button>';
         }
         if (isOk && files.length && row.target_dir) {
@@ -862,7 +767,7 @@ function renderSingleWorkHistory() {
         }
         actions += '</div>';
         return '<div class="history-card">' +
-            '<div class="hist-icon ' + (isOk ? 'success' : 'failed') + '"><i data-lucide="' + (isOk ? 'check' : 'x') + '"></i></div>' +
+            '<div class="hist-icon ' + statusCls + '"><i data-lucide="' + statusIcon + '"></i></div>' +
             '<div class="hist-body">' +
                 '<div class="hist-title">' + escapeHtml(row.title || row.work_id) + '</div>' +
                 '<div class="hist-sub">' + sub + '</div>' +
@@ -873,44 +778,28 @@ function renderSingleWorkHistory() {
         '</div>';
     }).join('');
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    // 有进行中的下载时,3 秒后自动刷新(自驱动轮询)
+    var hasActive = (singleWorkState.history || []).some(function(r) { return r.status === 'pending' || r.status === 'running'; });
+    if (hasActive) {
+        clearTimeout(singleWorkState._historyTimer);
+        singleWorkState._historyTimer = setTimeout(function() { loadSingleWorkHistory(); }, 3000);
+    }
 }
 
 async function retrySingleWorkHistory(historyId) {
-    var targetDir = el('single-target-dir').value || '';
     var button = event.target.closest('button'); button.disabled = true;
     try {
-        var data = await apiCall('/api/collection/works/history/' + historyId + '/retry', 'POST', { target_dir: targetDir });
+        var data = await apiCall('/api/collection/works/history/' + historyId + '/retry', 'POST', getStorageIds());
         showToast(data.success ? '重试成功' : '重试失败', data.success ? 'success' : 'error');
         await loadSingleWorkHistory();
     } catch(e) { showToast(e.message || '重试失败', 'error'); }
     finally { button.disabled = false; }
 }
 
-// ====== Directory picker ======
-var singleDirCurrent = '', singleDirEntries = [], singleDirParent = '';
-
-async function openSingleDirDialog() { await loadSingleDirs(el('single-target-dir').value || ''); el('single-dir-modal').style.display = 'flex'; }
-
-async function loadSingleDirs(path) {
-    var data = await apiCall('/api/browse-dir?path=' + encodeURIComponent(path || ''), 'GET');
-    singleDirCurrent = data.current || ''; singleDirParent = data.parent || ''; singleDirEntries = data.dirs || [];
-    el('single-dir-current').value = singleDirCurrent || '此电脑'; renderSingleDirs();
+function _singleStorageReady() {
+    var p = swActivePrimary() || swActiveSecondary();
+    return !!(p && p.path);
 }
-
-function renderSingleDirs() {
-    var list = el('single-dir-list');
-    if (!singleDirEntries.length) { list.innerHTML = '<div class="text-muted" style="padding:12px;">没有子目录</div>'; return; }
-    list.innerHTML = singleDirEntries.map(function(dir) {
-        var name = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
-        return '<div style="padding:8px 10px;border-bottom:1px solid var(--border-default);cursor:pointer;">' +
-            '<a href="javascript:void(0)" onclick="loadSingleDirs(\'' + dir.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')"><i data-lucide="folder"></i> ' + escapeHtml(name) + '</a></div>';
-    }).join('');
-    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
-}
-
-async function goSingleDirParent() { if (singleDirParent && singleDirParent !== singleDirCurrent) await loadSingleDirs(singleDirParent); }
-function closeSingleDirDialog() { el('single-dir-modal').style.display = 'none'; }
-function chooseSingleDir() { if (singleDirCurrent) el('single-target-dir').value = singleDirCurrent; closeSingleDirDialog(); }
 
 // ====== Misc ======
 function formatDateTime(v) { return v ? String(v).replace('T',' ').slice(0,19).replace(/ (\d\d)-(\d\d)-(\d\d)$/, ' $1:$2:$3') : '-'; }
@@ -1155,11 +1044,6 @@ function toggleWorkCollapsed(workId) {
     card.classList.toggle('collapsed');
 }
 
-function updateSettingsSummary() {
-    var summary = el('settings-summary');
-    if (summary) summary.textContent = el('single-target-dir').value || '未设置目录';
-}
-
 // ============================================================
 // ====== 跨卡片选中聚合 + 浮动操作条 ======
 // ============================================================
@@ -1245,8 +1129,6 @@ function openDlChoice(onConfirm, count) {
     if (!n && !onConfirm) { showToast('请先勾选要下载的资产', 'error'); return; }
     pendingDlAction = onConfirm || null;
     if (el('dl-choice-count')) el('dl-choice-count').textContent = n;
-    var dir = el('single-target-dir').value;
-    if (el('dl-local-sub')) el('dl-local-sub').textContent = '保存到本机目录' + (dir ? ': ' + dir : '');
     document.querySelectorAll('.dl-choice .choice').forEach(function(c) {
         c.classList.toggle('active', c.dataset.dl === currentDownloadMode);
     });

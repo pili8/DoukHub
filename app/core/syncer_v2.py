@@ -99,10 +99,10 @@ class Syncer:
         """根据链接内容自动判断平台"""
         s = share.lower()
         if "tiktok.com" in s:
-            return "TikTok"
+            return "tiktok"
         if "xiaohongshu.com" in s or "xhslink.com" in s or "rednote.com" in s:
-            return "小红书"
-        return "抖音"
+            return "xhs"
+        return "douyin"
 
     def map_tags(self, tags: list) -> list:
         """Apply tag mapping from config, ignoring case (e.g. '个' -> '个人')"""
@@ -234,7 +234,7 @@ class Syncer:
                         existing_tags = json.loads(existing.get("标签", "[]")) if existing.get("标签") else []
                         updates = {
                             "等级": self.merge_level(existing.get("等级"), level),
-                            "标签": json.dumps(self.merge_tags(existing_tags, self.map_tags(tags))),
+                            "标签": json.dumps(self.merge_tags(existing_tags, self.map_tags(tags)), ensure_ascii=False),
                         }
                         if import_name:
                             updates["账号名称"] = import_name
@@ -260,7 +260,7 @@ class Syncer:
                     new_tags = self.merge_tags(existing_tags, self.map_tags(tags))
                     updates = {
                         "等级": new_level,
-                        "标签": json.dumps(new_tags),
+                        "标签": json.dumps(new_tags, ensure_ascii=False),
                     }
                     if import_name:
                         updates["账号名称"] = import_name
@@ -281,7 +281,7 @@ class Syncer:
                         revived_data = {
                             "平台": self.detect_platform(share),
                             "等级": level,
-                            "标签": json.dumps(self.map_tags(tags)),
+                            "标签": json.dumps(self.map_tags(tags), ensure_ascii=False),
                             "解析状态": "待解析",
                         }
                         if import_name:
@@ -304,7 +304,7 @@ class Syncer:
                         "share_code": share,
                         "平台": self.detect_platform(share),
                         "等级": level,
-                        "标签": json.dumps(self.map_tags(tags)),
+                        "标签": json.dumps(self.map_tags(tags), ensure_ascii=False),
                         "解析状态": "待解析",
                     }
                     if import_name:
@@ -343,7 +343,7 @@ class Syncer:
         for collection in to_process:
             try:
                 share = collection["share_code"]
-                platform = collection.get("平台") or "抖音"
+                platform = collection.get("平台") or "douyin"
 
                 # 调用 TTD API 解析短链接
                 resolved_url = await self.collector.resolve_short_url(share, platform)
@@ -368,7 +368,7 @@ class Syncer:
 
                     self.db.update_collection(existing["record_id"], {
                         "等级": new_level,
-                        "标签": json.dumps(merged_tags),
+                        "标签": json.dumps(merged_tags, ensure_ascii=False),
                     })
                     # 删除重复记录
                     self.db.delete_collection(collection["record_id"])
@@ -423,7 +423,7 @@ class Syncer:
         for collection in to_process:
             try:
                 sec_user_id = collection["sec_user_id"]
-                platform = collection.get("平台") or "抖音"
+                platform = collection.get("平台") or "douyin"
 
                 # 检查账号表是否已存在
                 existing_account = self.db.get_account_by_sec_user_id(sec_user_id)
@@ -438,7 +438,7 @@ class Syncer:
                     # 先更新等级/标签（不碰 获取状态）
                     self.db.update_account(existing_account["record_id"], {
                         "等级": new_level,
-                        "标签": json.dumps(merged_tags),
+                        "标签": json.dumps(merged_tags, ensure_ascii=False),
                     })
                     account_id = existing_account["record_id"]
                     need_fetch = existing_account.get("获取状态") != "已获取"

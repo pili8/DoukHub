@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DoukHub · 存储方案 UI 原型</title>
+<style>
+:root{
+  --dh-bg:#FBFAF7; --dh-surface:#FFFFFF; --dh-surface-muted:#F5F2EC;
+  --dh-accent:#0061A4; --dh-accent-soft:#E6F1FB; --dh-border:#ECE7DF;
+  --dh-text:#1F2328; --dh-text-secondary:#4B5563; --dh-text-muted:#8A9199;
+  --dh-green:#2E8B57; --dh-green-soft:#EAF3E2;
+  --dh-red:#C0392B; --dh-red-soft:#FCEBEA;
+  --dh-gray:#8A9199; --dh-gray-soft:#F1EFE8;
+  --dh-radius:12px; --dh-radius-sm:8px;
+  --dh-font:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--dh-bg);color:var(--dh-text);font-family:var(--dh-font);font-size:13.5px;line-height:1.6;padding:28px;}
+.wrap{max-width:980px;margin:0 auto;}
+.page-head{margin-bottom:18px;}
+.page-head h1{font-size:20px;font-weight:600;display:flex;align-items:center;gap:8px;}
+.page-head p{color:var(--dh-text-muted);margin-top:4px;font-size:12.5px;}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--dh-text-secondary);}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-size:11.5px;line-height:1.5;font-weight:500;}
+.badge .dot{width:6px;height:6px;border-radius:50%;}
+.badge.ok{background:var(--dh-green-soft);color:var(--dh-green);}
+.badge.ok .dot{background:var(--dh-green);}
+.badge.fail{background:var(--dh-red-soft);color:var(--dh-red);}
+.badge.fail .dot{background:var(--dh-red);}
+.badge.none{background:var(--dh-gray-soft);color:var(--dh-gray);}
+.badge.none .dot{background:var(--dh-gray);}
+.card{background:var(--dh-surface);border:1px solid var(--dh-border);border-radius:var(--dh-radius);margin-bottom:22px;overflow:hidden;}
+.card-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--dh-border);}
+.card-head .ic{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;}
+.card-head.single .ic{background:var(--dh-accent-soft);}
+.card-head.batch .ic{background:#EAF3E2;}
+.card-head h2{font-size:15px;font-weight:600;}
+.card-head .sub{color:var(--dh-text-muted);font-size:12px;}
+.card-body{padding:16px 18px;}
+.fallback-note{display:flex;gap:8px;align-items:flex-start;background:var(--dh-surface-muted);border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);padding:9px 12px;font-size:12px;color:var(--dh-text-secondary);margin-bottom:14px;line-height:1.7;}
+.fallback-note b{color:var(--dh-text);}
+.profile-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);margin-bottom:8px;background:var(--dh-surface);transition:opacity .15s;}
+.profile-row:last-child{margin-bottom:0;}
+.profile-row.disabled{opacity:.5;}
+.idx{width:24px;height:24px;border-radius:50%;background:var(--dh-accent-soft);color:var(--dh-accent);font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.profile-row input[type=text]{border:1px solid var(--dh-border);border-radius:6px;padding:6px 9px;font-size:12.5px;background:var(--dh-surface);color:var(--dh-text);outline:none;font-family:var(--dh-font);}
+.profile-row input[type=text]:focus{border-color:var(--dh-accent);box-shadow:0 0 0 2px rgba(0,97,164,.12);}
+.in-name{width:110px;flex-shrink:0;}
+.in-path{flex:2;min-width:150px;}
+.in-nfmt{flex:1.2;min-width:110px;}
+.switch{position:relative;width:34px;height:19px;flex-shrink:0;}
+.switch input{opacity:0;width:0;height:0;}
+.switch .slider{position:absolute;inset:0;background:#D6D3CC;border-radius:999px;cursor:pointer;transition:.15s;}
+.switch .slider::before{content:"";position:absolute;width:15px;height:15px;border-radius:50%;background:#fff;top:2px;left:2px;transition:.15s;}
+.switch input:checked + .slider{background:var(--dh-accent);}
+.switch input:checked + .slider::before{transform:translateX(15px);}
+.row-ops{display:flex;gap:4px;flex-shrink:0;}
+.icon-btn{width:26px;height:26px;border:1px solid var(--dh-border);background:var(--dh-surface);border-radius:6px;cursor:pointer;color:var(--dh-text-secondary);font-size:13px;display:flex;align-items:center;justify-content:center;transition:.12s;}
+.icon-btn:hover:not(:disabled){border-color:var(--dh-accent);color:var(--dh-accent);background:var(--dh-accent-soft);}
+.icon-btn.danger:hover:not(:disabled){border-color:var(--dh-red);color:var(--dh-red);background:var(--dh-red-soft);}
+.icon-btn:disabled{opacity:.35;cursor:not-allowed;}
+.toolbar{display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap;}
+.btn{border:1px solid var(--dh-border);background:var(--dh-surface);color:var(--dh-text-secondary);border-radius:7px;padding:7px 13px;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:.12s;font-family:var(--dh-font);}
+.btn:hover{border-color:var(--dh-accent);color:var(--dh-accent);}
+.btn.primary{background:var(--dh-accent);border-color:var(--dh-accent);color:#fff;}
+.btn.primary:hover{background:#00518A;color:#fff;}
+.use-row{display:flex;align-items:center;gap:10px;background:var(--dh-surface-muted);border:1px dashed var(--dh-border);border-radius:var(--dh-radius-sm);padding:10px 14px;margin-top:16px;flex-wrap:wrap;}
+.use-row .lab{font-size:12.5px;font-weight:600;color:var(--dh-text-secondary);white-space:nowrap;}
+.use-row select{border:1px solid var(--dh-border);border-radius:6px;padding:6px 9px;font-size:12.5px;background:var(--dh-surface);color:var(--dh-text);outline:none;min-width:200px;font-family:var(--dh-font);}
+.use-row select:focus{border-color:var(--dh-accent);}
+.use-row .hint{font-size:11.5px;color:var(--dh-text-muted);}
+.section-tag{font-size:11px;font-weight:600;letter-spacing:.5px;color:var(--dh-text-muted);margin:20px 0 8px;display:flex;align-items:center;gap:8px;}
+.section-tag::after{content:"";flex:1;height:1px;background:var(--dh-border);}
+/* 弹窗示意 */
+.modal-demo{background:var(--dh-surface);border:1px solid var(--dh-border);border-radius:var(--dh-radius);padding:18px;box-shadow:0 8px 30px rgba(31,35,40,.08);}
+.modal-demo .m-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.modal-demo .m-head h3{font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px;}
+.f-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;}
+.f-grid .full{grid-column:1 / -1;}
+.f-grid label{display:block;font-size:12px;font-weight:600;color:var(--dh-text-secondary);margin-bottom:5px;}
+.f-grid input,.f-grid select{border:1px solid var(--dh-border);border-radius:6px;padding:7px 10px;font-size:12.5px;background:var(--dh-surface);color:var(--dh-text);outline:none;width:100%;font-family:var(--dh-font);}
+.f-grid input:focus,.f-grid select:focus{border-color:var(--dh-accent);}
+.m-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+.toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--dh-text);color:#fff;padding:9px 18px;border-radius:8px;font-size:12.5px;opacity:0;transition:.25s;z-index:99;box-shadow:0 6px 20px rgba(0,0,0,.18);}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.note-legend{font-size:11.5px;color:var(--dh-text-muted);margin-top:6px;}
+@media(max-width:820px){ .profile-row{flex-wrap:wrap;} .in-name{width:100%;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>存储方案 · UI 原型（讨论稿 v0.1）</h1>
+    <p>单作品 / 增量各自维护一份有序存储方案列表 · 顺序即优先级 · 探测失败自动切换下一个 · 全部失败报错停止</p>
+    <div class="legend">
+      <span class="badge ok"><span class="dot"></span>可用</span>
+      <span class="badge fail"><span class="dot"></span>不可用</span>
+      <span class="badge none"><span class="dot"></span>未检测</span>
+    </div>
+  </div>
+
+  <!-- ═══ 单作品 ═══ -->
+  <div class="card">
+    <div class="card-head single">
+      <div class="ic">单</div>
+      <div>
+        <h2>单作品采集 · 存储方案</h2>
+        <div class="sub">粘贴链接逐条下载 · 列表独立于增量</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="fallback-note">故障转移：任务开始前按上→下顺序探测，「可用」即落盘；前一个连不上自动切下一个。远程路径（NAS/SMB）探测带超时，不会卡死等待。</div>
+      <div id="single-list"></div>
+      <div class="toolbar">
+        <button class="btn primary" onclick="addProfile('single')">＋ 新建方案</button>
+        <button class="btn" onclick="testAll('single')">测试全部连接</button>
+        <span style="font-size:11.5px;color:var(--dh-text-muted);margin-left:auto;">命名留空 = 继承全局默认</span>
+      </div>
+      <div class="use-row">
+        <span class="lab">使用方式</span>
+        <select id="single-use" onchange="onUseChange('single')"></select>
+        <span class="hint" id="single-use-hint"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 增量 ═══ -->
+  <div class="card">
+    <div class="card-head batch">
+      <div class="ic">增</div>
+      <div>
+        <h2>增量采集 · 存储方案</h2>
+        <div class="sub">预设 / 定时任务共用本列表</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="fallback-note">故障转移：同上。定时任务自动运行时的场景（如凌晨家里 NAS 关机）→ 自动落到本地，不中断。</div>
+      <div id="batch-list"></div>
+      <div class="toolbar">
+        <button class="btn primary" onclick="addProfile('batch')">＋ 新建方案</button>
+        <button class="btn" onclick="testAll('batch')">测试全部连接</button>
+        <span style="font-size:11.5px;color:var(--dh-text-muted);margin-left:auto;">命名留空 = 继承全局默认</span>
+      </div>
+      <div class="use-row">
+        <span class="lab">使用方式</span>
+        <select id="batch-use" onchange="onUseChange('batch')"></select>
+        <span class="hint" id="batch-use-hint"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 采集页方案设置弹窗（改造示意） ═══ -->
+  <div class="section-tag">采集页 · 方案设置弹窗（改造后示意）</div>
+  <div class="modal-demo">
+    <div class="m-head">
+      <h3>方案设置 · 日常 4星+（增量）</h3>
+      <div style="display:flex;gap:6px;">
+        <span class="badge none"><span class="dot"></span>设为默认</span>
+        <span class="badge fail"><span class="dot"></span>删除</span>
+      </div>
+    </div>
+    <div class="f-grid">
+      <div class="full"><label>方案名称</label><input value="日常 4星+（增量）"></div>
+      <div><label>等级筛选</label><input value="4星及以上"></div>
+      <div><label>平台 / 采集模式</label><input value="douyin · 增量"></div>
+      <div class="full"><label>标签筛选</label><input value="多, 个人"></div>
+      <div class="full"><label>指定账号</label><input placeholder="留空为全部符合条件的账号"></div>
+      <div><label>账号录入时间 ≥</label><input placeholder="留空为不限"></div>
+      <div><label>跳过最近 N 天采过的</label><input value="0"></div>
+      <div class="full" style="background:var(--dh-surface-muted);border:1px dashed var(--dh-border);border-radius:var(--dh-radius-sm);padding:10px 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <label style="margin:0;white-space:nowrap;">存储方案</label>
+        <select style="flex:1;min-width:180px;" onchange="onPresetStorageChange(this)">
+          <option value="auto" selected>自动（按顺序故障转移）</option>
+          <option value="p1">本地磁盘（增量）</option>
+          <option value="p2">家里 NAS</option>
+        </select>
+        <button class="btn" onclick="toast('跳转 设置 → 下载设置 管理存储方案')">管理存储方案</button>
+        <span class="hint" id="preset-storage-hint" style="width:100%;font-size:11.5px;color:var(--dh-text-muted);">自动模式：任务开始时按列表顺序探测，第一个可用即落盘</span>
+      </div>
+    </div>
+    <div class="m-foot">
+      <button class="btn">取消</button>
+      <button class="btn primary">保存方案</button>
+    </div>
+  </div>
+
+  <div class="note-legend" style="margin-top:18px;">* 原型仅演示交互与布局，未接入后端。编辑路径/命名即实时更新方案；「测试全部连接」为模拟探测结果。</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+var DB = {
+  single: {
+    use: 'auto',
+    profiles: [
+      { name:'本地下载', path:'D:\\DoukHub\\Download\\单作品', nfmt:'create_time type nickname desc', enabled:true, status:'none' },
+      { name:'家里 NAS',  path:'\\\\nas\\downloads\\single',   nfmt:'', enabled:true, status:'none' },
+      { name:'备用网盘',  path:'E:\\backup\\single',           nfmt:'', enabled:false, status:'none' }
+    ]
+  },
+  batch: {
+    use: 'auto',
+    profiles: [
+      { name:'本地下载', path:'D:\\DoukHub\\Download', nfmt:'create_time type nickname desc', enabled:true, status:'none' },
+      { name:'家里 NAS',  path:'\\\\nas\\downloads\\batch',    nfmt:'create_time type nickname', enabled:true, status:'none' }
+    ]
+  }
+};
+
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function renderList(key){
+  var box = document.getElementById(key + '-list');
+  var arr = DB[key].profiles;
+  var html = '';
+  arr.forEach(function(p, i){
+    var st = p.status === 'ok' ? '<span class="badge ok"><span class="dot"></span>可用</span>'
+          : p.status === 'fail' ? '<span class="badge fail"><span class="dot"></span>不可用</span>'
+          : '<span class="badge none"><span class="dot"></span>未检测</span>';
+    html +=
+    '<div class="profile-row' + (p.enabled ? '' : ' disabled') + '">' +
+      '<div class="idx">' + (i + 1) + '</div>' +
+      '<input class="in-name" type="text" value="' + esc(p.name) + '" placeholder="方案名" oninput="setField(\'' + key + '\',' + i + ',\'name\',this.value)">' +
+      '<input class="in-path" type="text" value="' + esc(p.path) + '" placeholder="下载路径（远程如 \\\\nas\\share）" oninput="setField(\'' + key + '\',' + i + ',\'path\',this.value)">' +
+      '<input class="in-nfmt" type="text" value="' + esc(p.nfmt) + '" placeholder="命名留空=继承全局" oninput="setField(\'' + key + '\',' + i + ',\'nfmt\',this.value)">' +
+      st +
+      '<label class="switch" title="参与故障转移"><input type="checkbox" ' + (p.enabled ? 'checked' : '') + ' onchange="toggleProfile(\'' + key + '\',' + i + ')"><span class="slider"></span></label>' +
+      '<div class="row-ops">' +
+        '<button class="icon-btn" title="上移" ' + (i === 0 ? 'disabled' : '') + ' onclick="moveProfile(\'' + key + '\',' + i + ',-1)">↑</button>' +
+        '<button class="icon-btn" title="下移" ' + (i === arr.length - 1 ? 'disabled' : '') + ' onclick="moveProfile(\'' + key + '\',' + i + ',1)">↓</button>' +
+        '<button class="icon-btn danger" title="删除" onclick="delProfile(\'' + key + '\',' + i + ')">×</button>' +
+      '</div>' +
+    '</div>';
+  });
+  if(!arr.length) html = '<div style="padding:18px;text-align:center;color:var(--dh-text-muted);border:1px dashed var(--dh-border);border-radius:8px;">还没有方案，点「新建方案」添加（第一个方案即默认兜底）。</div>';
+  box.innerHTML = html;
+  renderUse(key);
+}
+
+function renderUse(key){
+  var sel = document.getElementById(key + '-use');
+  var arr = DB[key].profiles.filter(function(p){ return p.enabled; });
+  var html = '<option value="auto">自动（按顺序故障转移）</option>';
+  arr.forEach(function(p, i){ html += '<option value="p' + i + '">指定：' + esc(p.name) + '</option>'; });
+  sel.innerHTML = html;
+  sel.value = DB[key].use;
+  onUseChange(key);
+}
+
+function onUseChange(key){
+  var hint = document.getElementById(key + '-use-hint');
+  if(DB[key].use === 'auto'){
+    hint.textContent = '启动时依次探测，第一个可用即落盘；全部失败则报错停止。';
+  } else {
+    var idx = parseInt(DB[key].use.replace('p',''), 10);
+    var p = DB[key].profiles.filter(function(x){ return x.enabled; })[idx];
+    hint.textContent = '强制使用「' + (p ? p.name : '?') + '」，不再自动切换。';
+  }
+}
+
+function setField(key, i, f, v){ DB[key].profiles[i][f] = v; DB[key].profiles[i].status = 'none'; renderList(key); }
+function toggleProfile(key, i){ DB[key].profiles[i].enabled = !DB[key].profiles[i].enabled; renderList(key); }
+function moveProfile(key, i, d){
+  var arr = DB[key].profiles, j = i + d;
+  if(j < 0 || j >= arr.length) return;
+  var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  renderList(key); toast('已调整优先级：' + arr[i].name + ' ⇄ ' + arr[j].name);
+}
+function delProfile(key, i){
+  if(!confirm('删除「' + DB[key].profiles[i].name + '」？')) return;
+  DB[key].profiles.splice(i, 1); renderList(key); toast('已删除');
+}
+function addProfile(key){
+  DB[key].profiles.push({ name:'新方案', path:'', nfmt:'', enabled:true, status:'none' });
+  renderList(key); toast('已添加，请填写路径');
+}
+function testAll(key){
+  var arr = DB[key].profiles, hit = false;
+  arr.forEach(function(p, i){
+    if(!p.enabled) { p.status = 'none'; return; }
+    if(!p.path) { p.status = 'fail'; return; }
+    p.status = hit ? 'fail' : 'ok';   // 模拟：第一个可用，其后标记为不可用（演示）
+    if(p.status === 'ok') hit = true;
+  });
+  renderList(key);
+  var use = document.getElementById(key + '-use').value;
+  toast('探测完成：' + (use === 'auto' ? '将使用第一个可用方案' : '指定模式不参与探测'));
+}
+function onPresetStorageChange(sel){
+  document.getElementById('preset-storage-hint').textContent =
+    sel.value === 'auto' ? '自动模式：任务开始时按列表顺序探测，第一个可用即落盘' : '指定模式：始终使用所选方案，失败直接报错';
+}
+var toastTimer;
+function toast(msg){
+  var el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ el.classList.remove('show'); }, 2200);
+}
+renderList('single');
+renderList('batch');
+</script>
+</body>
+</html>

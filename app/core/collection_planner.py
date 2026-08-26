@@ -28,9 +28,19 @@ def _tags(value) -> set[str]:
         return {str(item).strip() for item in value if str(item).strip()}
     if not value:
         return set()
+    text = str(value).strip()
+    # 标签以 JSON 数组存储（可能含 Unicode 转义），优先按 JSON 解析
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return {str(item).strip() for item in parsed if str(item).strip()}
+        except (ValueError, TypeError):
+            pass
+    # 回退：兼容逗号/顿号/空白分隔的旧格式
     return {
         tag.strip()
-        for tag in re.split(r"[,，、\s]+", str(value))
+        for tag in re.split(r"[,，、\s]+", text)
         if tag.strip()
     }
 
@@ -93,7 +103,7 @@ def plan_collection(
         if uid.strip()
     }
     ids = set(record_ids or [])
-    expected_platform = "抖音" if platform == "douyin" else "TikTok"
+    expected_platform = platform
     result: list[PlannedAccount] = []
 
     candidates = [
@@ -166,6 +176,7 @@ def write_ttd_accounts(
     folder_name: str = "",
     name_format: str = "",
     cookie: str = "",
+    engine_params: dict | None = None,
 ) -> list[dict]:
     key = "accounts_urls" if platform == "douyin" else "accounts_urls_tiktok"
     entries = [
@@ -187,11 +198,19 @@ def write_ttd_accounts(
     else:
         settings = {}
     settings[key] = entries
+    # 固化文件名规则（统一管理，不再从设置页传入）
+    settings["split"] = "-"
+    settings["date_format"] = "%Y%m%d_%H%M%S"
     # 覆写采集设置（空值不覆写，保留 TTD 原始默认）
     if folder_name:
         settings["folder_name"] = folder_name
     if name_format:
         settings["name_format"] = name_format
+    # 引擎参数：从 collection_defaults 注入
+    if engine_params:
+        for k in ("folder_mode", "music", "dynamic_cover", "static_cover", "max_size", "storage_format", "max_pages"):
+            if k in engine_params:
+                settings[k] = engine_params[k]
     # 写入 Cookie（仅在传入非空值时覆写）
     if cookie:
         if platform == "douyin":

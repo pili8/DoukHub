@@ -22,7 +22,39 @@ _SHORT_URL = re.compile(_SHORT_DOMAINS)
 URL = re.compile(r"https?://[^\s\"'<>]+|" + _SHORT_DOMAINS)
 
 INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-MAX_FILENAME_STEM = 160
+# Emoji 及零宽字符: 各种 emoji ranges + 零宽空格/BOM/不可见字符
+EMOJI_AND_INVISIBLE = re.compile(
+    r'[\U0001F000-\U0001FFFF'  # emoji
+    r'\U00002600-\U000027BF'   # misc symbols
+    r'\U0000FE00-\U0000FE0F'   # variation selectors
+    r'\U00002B00-\U00002BFF'   # arrows
+    r'\u200b-\u200f'           # zero-width chars
+    r'\ufeff'                    # BOM
+    r'\u2028-\u2029'           # line/paragraph sep
+    r']'
+)
+# 全角特殊字符 → 半角映射 (清洗后会命中 INVALID_FILENAME 被删除)
+FULLWIDTH_MAP = str.maketrans({
+    '\uff1a': ':',  # ：
+    '\uff5c': '|',  # ｜
+    '\uff1c': '<',  # ＜
+    '\uff1e': '>',  # ＞
+    '\uff02': '"',  # ＂
+    '\uff1f': '?',  # ？
+    '\uff0a': '*',  # ＊
+    '\uff0f': '/',  # ／
+    '\uff3c': '\\',  # ＼
+})
+MAX_FILENAME_STEM = 80
+# 各字段长度上限: 固定字段不截, 可变字段才截
+FIELD_MAX_LENGTH = {
+    'create_time': 0,   # 0 = 不截
+    'author': 20,
+    'title': 38,
+    'id': 0,
+    'type': 0,
+    'platform': 0,
+}
 
 PRIMARY_ASSET_KINDS = {"video", "image", "live_photo"}
 
@@ -124,7 +156,7 @@ def normalize_work(raw: dict, platform: str) -> dict:
     # Keep both plain URL strings and structured dict items
     downloads = [d for d in raw_downloads if d and (isinstance(d, str) or isinstance(d, dict))]
     work_type = str(raw.get("type") or "")
-    create_time = str(raw.get("create_time") or "").replace(":", "-")
+    create_time = _format_create_time(str(raw.get("create_time") or ""))
     create_timestamp = raw.get("create_timestamp") or 0
     # 互动数据
     stats = {
@@ -188,10 +220,47 @@ def normalize_work(raw: dict, platform: str) -> dict:
     }
 
 
-def sanitize_filename_part(value, max_length: int = 80) -> str:
-    cleaned = INVALID_FILENAME.sub("", str(value or ""))
+def _format_create_time(raw: str) -> str:
+    """将 TTD 返回的日期统一格式化为 20260815_100000。
+    输入可能为: 2026-08-15 10:00:00 / 2026-08-15 10:00:00 / 20260815100000 等。
+    """
+    s = raw.strip()
+    if not s:
+        return ""
+    # 已是纯数字（如 20260815100000）→ 插入下划线
+    if s.isdigit() and len(s) >= 14:
+        return f"{s[:8]}_{s[8:14]}"
+    if s.isdigit() and len(s) == 8:
+        return s
+    # 尝试解析常见格式
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M:%S", "%Y%m%d_%H%M%S"):
+        try:
+            from datetime import datetime
+            dt = datetime.strptime(s, fmt)
+            return dt.strftime("%Y%m%d_%H%M%S")
+        except ValueError:
+            continue
+    # 兜底: 去掉所有非数字字符再格式化
+    digits = re.sub(r"\D", "", s)
+    if len(digits) >= 14:
+        return f"{digits[:8]}_{digits[8:14]}"
+    if len(digits) >= 8:
+        return digits[:8]
+    return s.replace(":", "-").replace(" ", "_")
+
+
+def sanitize_filename_part(value, max_length: int = 0) -> str:
+    """清洗文件名片段: 去非法字符/emoji/全角/零宽, 合并空格, 可选截断。
+    max_length=0 表示不截断 (用于固定长度字段如日期/ID)。
+    """
+    cleaned = str(value or "")
+    cleaned = cleaned.translate(FULLWIDTH_MAP)   # 全角 → 半角
+    cleaned = INVALID_FILENAME.sub("", cleaned)    # Windows 非法字符
+    cleaned = EMOJI_AND_INVISIBLE.sub("", cleaned) # emoji + 零宽
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
-    return cleaned[:max_length]
+    if max_length and len(cleaned) > max_length:
+        cleaned = cleaned[:max_length].rstrip(" .")
+    return cleaned
 
 
 def build_filename(
@@ -204,17 +273,19 @@ def build_filename(
         stem = sanitize_filename_part(override, MAX_FILENAME_STEM)
     else:
         stem = template.format(
-            create_time=sanitize_filename_part(work.get("create_time"), 24),
-            author=sanitize_filename_part(work.get("author")),
-            title=sanitize_filename_part(work.get("title")),
-            id=sanitize_filename_part(work.get("id"), 24),
-            type=sanitize_filename_part(work.get("type")),
-            platform=sanitize_filename_part(work.get("platform")),
+            create_time=sanitize_filename_part(work.get("create_time"), FIELD_MAX_LENGTH["create_time"]),
+            author=sanitize_filename_part(work.get("author"), FIELD_MAX_LENGTH["author"]),
+            title=sanitize_filename_part(work.get("title"), FIELD_MAX_LENGTH["title"]),
+            id=sanitize_filename_part(work.get("id"), FIELD_MAX_LENGTH["id"]),
+            type=sanitize_filename_part(work.get("type"), FIELD_MAX_LENGTH["type"]),
+            platform=sanitize_filename_part(work.get("platform"), FIELD_MAX_LENGTH["platform"]),
         ).strip()
     if index:
         stem = f"{stem}_{index}"
-    stem = stem[:MAX_FILENAME_STEM].rstrip(" .")
-    return stem or sanitize_filename_part(work.get("id"), 24)
+    # 总长兜底: 如果拼接后仍超限, 从末尾截断
+    if len(stem) > MAX_FILENAME_STEM:
+        stem = stem[:MAX_FILENAME_STEM].rstrip(" .")
+    return stem or sanitize_filename_part(work.get("id"), 0)
 
 
 async def _resolve_share_link(
@@ -365,7 +436,7 @@ def _unique_path(path: Path) -> Path:
         return path
     counter = 2
     while True:
-        candidate = path.parent / f"{path.stem} ({counter}){path.suffix}"
+        candidate = path.parent / f"{path.stem}_{counter}{path.suffix}"
         if not candidate.exists():
             return candidate
         counter += 1
@@ -393,6 +464,7 @@ async def download_work(
     include_music: bool = False,
     include_static_cover: bool = False,
     include_dynamic_cover: bool = False,
+    folder_mode: bool = False,
 ) -> list[Path]:
     assets = work.get("assets") or []
     if not assets and not work.get("downloads"):
@@ -436,7 +508,13 @@ async def download_work(
                 stem = build_filename(
                     work, template, offset if multiple else 0, filename_override
                 )
-                final_path = _unique_path(target_dir / f"{stem}{extension}")
+                # 每作品独立子文件夹：与增量采集 TTD folder_mode 语义一致
+                # （<目标目录>/<文件名>/<文件名>.<ext>）
+                out_dir = target_dir
+                if folder_mode:
+                    out_dir = target_dir.joinpath(stem)
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                final_path = _unique_path(out_dir / f"{stem}{extension}")
                 temporary = final_path.with_suffix(f"{final_path.suffix}.part")
                 try:
                     with temporary.open("wb") as file:

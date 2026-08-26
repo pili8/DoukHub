@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}日常增量采集 - DoukHub{% endblock %}
+{% block title %}增量采集 - DoukHub{% endblock %}
 {% block content %}
 <style>
 #task-modal > div { max-width: 90vw; width: 420px; max-height: 90vh; overflow-y: auto; }
@@ -67,7 +67,7 @@
 
 <div class="page-head">
     <div>
-        <h1 class="page-title">日常增量采集</h1>
+        <h1 class="page-title">增量采集</h1>
         <div class="page-sub">按方案筛选范围执行增量批次 · 上次采集 <span id="collection-last-run">-</span> · 上次成功 <span id="collection-last-success">-</span> 个账号</div>
     </div>
     <div class="page-actions">
@@ -80,11 +80,11 @@
     <div class="workflow-header">
         <div class="workflow-title">
             <i data-lucide="layers"></i>
-            <span>采集方案</span>
+            <span>采集筛选方案</span>
         </div>
         <div class="workflow-actions">
             <button class="btn btn-secondary btn-sm" onclick="openPresetManager()">
-                <i data-lucide="sliders-horizontal"></i> 方案设置
+                <i data-lucide="sliders-horizontal"></i> 编辑方案
             </button>
         </div>
     </div>
@@ -301,11 +301,11 @@
     </div>
 </div>
 
-<!-- ===== 方案设置弹窗（左右分栏） ===== -->
+<!-- ===== 采集筛选方案弹窗（左右分栏） ===== -->
 <div class="dh-modal-overlay" id="preset-manager-modal">
     <div class="dh-modal-box dh-modal-box-preset">
         <div class="dh-modal-header">
-            <h3><i data-lucide="layers"></i> <span>方案设置</span></h3>
+            <h3><i data-lucide="layers"></i> <span>采集筛选方案</span></h3>
             <button class="dh-modal-close" onclick="closePresetManager()"><i data-lucide="x"></i></button>
         </div>
 
@@ -316,29 +316,26 @@
             <!-- 右：参数编辑表单 -->
             <div class="preset-modal-right">
                 <div class="preset-right-head">
-                    <h4 id="preset-form-title" style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;"></h4>
+                    <input type="text" id="preset-name-input" class="preset-title-input" placeholder="方案名称" aria-label="方案名称">
+                    <span id="preset-default-badge" class="preset-role-tag" style="display:none;">默认</span>
                     <div class="preset-right-ops">
-                        <button type="button" class="btn btn-secondary btn-sm" id="preset-default-btn" onclick="markPresetDefault()"><i data-lucide="star"></i> 设为默认</button>
-                        <button type="button" class="btn btn-danger btn-sm" id="preset-delete-btn" onclick="deleteCurrentPreset()"><i data-lucide="trash-2"></i> 删除</button>
+                        <button type="button" class="preset-role-tag" id="preset-default-btn" onclick="markPresetDefault()"><i data-lucide="star"></i> 设为默认</button>
+                        <button type="button" class="preset-del-btn" id="preset-delete-btn" onclick="deleteCurrentPreset()" title="删除方案"><i data-lucide="trash-2"></i></button>
                     </div>
                 </div>
-                <div class="workflow-form-grid">
-                    <div class="form-group" style="grid-column:1 / -1;">
-                        <label>方案名称</label>
-                        <input type="text" id="preset-name-input" placeholder="如: 日常 4星+（增量）">
-                    </div>
+                <div class="preset-sec">
+                                        <div class="workflow-form-grid">
                     <div class="form-group">
-                        <label>等级筛选</label>
+                        <label title="采集选中等级及以上的账号">等级筛选</label>
                         <div class="rating-segmented" id="preset-rating-segmented">
                             <label><input type="checkbox" name="preset-rating" value="4"> 4星</label>
                             <label><input type="checkbox" name="preset-rating" value="3"> 3星</label>
                             <label><input type="checkbox" name="preset-rating" value="2"> 2星</label>
                             <label><input type="checkbox" name="preset-rating" value="1"> 1星</label>
                         </div>
-                        <small>采集选中等级及以上的账号</small>
-                    </div>
+                                            </div>
                     <div class="form-group">
-                        <label>平台 / 采集模式</label>
+                        <label title="增量：只采集上次之后的新作品；全量：采集账号全部作品">平台 / 采集模式</label>
                         <div style="display:flex;gap:8px;">
                             <select id="preset-platform-input" style="flex:1;">
                                 <option value="douyin">douyin</option>
@@ -350,39 +347,76 @@
                                 <option value="full">全量</option>
                             </select>
                         </div>
-                    </div>
+                                            </div>
                     <div class="form-group" style="grid-column:1 / -1;">
                         <label>标签筛选</label>
-                        <input type="text" id="preset-tags-input" placeholder="多, 个人">
+                                            <div class="form-group" style="grid-column:1 / -1;">
+                        <label title="只采集带有选中标签的账号（满足其一即可）">标签筛选</label>
+                        <div class="tag-multi-select" id="preset-tags-select">
+                            <button type="button" class="tag-select-trigger" onclick="toggleTagDropdown(event)" aria-haspopup="listbox" aria-expanded="false">
+                                <span id="preset-tags-display" class="tag-select-display is-placeholder">全部标签</span>
+                                <i data-lucide="chevron-down" class="tag-select-arrow"></i>
+                            </button>
+                            <div class="tag-select-dropdown" id="preset-tags-dropdown" style="display:none;" role="listbox" aria-multiselectable="true">
+                                <div class="tag-select-search">
+                                    <i data-lucide="search" class="tag-select-search-icon"></i>
+                                    <input type="text" id="preset-tags-search" placeholder="搜索标签" autocomplete="off" oninput="renderTagDropdown()">
+                                </div>
+                                <div class="tag-select-list" id="preset-tags-list"></div>
+                                <div class="tag-select-foot">
+                                    <span class="tag-select-count" id="preset-tags-count">已选 0</span>
+                                    <span class="tag-select-ops">
+                                        <button type="button" class="tag-select-op" onclick="tagSelectAll()">全选</button>
+                                        <button type="button" class="tag-select-op" onclick="tagClearAll()">清空</button>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <input type="hidden" id="preset-tags-input" value="">
+                    </div>
                     </div>
                     <div class="form-group" style="grid-column:1 / -1;">
-                        <label>指定账号</label>
+                        <label title="输入 sec_user_id，可在「表浏览」多选账号后「存为方案」自动填入">指定账号</label>
                         <input type="text" id="preset-accounts-input" placeholder="留空为全部符合条件的账号，多个用逗号分隔">
-                        <small>输入 sec_user_id，可在「表浏览」多选账号后「存为方案」自动填入</small>
-                    </div>
+                                            </div>
                     <div class="form-group">
-                        <label>账号录入时间 ≥</label>
+                        <label title="只采集此日期之后录入的账号">账号录入时间 ≥</label>
                         <input type="date" id="preset-created-after-input" placeholder="留空为不限">
-                        <small>只采集此日期之后录入的账号</small>
-                    </div>
+                                            </div>
                     <div class="form-group">
-                        <label>跳过最近 N 天采过的</label>
+                        <label title="按账号上次成功采集时间计算">跳过最近 N 天</label>
                         <input type="number" id="preset-skip-recent-input" min="0" max="365" placeholder="0" style="width:100%;">
-                        <small>按账号上次成功采集时间计算</small>
-                    </div>
+                                            </div>
+                </div>
                 </div>
 
-                <!-- 存储统一入口提示 -->
-                <div class="preset-store-note">
-                    <i data-lucide="folder" style="width:13px;height:13px;flex-shrink:0;"></i>
-                    <span>保存目录与文件名模板为全局统一配置，见</span>
-                    <a href="/settings" target="_blank">设置 → 下载设置</a>
+                <!-- 存储方案（主/次双列，空=设置页默认） -->
+                <div class="preset-sec">
+                                    <div class="settings-grid">
+                    <div class="form-group">
+                        <label><i data-lucide="folder"></i> 主存储</label>
+                        <select id="preset-storage-primary" onchange="onPresetStorageChange(this)">
+                            <option value="">默认主方案（设置）</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label><i data-lucide="folder-backup"></i> 次存储</label>
+                        <select id="preset-storage-secondary" onchange="onPresetStorageChange(this)">
+                            <option value="">默认次方案（设置）</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="preset-storage-foot">
+                    <span id="preset-storage-hint" title="先连主存储，连不上自动切次存储（含命名与附属开关整套切换）；两档均留空时用设置页的默认主/次">连不上自动切次，留空用设置页默认</span>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="openStorageManager()" title="在新标签页打开设置页，关掉该页即返回" style="flex:0 0 auto;"><i data-lucide="settings-2"></i> 管理方案</button>
+                </div>
                 </div>
             </div>
         </div>
 
         <!-- 底部操作栏 -->
         <div class="preset-form-footer">
+                        <span style="flex:1;"></span>
             <button class="btn btn-secondary" onclick="closePresetManager()">
                 <i data-lucide="x"></i> 取消
             </button>
@@ -418,8 +452,12 @@
         </form>
     </div>
 </div>
+
+{# ===== 命名模板编辑器弹窗（与设置页 / 单作品采集 共用组件） ====== #}
+{% include "partials/name_editor_modal.html" %}
 {% endblock %}
 {% block scripts %}
+<script src="/static/js/name_editor.js?v=3"></script>
 <script>
 // ===== 全局状态 =====
 var presets = [];           // 方案列表
@@ -520,7 +558,7 @@ async function previewPreset(presetId) {
 async function startCollection() {
     var select = document.getElementById('preset-select');
     var presetId = parseInt(select.value);
-    if (!presetId) { showToast('请先选择或创建采集方案', 'error'); return; }
+    if (!presetId) { showToast('请先选择或创建采集筛选方案', 'error'); return; }
     var btn = document.getElementById('start-btn');
     btn.disabled = true;
     btn.innerHTML = '<i data-lucide="loader-circle"></i> 采集进行中...';
@@ -883,7 +921,58 @@ async function retryBatch(batchId) {
 }
 
 // ===== 方案管理弹窗 =====
-function openPresetManager() {
+// 填充方案设置弹窗内的存储方案选择（增量主/次方案）
+function _storageLabel(p) {
+    var names = [];
+    var pr = p.storage_primary_id ? (_storageProfiles.find(function(x){return x.id === p.storage_primary_id;}) || {}) : null;
+    var se = p.storage_secondary_id ? (_storageProfiles.find(function(x){return x.id === p.storage_secondary_id;}) || {}) : null;
+    names.push('主:' + (pr ? (pr.name || '?') : '默认'));
+    names.push('次:' + (se ? (se.name || '?') : '默认'));
+    return names.join(' ');
+}
+var _storageProfiles = [];  // 增量存储方案缓存
+async function refreshPresetStorageSelect() {
+    var selP = document.getElementById('preset-storage-primary');
+    var selS = document.getElementById('preset-storage-secondary');
+    if (!selP || !selS) return;
+    _storageProfiles = [];
+    try {
+        var data = await apiCall('/api/collection/storage', 'GET');
+        var batch = (data && data.batch) || {};
+        _storageProfiles = (batch.profiles || []).filter(function(p){ return p.enabled !== false && (p.path || '').trim(); });
+    } catch(e) { /* 保持默认选项 */ }
+    function buildOptions(defLabel) {
+        var html = '<option value="">' + defLabel + '</option>';
+        _storageProfiles.forEach(function(p) {
+            var tag = p.role === 'primary' ? '（默认主）' : (p.role === 'secondary' ? '（默认次）' : '');
+            html += '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.name || '未命名') + tag + '</option>';
+        });
+        return html;
+    }
+    selP.innerHTML = buildOptions('默认主方案（设置）');
+    selS.innerHTML = buildOptions('默认次方案（设置）');
+    onPresetStorageChange(null);
+}
+
+function onPresetStorageChange(sel) {
+    var hint = document.getElementById('preset-storage-hint');
+    if (!hint) return;
+    var selP = document.getElementById('preset-storage-primary');
+    var selS = document.getElementById('preset-storage-secondary');
+    var pid = selP ? selP.value : '';
+    var sid = selS ? selS.value : '';
+    var pname = pid ? _storageProfiles.find(function(p){return p.id===pid;}) : null;
+    var sname = sid ? _storageProfiles.find(function(p){return p.id===sid;}) : null;
+    hint.textContent = '主「' + (pname ? pname.name : '默认') + '」→ 次「' + (sname ? sname.name : '默认') + '」';
+}
+
+function openStorageManager() {
+    window.open('/settings#group-download', '_blank');
+}
+
+async function openPresetManager() {
+    await refreshPresetStorageSelect();
+    await loadTagOptions();
     renderPresetList();
     // 默认选中第一个方案
     var defaultPreset = presets.find(p => p.is_default) || presets[0];
@@ -893,11 +982,136 @@ function openPresetManager() {
         selectPresetForEdit(null); // 新建态
     }
     document.getElementById('preset-manager-modal').classList.add('dh-show');
+    document.body.style.overflow = 'hidden';
 }
 
 function closePresetManager() {
     document.getElementById('preset-manager-modal').classList.remove('dh-show');
+    document.body.style.overflow = '';
 }
+
+// ===== 标签多选下拉 =====
+var presetTagOptions = [];
+var presetSelectedTags = [];
+
+async function loadTagOptions() {
+    try {
+        var data = await apiCall('/api/tags/options', 'GET');
+        presetTagOptions = (data && data.tags) || [];
+    } catch (e) { presetTagOptions = []; }
+}
+
+// 可见选项：选中置顶 + 搜索过滤（按 value 定位，不依赖索引）
+function _tagVisibleOptions() {
+    var q = (document.getElementById('preset-tags-search').value || '').trim().toLowerCase();
+    var opts = presetTagOptions.slice();
+    presetSelectedTags.forEach(function(t) { if (opts.indexOf(t) < 0) opts.push(t); });
+    opts.sort(function(a, b) {
+        var sa = presetSelectedTags.indexOf(a) >= 0 ? 0 : 1;
+        var sb = presetSelectedTags.indexOf(b) >= 0 ? 0 : 1;
+        if (sa !== sb) return sa - sb;
+        return a.localeCompare(b, 'zh');
+    });
+    if (q) opts = opts.filter(function(t) { return t.toLowerCase().indexOf(q) >= 0; });
+    return opts;
+}
+
+function toggleTagDropdown(e) {
+    if (e) e.stopPropagation();
+    var sel = document.getElementById('preset-tags-select');
+    var dd = document.getElementById('preset-tags-dropdown');
+    if (!sel || !dd) return;
+    var open = dd.style.display === 'none';
+    dd.style.display = open ? 'block' : 'none';
+    sel.classList.toggle('open', open);
+    var trig = sel.querySelector('.tag-select-trigger');
+    if (trig) trig.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+        var s = document.getElementById('preset-tags-search');
+        if (s) { s.value = ''; setTimeout(function(){ s.focus(); }, 0); }
+        renderTagDropdown();
+    }
+}
+
+function renderTagDropdown() {
+    var list = document.getElementById('preset-tags-list');
+    var count = document.getElementById('preset-tags-count');
+    if (!list) return;
+    var opts = _tagVisibleOptions();
+    if (count) count.textContent = '已选 ' + presetSelectedTags.length;
+    if (!opts.length) {
+        list.innerHTML = '<div class="tag-select-empty">' + (presetTagOptions.length ? '无匹配标签' : '暂无标签，可先在账号里添加') + '</div>';
+        return;
+    }
+    list.innerHTML = opts.map(function(t) {
+        var on = presetSelectedTags.indexOf(t) >= 0;
+        return '<button type="button" class="tag-select-item' + (on ? ' is-on' : '') + '" data-tag="' + escapeHtml(t) + '" onclick="tagToggleOne(this, event)" role="option" aria-selected="' + on + '">' +
+            '<i data-lucide="' + (on ? 'check' : 'square') + '" class="tag-select-check"></i>' +
+            '<span>' + escapeHtml(t) + '</span>' +
+        '</button>';
+    }).join('');
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(list);
+}
+
+function tagToggleOne(el, ev) {
+    if (ev) ev.stopPropagation();
+    var t = el.getAttribute('data-tag');
+    var idx = presetSelectedTags.indexOf(t);
+    if (idx >= 0) presetSelectedTags.splice(idx, 1); else presetSelectedTags.push(t);
+    syncTagDisplay();
+    renderTagDropdown();
+}
+
+function tagSelectAll() {
+    presetSelectedTags = presetTagOptions.slice();
+    syncTagDisplay();
+    renderTagDropdown();
+}
+
+function tagClearAll() {
+    presetSelectedTags = [];
+    syncTagDisplay();
+    renderTagDropdown();
+}
+
+function tagChipRemove(e, icon) {
+    e.stopPropagation();
+    var t = icon.getAttribute('data-tag');
+    var idx = presetSelectedTags.indexOf(t);
+    if (idx >= 0) presetSelectedTags.splice(idx, 1);
+    syncTagDisplay();
+    renderTagDropdown();
+}
+
+function syncTagDisplay() {
+    var disp = document.getElementById('preset-tags-display');
+    var hidden = document.getElementById('preset-tags-input');
+    if (hidden) hidden.value = presetSelectedTags.join(',');
+    if (!disp) return;
+    if (!presetSelectedTags.length) {
+        disp.classList.add('is-placeholder');
+        disp.textContent = '全部标签';
+        return;
+    }
+    disp.classList.remove('is-placeholder');
+    var shown = presetSelectedTags.slice(0, 2);
+    var rest = presetSelectedTags.length - shown.length;
+    disp.innerHTML = shown.map(function(t) {
+        return '<span class="tag-chip">' + escapeHtml(t) + '<i data-lucide="x" class="tag-chip-x" data-tag="' + escapeHtml(t) + '" onclick="tagChipRemove(event, this)"></i></span>';
+    }).join('') + (rest > 0 ? '<span class="tag-chip tag-chip-more">+' + rest + '</span>' : '');
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(disp);
+}
+
+document.addEventListener('click', function(e) {
+    var sel = document.getElementById('preset-tags-select');
+    var dd = document.getElementById('preset-tags-dropdown');
+    if (sel && dd && !sel.contains(e.target)) {
+        dd.style.display = 'none';
+        sel.classList.remove('open');
+        var trig = sel.querySelector('.tag-select-trigger');
+        if (trig) trig.setAttribute('aria-expanded', 'false');
+    }
+});
 
 function renderPresetList() {
     var list = document.getElementById('preset-list');
@@ -905,10 +1119,10 @@ function renderPresetList() {
         return '<div class="preset-row' + (p.id === currentPresetId ? ' is-active' : '') + '" onclick="selectPresetForEdit(' + p.id + ')">' +
             '<div class="preset-row-info">' +
                 '<div class="preset-row-name">' +
-                    (p.is_default ? '<i data-lucide="star" class="default-star"></i>' : '') +
+                    (p.is_default ? '<span class="preset-role-tag sm">默认</span>' : '') +
                     escapeHtml(p.name) +
                 '</div>' +
-                '<div class="preset-row-desc">等级≥' + p.rating_min + ' · ' + formatPlatform(p.platform) + ' · ' + (p.mode === 'incremental' ? '增量' : '全量') + '</div>' +
+                '<div class="preset-row-desc">等级≥' + p.rating_min + ' · ' + formatPlatform(p.platform) + ' · ' + (p.mode === 'incremental' ? '增量' : '全量') + ' · 存储:' + _storageLabel(p) + '</div>' +
             '</div>' +
         '</div>';
     }).join('') +
@@ -919,7 +1133,7 @@ function renderPresetList() {
 function selectPresetForEdit(presetId) {
     currentPresetId = presetId;
     renderPresetList();
-    var titleEl = document.getElementById('preset-form-title');
+    var badgeEl = document.getElementById('preset-default-badge');
     var nameInput = document.getElementById('preset-name-input');
     var tagsInput = document.getElementById('preset-tags-input');
     var accountsInput = document.getElementById('preset-accounts-input');
@@ -931,29 +1145,40 @@ function selectPresetForEdit(presetId) {
 
     if (presetId === null) {
         // 新建态
-        titleEl.innerHTML = '<i data-lucide="plus" style="font-size:15px;color:var(--accent);"></i><span>新建方案</span>';
+        if (badgeEl) badgeEl.style.display = 'none';
         nameInput.value = '';
-        tagsInput.value = '';
+        presetSelectedTags = [];
+        syncTagDisplay();
         accountsInput.value = '';
         platformInput.value = 'douyin';
         modeInput.value = 'incremental';
         document.getElementById('preset-created-after-input').value = '';
         document.getElementById('preset-skip-recent-input').value = '';
+        var selP = document.getElementById('preset-storage-primary');
+        var selS = document.getElementById('preset-storage-secondary');
+        if (selP) selP.value = '';
+        if (selS) selS.value = '';
+        onPresetStorageChange(null);
         ratingCheckboxes.forEach(cb => { cb.checked = (cb.value === '4' || cb.value === '3'); });
         deleteBtn.style.display = 'none';
         defaultBtn.style.display = 'none';
     } else {
         var p = presets.find(x => x.id === presetId);
         if (!p) return;
-        var badge = p.is_default ? '<span class="tag" style="margin-left:4px;color:var(--accent);border-color:var(--accent);">默认</span>' : '';
-        titleEl.innerHTML = '<span>' + escapeHtml(p.name) + '</span>' + badge;
+        if (badgeEl) badgeEl.style.display = p.is_default ? 'inline-flex' : 'none';
         nameInput.value = p.name;
-        tagsInput.value = p.tags || '';
+        presetSelectedTags = (p.tags || '').split(',').map(function(s){return s.trim();}).filter(Boolean);
+        syncTagDisplay();
         accountsInput.value = p.account_names || '';
         platformInput.value = p.platform;
         modeInput.value = p.mode;
         document.getElementById('preset-created-after-input').value = p.account_created_after || '';
         document.getElementById('preset-skip-recent-input').value = p.skip_recent_days || 0;
+        var selP = document.getElementById('preset-storage-primary');
+        var selS = document.getElementById('preset-storage-secondary');
+        if (selP) selP.value = p.storage_primary_id || '';
+        if (selS) selS.value = p.storage_secondary_id || '';
+        onPresetStorageChange(null);
         // rating_min → 勾选 >= rating_min 的所有等级
         ratingCheckboxes.forEach(cb => { cb.checked = parseInt(cb.value) >= p.rating_min; });
         deleteBtn.style.display = p.is_default ? 'none' : 'inline-flex';
@@ -974,6 +1199,9 @@ function getPresetFormData() {
         mode: document.getElementById('preset-mode-input').value,
         account_created_after: document.getElementById('preset-created-after-input').value.trim(),
         skip_recent_days: parseInt(document.getElementById('preset-skip-recent-input').value) || 0,
+        storage_primary_id: document.getElementById('preset-storage-primary').value || '',
+        storage_secondary_id: document.getElementById('preset-storage-secondary').value || '',
+        storage_choice: 'auto',
         is_default: false,
     };
 }

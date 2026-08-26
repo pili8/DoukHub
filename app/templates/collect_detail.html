@@ -43,33 +43,27 @@
             <button type="button" class="btn mode-btn ghost" id="api-mode-btn" onclick="onApi()"><i data-lucide="webhook"></i><span>API 请求</span></button>
         </div>
         <button type="button" class="btn btn-secondary settings-btn" id="settings-btn" onclick="toggleSettings()">
-            <i data-lucide="settings-2"></i><span>下载设置</span>
+            <i data-lucide="layers"></i><span>采集方案</span>
         </button>
     </div>
 
-    {# ====== 下载设置内容：整行，点击「下载设置」按钮展开 ====== #}
+    {# ====== 采集方案：选择方案 + 展示方案信息 ====== #}
     <div class="settings-block" id="settings-panel" style="display:none;">
         <div class="settings-body" id="settings-body">
-            {# 段A 通用：保存目录 + 命名模板 #}
+            {# 段A: 方案选择 + 信息展示 #}
             <div class="settings-sec">
                 <div class="settings-grid">
                     <div class="form-group">
-                        <label>保存目录</label>
-                        <div class="input-btn">
-                            <input type="text" id="single-target-dir" value="{{ download_path or '' }}" placeholder="选择或输入保存路径" onchange="saveRecentSingleDir(this.value)">
-                            <button type="button" class="btn btn-secondary" onclick="openSingleDirDialog()" title="选择目录"><i data-lucide="folder-open"></i></button>
-                        </div>
-                        <select id="single-recent-dirs" onchange="useRecentSingleDir(this.value)" class="recent-dirs">
-                            <option value="">最近目录...</option>
-                        </select>
+                        <label><i data-lucide="folder"></i> 主存储</label>
+                        <select id="single-storage-primary" onchange="onStorageSelectChange()"></select>
                     </div>
                     <div class="form-group">
-                        <label><i data-lucide="tag"></i>命名模板<span class="pv" id="single-template-preview"></span></label>
-                        <div class="input-btn">
-                            <select id="single-template-select" onchange="onTemplateSelectChange()" class="template-select"></select>
-                            <input type="hidden" id="single-template-input" name="filename_template" value="{create_time} {author} {title}">
-                            <button type="button" class="btn btn-secondary" onclick="openTemplateModal()" title="管理模板"><i data-lucide="settings-2"></i></button>
-                        </div>
+                        <label title="主存储连不上时自动切换，整套设置随之生效"><i data-lucide="folder-backup"></i> 次存储</label>
+                        <select id="single-storage-secondary" onchange="onStorageSelectChange()"></select>
+                        <input type="hidden" id="single-template-input" name="filename_template" value="{create_time} {author} {title}">
+                    </div>
+                    <div class="form-group" style="display:flex; align-items:flex-end; justify-content:flex-end;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="window.open('/settings#group-download','_blank')" title="管理方案（跳转到设置页）"><i data-lucide="settings-2"></i> 管理方案</button>
                     </div>
                 </div>
             </div>
@@ -90,6 +84,7 @@
                     <label class="chip"><input type="checkbox" id="opt-music"><i data-lucide="music"></i>音乐</label>
                     <label class="chip"><input type="checkbox" id="opt-static-cover"><i data-lucide="image"></i>静态封面</label>
                     <label class="chip"><input type="checkbox" id="opt-dynamic-cover"><i data-lucide="film"></i>动态封面</label>
+                    <label class="chip"><input type="checkbox" id="opt-folder-mode"><i data-lucide="folder"></i>独立子文件夹</label>
                 </div>
             </div>
         </div>
@@ -145,53 +140,6 @@
     <img id="lightbox-img" class="lightbox-img" src="" alt="预览">
 </div>
 
-{# ====== Directory Picker Modal ====== #}
-<div id="single-dir-modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,.45);">
-    <div class="workflow-panel" style="width:min(560px,92vw);max-height:80vh;display:flex;flex-direction:column;margin-bottom:0;">
-        <div class="workflow-header"><div class="workflow-title"><i data-lucide="folder-open"></i><span>选择目录</span></div></div>
-        <div class="form-group"><label>当前目录</label><input type="text" id="single-dir-current" readonly></div>
-        <div id="single-dir-list" style="overflow:auto;flex:1;min-height:160px;"></div>
-        <div class="btn-group" style="justify-content:flex-end;margin-top:12px;">
-            <button type="button" class="btn btn-secondary" onclick="goSingleDirParent()">上一级</button>
-            <button type="button" class="btn btn-secondary" onclick="closeSingleDirDialog()">取消</button>
-            <button type="button" class="btn btn-primary" onclick="chooseSingleDir()">使用此目录</button>
-        </div>
-    </div>
-</div>
-
-{# ====== Template Manager Modal ====== #}
-<div id="template-modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,.45);">
-    <div class="workflow-panel" style="width:min(640px,92vw);max-height:85vh;display:flex;flex-direction:column;margin-bottom:0;">
-        <div class="workflow-header"><div class="workflow-title"><i data-lucide="settings-2"></i><span>模板管理</span></div></div>
-        <div style="overflow:auto;flex:1;padding:0 16px;">
-            <div class="form-group"><label>模板库</label><select id="template-library" onchange="loadSelectedTemplate()" style="width:100%;"></select></div>
-            <div class="form-group"><label>模板名称</label><input type="text" id="template-name" placeholder="输入模板名称"></div>
-            <div class="form-group">
-                <label>可拖字段（拖入或点击追加）</label>
-                <div class="template-field-row" id="template-fields">
-                    <span class="template-part" draggable="true" onclick="appendTemplateField('create_time')" ondragstart="dragSingleField(event,'create_time')">发布时间</span>
-                    <span class="template-part" draggable="true" onclick="appendTemplateField('author')" ondragstart="dragSingleField(event,'author')">作者</span>
-                    <span class="template-part" draggable="true" onclick="appendTemplateField('title')" ondragstart="dragSingleField(event,'title')">标题</span>
-                    <span class="template-part" draggable="true" onclick="appendTemplateField('id')" ondragstart="dragSingleField(event,'id')">作品ID</span>
-                    <span class="template-part" draggable="true" onclick="appendTemplateField('type')" ondragstart="dragSingleField(event,'type')">类型</span>
-                    <span class="template-part" draggable="true" onclick="appendTemplateField('platform')" ondragstart="dragSingleField(event,'platform')">平台</span>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>分隔文本</label>
-                <div style="display:flex;gap:8px;"><input type="text" id="template-separator" placeholder="如 空格、下划线" style="flex:1;"><button type="button" class="btn btn-secondary" onclick="appendTemplateSeparator()">添加</button></div>
-            </div>
-            <div class="form-group"><label>已排序字段</label><div class="template-part-list" id="template-parts" ondragover="event.preventDefault()" ondrop="dropSingleTemplatePart(event,-1)"></div></div>
-            <div class="form-group"><label>实时预览</label><div id="template-live-preview" class="text-muted" style="padding:8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);"></div></div>
-        </div>
-        <div class="btn-group" style="justify-content:flex-end;padding:12px 16px;">
-            <button type="button" class="btn btn-secondary" onclick="closeTemplateModal()">取消</button>
-            <button type="button" class="btn btn-secondary" onclick="saveSingleTemplate()">保存模板</button>
-            <button type="button" class="btn btn-primary" onclick="useThisTemplate()">使用此模板</button>
-        </div>
-    </div>
-</div>
-
 {# ====== API 悬浮提示 ====== #}
 <div id="api-popover" class="pop-overlay" style="display:none;" onclick="if(event.target===this)closePop('api-popover')">
     <div class="pop-card">
@@ -241,8 +189,8 @@
             <div class="form-group">
                 <label><i data-lucide="smartphone"></i> 平台</label>
                 <select id="share-add-platform" style="width:100%;">
-                    <option value="抖音">抖音</option>
-                    <option value="TikTok">TikTok</option>
+                    <option value="douyin">douyin</option>
+                    <option value="tiktok">tiktok</option>
                 </select>
             </div>
             <div class="form-group">
@@ -281,6 +229,7 @@
 {# ====== 底部常驻下载栏（跨卡片批量下载 + 下载方式内联） ====== #}
 <style>
 #main-content { padding-bottom: 96px; }
+.settings-grid { grid-template-columns: 1fr 1fr auto; align-items: end; }
 @media (max-width: 768px) {
   /* 底部下载栏:窄屏换行后加大底部留白 */
   #main-content { padding-bottom: 140px; }
@@ -293,12 +242,10 @@
   /* 设置面板:窄屏内边距缩小 */
   .settings-sec { padding: 10px 12px; }
   .settings-body { padding: 0; }
+  .settings-grid { grid-template-columns: 1fr 1fr; }
   /* belong-row:窄屏 chip 可换行 */
   .belong-row { gap: 6px; }
   .belong-row .chip { padding: 4px 8px; font-size: 11px; }
-  /* 目录选择器/模板管理弹窗:窄屏按钮换行 */
-  #single-dir-modal .btn-group, #template-modal .btn-group { flex-wrap: wrap; }
-  #single-dir-modal .btn-group .btn, #template-modal .btn-group .btn { flex: 1 1 calc(50% - 4px); min-width: 100px; justify-content: center; }
   /* 录入分享表弹窗:窄屏紧凑 */
   .pop-card { padding: 14px 16px; }
 }
@@ -320,16 +267,18 @@
     <button type="button" class="btn btn-secondary" id="fb-download-btn" onclick="downloadAllSelected()"><i data-lucide="download"></i><span id="fb-download-label">选择资产以下载</span></button>
     <button type="button" class="btn btn-secondary" id="fb-clear-btn" onclick="clearAllSelection()" style="display:none;">清除</button>
 </div>
+
+{# ====== 命名模板编辑器弹窗（与设置页 / 增量采集 共用组件） ====== #}
+{% include "partials/name_editor_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/collect_detail.js?v=32"></script>
+<script src="/static/js/name_editor.js?v=3"></script>
+<script src="/static/js/collect_detail.js?v=36"></script>
 <script>
 (function init() {
     renderTemplateSelect();
-    renderRecentDirs();
     loadSingleWorkHistory();
-    updateSettingsSummary();
     if (singleWorkState.works.length) { el('settings-panel').style.display = 'block'; }
     updateSelection();
 })();
