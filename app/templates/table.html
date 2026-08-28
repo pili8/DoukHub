@@ -1771,7 +1771,41 @@ var FIELD_RENDERERS = {
     // =========================================================================
     // SPA 友好:直接调用(脚本在 body 末尾,DOM 已就绪;SPA 二次进入由 rebindScripts 重执行)
     renderTableTabs();
-    showTable('share_cache');
+    // 支持从健康度等入口跳转定位:?tab=account_cache&sec=<sec_user_id>
+    (function() {
+        var qp = new URLSearchParams(location.search);
+        var tab = qp.get('tab');
+        var sec = qp.get('sec');
+        if (tab && TABLE_NAMES[tab]) {
+            if (tab === 'account_cache' && sec) {
+                // 目标账号可能不在当前分页,直接带 sec_user_id 搜索定位(唯一值)
+                // 注意:不走 jumpToAccount(它会重新加载全量覆盖搜索),改为搜索后直接高亮结果行
+                var kw = document.getElementById('search-keyword');
+                if (kw) kw.value = sec;
+                var clearBtn = document.getElementById('search-clear-btn');
+                if (clearBtn) clearBtn.style.display = 'flex';
+                showTable(tab, 1, sec);
+                setTimeout(function() {
+                    if (gridApi) {
+                        gridApi.forEachNode(function(node) {
+                            if (node.data && node.data.sec_user_id === sec) {
+                                gridApi.ensureNodeVisible(node);
+                                var rowEl = document.querySelector('.ag-root-wrapper [row-id="' + CSS.escape(node.id) + '"]');
+                                if (rowEl) {
+                                    rowEl.classList.add('jump-highlight');
+                                    setTimeout(function() { rowEl.classList.remove('jump-highlight'); }, 3000);
+                                }
+                            }
+                        });
+                    }
+                }, 500);
+            } else {
+                showTable(tab);
+            }
+        } else {
+            showTable('share_cache');
+        }
+    })();
 
     function renderTableTabs() {
         const container = document.getElementById('table-tabs');

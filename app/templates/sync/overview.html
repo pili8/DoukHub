@@ -105,6 +105,7 @@
         <div class="workflow-title">
             <i data-lucide="activity"></i>
             <span>账号健康度</span>
+            <span class="batch-detail-sec-note" style="font-weight:400;">点账号到表浏览管理，点 Cookie 徽章管理 Cookie</span>
         </div>
     </div>
     {% set h = account_health %}
@@ -113,7 +114,7 @@
         <span class="workflow-status {{ 'warning' if h.summary.attention else 'success' }}">需关注 {{ h.summary.attention }}</span>
         <span class="workflow-status {{ 'pending' if h.summary.uncollected else 'success' }}">未采集 {{ h.summary.uncollected }}</span>
         <span class="workflow-status success">健康 {{ h.summary.healthy }}</span>
-        <span class="workflow-status {{ 'success' if h.cookie.healthy else 'failed' }}">Cookie {{ h.cookie.healthy }}/{{ h.cookie.total }}</span>
+        <a class="workflow-status health-link {{ 'success' if h.cookie.healthy else 'failed' }}" href="/table?tab=cookie_cache" title="点击管理 Cookie">Cookie {{ h.cookie.healthy }}/{{ h.cookie.total }}</a>
     </div>
     <div class="table-scroll" style="max-height:420px; overflow-y:auto;">
         <table>
@@ -124,7 +125,7 @@
                 {% for a in h.accounts %}
                 {% set lvl_class = 'failed' if a.level == 'abnormal' else ('warning' if a.level == 'attention' else ('pending' if a.level == 'uncollected' else 'success')) %}
                 <tr>
-                    <td>{{ a.name }}</td>
+                    <td><a class="health-link" href="/table?tab=account_cache&amp;sec={{ a.sec_user_id }}" title="点击到账号表管理">{% if a.level != 'healthy' %}⚠ {% endif %}{{ a.name }}</a></td>
                     <td><span class="platform-tag platform-{{ a.platform }}">{{ a.platform }}</span></td>
                     <td>{{ a.fetch_status }}</td>
                     <td>{{ a.success }} 成功 / {{ a.failed }} 失败</td>

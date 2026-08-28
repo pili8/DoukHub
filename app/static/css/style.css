@@ -1150,6 +1150,22 @@ tbody tr:hover {
 .workflow-log .log-info { color: var(--dh-accent); }
 .workflow-log .log-warn { color: var(--dh-warning); }
 
+/* 健康度跳转链接：保持徽章外观，悬停略有反馈 */
+.health-link {
+  text-decoration: none;
+  cursor: pointer;
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+.health-link:hover { filter: brightness(1.12); }
+.health-link.workflow-status:hover,
+a.health-link:hover { opacity: 1; }
+td a.health-link {
+  color: var(--text-primary, #e0e0e0);
+  font-weight: 500;
+  border-bottom: 1px dashed var(--border-default, rgba(255,255,255,0.2));
+}
+td a.health-link:hover { border-bottom-color: var(--accent, #4f8cff); }
+
 .workflow-status {
   display: inline-flex;
   align-items: center;

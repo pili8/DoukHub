@@ -398,6 +398,7 @@ def _account_health(db: Database) -> dict:
 
         rows.append({
             "name": acc.get("账号名称") or acc.get("sec_user_id") or "-",
+            "sec_user_id": sec,
             "platform": acc.get("平台") or "",
             "fetch_status": fetch_status,
             "success": success,

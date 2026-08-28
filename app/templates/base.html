@@ -699,6 +699,8 @@
                 await rebindScripts(main);
                 // 替换页面脚本块并重执行
                 const ps = document.getElementById('page-scripts');
+                // 先更新 URL 再执行页面脚本,保证脚本内 location.search 读到的是目标地址
+                if (pushState) history.pushState({ url }, '', url);
                 if (newScripts && ps) {
                     ps.innerHTML = newScripts.innerHTML;
                     await rebindScripts(ps);
@@ -707,7 +709,6 @@
                 if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(main);
                 if (window._doukhubRefreshTTDStatus) window._doukhubRefreshTTDStatus();
                 document.title = doc.title;
-                if (pushState) history.pushState({ url }, '', url);
                 window.scrollTo(0, 0);
             } catch (e) {
                 if (gen !== _spaLoadGen) return; // 静默丢弃过期的错误
