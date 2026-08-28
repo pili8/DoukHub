@@ -358,12 +358,77 @@ def _sync_recent_results(db: Database) -> tuple[dict[str, dict], dict[str, str]]
     return histories, task_types
 
 
+def _account_health(db: Database) -> dict:
+    """账号健康度：综合解析状态 + 采集成败 + Cookie 可用性，零新表零新字段。
+
+    返回 {
+        "accounts": [{ name, platform, fetch_status, success, failed,
+                       last_status, last_message, level, level_label }],
+        "summary": { total, healthy, attention, abnormal, uncollected },
+        "cookie": { total, healthy, disabled },
+    }
+    level: healthy 健康 / attention 需关注 / abnormal 异常 / uncollected 未采集
+    """
+    accounts = db.get_all_accounts()
+    collect = {s["sec_user_id"]: s for s in db.get_account_collection_stats()}
+    cookies = db.get_all_cookies()
+
+    rows = []
+    for acc in accounts:
+        sec = acc.get("sec_user_id") or ""
+        st = collect.get(sec) or {}
+        fetch_status = acc.get("获取状态") or "待获取"
+        success = st.get("success") or 0
+        failed = st.get("failed") or 0
+        last_status = st.get("last_status") or ""
+        last_message = st.get("last_message") or ""
+
+        # 健康判定：解析失败优先 → 未采集 → 按成败分布
+        total = success + failed
+        if fetch_status == "获取失败":
+            level, label = "abnormal", "解析失败"
+        elif total == 0:
+            level, label = "uncollected", "未采集"
+        elif failed == 0:
+            level, label = "healthy", "健康"
+        elif success == 0:
+            level, label = "abnormal", "从未成功"
+        else:
+            level, label = "attention", "部分失败"
+
+        rows.append({
+            "name": acc.get("账号名称") or acc.get("sec_user_id") or "-",
+            "platform": acc.get("平台") or "",
+            "fetch_status": fetch_status,
+            "success": success,
+            "failed": failed,
+            "last_status": last_status,
+            "last_message": last_message,
+            "level": level,
+            "level_label": label,
+        })
+
+    order = {"abnormal": 0, "attention": 1, "uncollected": 2, "healthy": 3}
+    rows.sort(key=lambda r: (order.get(r["level"], 9), r["name"]))
+
+    summary = {"total": len(rows), "healthy": 0, "attention": 0, "abnormal": 0, "uncollected": 0}
+    for r in rows:
+        summary[r["level"]] += 1
+    cookie_ok = sum(1 for c in cookies if c.get("启用"))
+    cookie_disabled = sum(1 for c in cookies if not c.get("启用"))
+    return {
+        "accounts": rows,
+        "summary": summary,
+        "cookie": {"total": len(cookies), "healthy": cookie_ok, "disabled": cookie_disabled},
+    }
+
 def _sync_overview_context(db: Database) -> dict:
     histories, labels = _sync_recent_results(db)
     return {
         "stats": _sync_workflow_stats(db),
         "recent_histories": histories,
         "recent_labels": labels,
+        "account_health": _account_health(db),
     }
 
 

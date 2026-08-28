@@ -836,6 +836,48 @@ class Database:
             conn.commit()
             return counts
 
+    def get_account_collection_stats(self) -> list[dict]:
+        """按账号聚合全部批次明细的采集成败统计（账号健康度数据源）。
+
+        返回 [{ sec_user_id, account_name, success, failed, skipped,
+                last_finished_at, last_status, last_message }]
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    sec_user_id,
+                    COALESCE(MAX(account_name), '') AS account_name,
+                    SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)   AS success,
+                    SUM(CASE WHEN status = 'failed'  THEN 1 ELSE 0 END)   AS failed,
+                    SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END)   AS skipped,
+                    MAX(finished_at) AS last_finished_at
+                FROM collection_batch_items
+                GROUP BY sec_user_id
+                ORDER BY MAX(finished_at) DESC
+                """,
+            ).fetchall()
+            result = [dict(row) for row in rows]
+        # 每条账号最近一条非 pending 明细的状态与原因（用于健康度提示）
+        if result:
+            with self._connect() as conn:
+                for item in result:
+                    row = conn.execute(
+                        """
+                        SELECT status, message FROM collection_batch_items
+                        WHERE sec_user_id = ? AND status != 'pending'
+                        ORDER BY id DESC LIMIT 1
+                        """,
+                        (item["sec_user_id"],),
+                    ).fetchone()
+                    if row:
+                        item["last_status"] = row["status"]
+                        item["last_message"] = row["message"] or ""
+                    else:
+                        item["last_status"] = ""
+                        item["last_message"] = ""
+        return result
+
     # ========== 单作品下载历史操作 ==========
 
     def create_single_work_history(

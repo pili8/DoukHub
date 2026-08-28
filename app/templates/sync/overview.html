@@ -99,6 +99,47 @@
     </div>
 </div>
 
+
+<div class="workflow-panel">
+    <div class="workflow-header">
+        <div class="workflow-title">
+            <i data-lucide="activity"></i>
+            <span>账号健康度</span>
+        </div>
+    </div>
+    {% set h = account_health %}
+    <div class="workflow-checklist" style="margin-bottom:12px;">
+        <span class="workflow-status {{ 'failed' if h.summary.abnormal else 'success' }}">异常 {{ h.summary.abnormal }}</span>
+        <span class="workflow-status {{ 'warning' if h.summary.attention else 'success' }}">需关注 {{ h.summary.attention }}</span>
+        <span class="workflow-status {{ 'pending' if h.summary.uncollected else 'success' }}">未采集 {{ h.summary.uncollected }}</span>
+        <span class="workflow-status success">健康 {{ h.summary.healthy }}</span>
+        <span class="workflow-status {{ 'success' if h.cookie.healthy else 'failed' }}">Cookie {{ h.cookie.healthy }}/{{ h.cookie.total }}</span>
+    </div>
+    <div class="table-scroll" style="max-height:420px; overflow-y:auto;">
+        <table>
+            <thead>
+                <tr><th>账号</th><th>平台</th><th>解析</th><th>采集成败</th><th>最近状态</th><th>健康度</th></tr>
+            </thead>
+            <tbody>
+                {% for a in h.accounts %}
+                {% set lvl_class = 'failed' if a.level == 'abnormal' else ('warning' if a.level == 'attention' else ('pending' if a.level == 'uncollected' else 'success')) %}
+                <tr>
+                    <td>{{ a.name }}</td>
+                    <td><span class="platform-tag platform-{{ a.platform }}">{{ a.platform }}</span></td>
+                    <td>{{ a.fetch_status }}</td>
+                    <td>{{ a.success }} 成功 / {{ a.failed }} 失败</td>
+                    <td class="text-muted" style="font-size:12px;">{{ a.last_message or '-' }}</td>
+                    <td><span class="workflow-status {{ lvl_class }}">{{ a.level_label }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if not h.accounts %}
+    <div class="empty-state" style="padding:14px 0;">暂无账号数据</div>
+    {% endif %}
+</div>
+
 <div class="workflow-panel">
     <div class="workflow-header">
         <div class="workflow-title">

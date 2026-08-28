@@ -28,8 +28,6 @@ def app_env(tmp_path):
     ]
     mock_services.get_versions.return_value = []
 
-    mock_scheduler = MagicMock()
-    mock_scheduler.get_jobs_info.return_value = []
 
     import app.main as app_main
 
@@ -38,7 +36,6 @@ def app_env(tmp_path):
         "config": app_main.config,
         "history": app_main.history,
         "services": app_main.services,
-        "scheduler": app_main.scheduler,
         "feishu_client": app_main.feishu_client,
         "collector": app_main.collector,
         "syncer": app_main.syncer,
@@ -49,7 +46,6 @@ def app_env(tmp_path):
     app_main.config = test_config
     app_main.history = test_history
     app_main.services = mock_services
-    app_main.scheduler = mock_scheduler
     app_main.feishu_client = None
     app_main.collector = None
     app_main.syncer = None
