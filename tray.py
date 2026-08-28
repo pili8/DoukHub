@@ -194,7 +194,6 @@ def restart_doukhub_only(icon, item):
     logger.info("只重启 DoukHub")
     stop_server()
     start_server()
-    _reopen_ui_after_ready()
 
 
 def restart_all(icon, item):
@@ -210,7 +209,6 @@ def restart_all(icon, item):
         svc.start_all()
     except Exception as e:
         logger.warning(f"启动下载器异常: {e}")
-    _reopen_ui_after_ready()
 
 
 def quit_app(icon, item):
@@ -274,8 +272,7 @@ def main():
     # 后台异步拉起下载器(避免阻塞服务启动),再启动服务
     # (uvicorn lifespan 检测到端口占用会幂等跳过)
     start_downloaders_async()
-    if start_server():
-        _reopen_ui_after_ready()
+    start_server()
 
     # 自实现热重载:监控 app/ 目录文件变化(uvicorn --reload 与隐藏窗口互斥)
     threading.Thread(target=_watch_files, daemon=True).start()

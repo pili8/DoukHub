@@ -21,7 +21,5 @@ echo   Local:  http://127.0.0.1:2999
 echo   Press Ctrl+C to stop
 echo ================================
 
-start "" "http://127.0.0.1:2999"
-
 venv\Scripts\python.exe main.py
 pause
