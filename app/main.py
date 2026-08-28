@@ -28,7 +28,6 @@ from .core.collection_batch_manager import CollectionBatchManager
 from .core.collection_planner import plan_collection
 from .core.feishu_sync import FeishuSyncer
 from .core.history import HistoryDB
-from .core.scheduler import TaskScheduler
 from .core.tasks import get_task_manager
 from .core.link_resolver import extract_sec_user_id, build_profile_url
 from .core import single_work
@@ -36,6 +35,8 @@ from .core import storage_profiles as sp
 from .core.download_worker import DownloadWorker
 from .core import backup
 from .core import dedup
+from .core import maintenance
+from .core import presets
 from .services.downloader import ServiceManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
@@ -52,7 +53,6 @@ syncer_v2: SyncerV2 | None = None
 database: Database | None = None
 history: HistoryDB | None = None
 services: ServiceManager | None = None
-scheduler: TaskScheduler | None = None
 collection_batch_manager: CollectionBatchManager | None = None
 download_worker: DownloadWorker | None = None
 single_work_client: httpx.AsyncClient | None = None
@@ -190,19 +190,6 @@ def get_services() -> ServiceManager:
     return services
 
 
-def get_scheduler() -> TaskScheduler:
-    global scheduler
-    if scheduler is None:
-        scheduler = TaskScheduler(
-            history=get_history(),
-            get_collector=get_collector,
-            get_syncer=get_syncer,
-            get_accounts=lambda: (get_syncer().load_local_accounts() if get_syncer() else []),
-            config=config,
-        )
-    return scheduler
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import threading
@@ -212,10 +199,6 @@ async def lifespan(app: FastAPI):
     if config.downloader.get("auto_start_services", True):
         logger.info("正在后台启动 Downloader 服务...")
         threading.Thread(target=svc.start_all, daemon=True).start()
-
-    # 启动定时任务调度器
-    sched = get_scheduler()
-    sched.start()
 
     # TTD/XHS 心跳监控：30秒检查一次，连续2次失败自动重启（可通过 keep_services_alive 开关关闭）
     def _health_loop():
@@ -266,7 +249,6 @@ async def lifespan(app: FastAPI):
     # 关闭
     global single_work_client
     await get_collection_batch_manager().shutdown()
-    sched.shutdown()
     svc.close()
     c = get_collector()
     if c:
@@ -560,6 +542,28 @@ async def api_backup_stats():
     return backup.get_db_stats()
 
 
+@app.get("/api/maintenance/items")
+async def api_maintenance_items():
+    """返回所有可清理项（日志/缓存），供通用清理面板展示"""
+    root = BASE_DIR.parent
+    items = maintenance.list_items(config, root)
+    return {"items": items}
+
+
+@app.post("/api/maintenance/clean")
+async def api_maintenance_clean(payload: dict):
+    """按项清理日志/缓存，payload: {"items": [id, ...]} 或 {"item": id}"""
+    root = BASE_DIR.parent
+    targets = payload.get("items") or ([payload.get("item")] if payload.get("item") else [])
+    results = {}
+    total_freed = 0
+    for item_id in targets:
+        r = maintenance.clean_item(item_id, config, root)
+        results[item_id] = r
+        total_freed += r.get("freed_bytes", 0)
+    return {"success": True, "results": results, "total_freed": total_freed}
+
+
 @app.get("/api/backup/download/{filename}")
 async def api_backup_download(filename: str):
     """下载备份文件"""
@@ -741,16 +745,8 @@ async def page_collect(request: Request):
     if request.query_params.get("mode") == "detail":
         return RedirectResponse("/collect/detail", status_code=307)
 
-    h = get_history()
-    tasks = h.get_tasks()
-    sched = get_scheduler()
-    jobs_info = {j["id"]: j for j in sched.get_jobs_info()}
-    for task in tasks:
-        job = jobs_info.get(f"task_{task['id']}")
-        task["next_run"] = job["next_run"] if job else None
     return templates.TemplateResponse(request, "collect.html", context={
         "request": request,
-        "tasks": tasks,
         "page": "collect_account",
         "collect_mode": "account",
     })
@@ -780,18 +776,6 @@ async def page_collect_detail(request: Request):
         "collect_mode": "detail",
     })
 
-
-@app.get("/schedule", response_class=HTMLResponse)
-async def page_schedule(request: Request):
-    h = get_history()
-    tasks = h.get_tasks()
-    sched = get_scheduler()
-    return templates.TemplateResponse(request, "schedule.html", context={
-        "request": request,
-        "tasks": tasks,
-        "jobs": sched.get_jobs_info(),
-        "page": "schedule",
-    })
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -868,7 +852,6 @@ async def api_status():
     feishu = get_feishu()
     collector = get_collector()
     h = get_history()
-    sched = get_scheduler()
 
     # 检测飞书连通性
     feishu_status = {"connected": False, "message": "云端未配置"}
@@ -913,7 +896,6 @@ async def api_status():
         "xhs": xhs_status,
         "services": svc.status_all(),
         "stats": h.get_stats(),
-        "jobs": sched.get_jobs_info(),
         "kernels": {
             "ttd": {"installed": ttd_kernel, "path": str(svc.ttd.path)},
             "xhs": {"installed": xhs_kernel, "path": str(svc.xhs.path)},
@@ -2215,7 +2197,7 @@ async def api_database_clear_table(table_name: str):
     db = get_database()
     
     # 验证表名
-    valid_tables = ["share_cache", "account_cache", "cookie_cache", "collection_history", "scheduled_tasks"]
+    valid_tables = ["share_cache", "account_cache", "cookie_cache"]
     if table_name not in valid_tables:
         return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
     
@@ -2227,16 +2209,6 @@ async def api_database_clear_table(table_name: str):
         elif table_name == "cookie_cache":
             with db._connect() as conn:
                 conn.execute("DELETE FROM cookie_cache")
-                conn.commit()
-                success = True
-        elif table_name == "collection_history":
-            with db._connect() as conn:
-                conn.execute("DELETE FROM collection_history")
-                conn.commit()
-                success = True
-        elif table_name == "scheduled_tasks":
-            with db._connect() as conn:
-                conn.execute("DELETE FROM scheduled_tasks")
                 conn.commit()
                 success = True
         
@@ -3400,41 +3372,7 @@ class CollectionPresetRequest(BaseModel):
 
 @app.get("/api/collection/presets")
 async def api_list_collection_presets():
-    presets = get_database().list_collection_presets()
-    # 如果没有方案，自动初始化默认方案
-    if not presets:
-        db = get_database()
-        db.create_collection_preset({
-            "name": "日常 4星+（增量）",
-            "rating_min": 4,
-            "tags": "",
-            "account_names": "",
-            "platform": "douyin",
-            "mode": "incremental",
-            "is_default": True,
-        })
-        db.create_collection_preset({
-            "name": "日常 3星+（增量）",
-            "rating_min": 3,
-            "platform": "douyin",
-            "mode": "incremental",
-        })
-        db.create_collection_preset({
-            "name": "TikTok 全部（增量）",
-            "rating_min": 3,
-            "platform": "tiktok",
-            "mode": "incremental",
-        })
-        db.create_collection_preset({
-            "name": "连通性测试",
-            "rating_min": 4,
-            "tags": "",
-            "account_names": "",
-            "platform": "douyin",
-            "mode": "incremental",
-        })
-        presets = db.list_collection_presets()
-    return {"presets": presets}
+    return {"presets": presets.list_presets(config)}
 
 
 @app.post("/api/collection/presets")
@@ -3443,7 +3381,7 @@ async def api_create_collection_preset(request: CollectionPresetRequest):
     # 旧版 storage_choice=p:<id> 兼容 → 迁移为主方案 ID
     if not data.get("storage_primary_id") and str(data.get("storage_choice") or "").startswith("p:"):
         data["storage_primary_id"] = data["storage_choice"][2:]
-    preset = get_database().create_collection_preset(data)
+    preset = presets.create_preset(config, data)
     return {"success": True, "preset": preset}
 
 
@@ -3452,7 +3390,7 @@ async def api_update_collection_preset(preset_id: int, request: CollectionPreset
     data = request.model_dump()
     if not data.get("storage_primary_id") and str(data.get("storage_choice") or "").startswith("p:"):
         data["storage_primary_id"] = data["storage_choice"][2:]
-    preset = get_database().update_collection_preset(preset_id, data)
+    preset = presets.update_preset(config, preset_id, data)
     if not preset:
         return JSONResponse({"success": False, "message": "方案不存在"}, status_code=404)
     return {"success": True, "preset": preset}
@@ -3460,16 +3398,16 @@ async def api_update_collection_preset(preset_id: int, request: CollectionPreset
 
 @app.delete("/api/collection/presets/{preset_id}")
 async def api_delete_collection_preset(preset_id: int):
-    preset = get_database().get_collection_preset(preset_id)
+    preset = presets.get_preset(config, preset_id)
     if preset and preset.get("is_default"):
         return JSONResponse({"success": False, "message": "不能删除默认方案"}, status_code=400)
-    ok = get_database().delete_collection_preset(preset_id)
+    ok = presets.delete_preset(config, preset_id)
     return {"success": ok}
 
 
 @app.post("/api/collection/presets/{preset_id}/default")
 async def api_set_default_collection_preset(preset_id: int):
-    ok = get_database().set_default_collection_preset(preset_id)
+    ok = presets.set_default_preset(config, preset_id)
     return {"success": ok}
 
 
@@ -3517,7 +3455,7 @@ async def api_preview_collection_preset(preset_id: str):
         pid = int(preset_id)
     except ValueError:
         return JSONResponse({"success": False, "message": "无效的方案 ID"}, status_code=400)
-    preset = db.get_collection_preset(pid)
+    preset = presets.get_preset(config, pid)
     if not preset:
         return JSONResponse({"success": False, "message": "方案不存在"}, status_code=404)
 
@@ -3572,7 +3510,7 @@ async def api_start_collection_batch(request: CollectionBatchRequest):
     manager = get_collection_batch_manager()
     # 如果指定了 preset_id，从方案中读取参数覆盖请求字段
     if request.preset_id is not None:
-        preset = db.get_collection_preset(request.preset_id)
+        preset = presets.get_preset(config, request.preset_id)
         if not preset:
             return JSONResponse({"success": False, "message": "方案不存在"}, status_code=404)
         rating_min = preset["rating_min"]
@@ -3736,11 +3674,14 @@ async def api_collection_batch_detail(batch_id: str):
     for item in items:
         account = accounts.get(item.get("account_record_id"))
         item["last_collected_at"] = account.get("last_collected_at") if account else None
+    log_path = (batch.get("log_path") or "") if batch else ""
+    log_exists = bool(log_path) and Path(log_path).exists()
     return {
         "batch": batch,
         "items": items,
         "log": get_collection_batch_manager().read_log(batch_id),
         "works": get_collection_batch_manager().read_account_works(batch_id),
+        "log_exists": log_exists,
     }
 
 
@@ -3822,81 +3763,6 @@ async def api_stats():
     """获取统计数据"""
     h = get_history()
     return h.get_stats()
-
-
-# --- 定时任务 ---
-
-@app.get("/api/schedule")
-async def api_list_schedule():
-    """获取定时任务列表"""
-    h = get_history()
-    sched = get_scheduler()
-    tasks = h.get_tasks()
-    jobs_info = {j["id"]: j for j in sched.get_jobs_info()}
-    for task in tasks:
-        job = jobs_info.get(f"task_{task['id']}")
-        task["next_run"] = job["next_run"] if job else None
-    return {"tasks": tasks}
-
-
-@app.post("/api/schedule")
-async def api_add_schedule(
-    name: str = Form(...),
-    cron_expression: str = Form(...),
-    rating_filter: str = Form("3,4,5"),
-):
-    h = get_history()
-    sched = get_scheduler()
-    task_id = h.add_task(name, cron_expression, rating_filter)
-    sched.add_task(task_id)
-    return {"success": True, "task_id": task_id}
-
-
-@app.post("/api/schedule/{task_id}/delete")
-async def api_delete_schedule(task_id: int):
-    h = get_history()
-    sched = get_scheduler()
-    sched.remove_task(task_id)
-    h.delete_task(task_id)
-    return {"success": True}
-
-
-@app.post("/api/schedule/{task_id}/toggle")
-async def api_toggle_schedule(task_id: int):
-    h = get_history()
-    sched = get_scheduler()
-    tasks = h.get_tasks()
-    for t in tasks:
-        if t["id"] == task_id:
-            new_enabled = not t["enabled"]
-            h.update_task(task_id, {"enabled": new_enabled})
-            sched.toggle_task(task_id, new_enabled)
-            return {"success": True, "enabled": new_enabled}
-    return {"success": False, "message": "任务不存在"}
-
-
-@app.post("/api/schedule/{task_id}/run")
-async def api_run_schedule(task_id: int):
-    """立即执行定时任务"""
-    h = get_history()
-    tasks = h.get_tasks()
-    for t in tasks:
-        if t["id"] == task_id:
-            rating_filter = set()
-            for r in t.get("rating_filter", "3,4,5").split(","):
-                try:
-                    rating_filter.add(int(r.strip()))
-                except ValueError:
-                    pass
-
-            sched = get_scheduler()
-            await sched._execute_task(
-                task_id=task_id,
-                task_name=t["name"],
-                rating_filter=rating_filter,
-            )
-            return {"success": True, "message": f"任务 {t['name']} 已执行"}
-    return {"success": False, "message": "任务不存在"}
 
 
 # --- 设置 ---
@@ -4061,10 +3927,6 @@ async def restart_system():
     svc = get_services()
     svc.stop_all()
 
-    # 停止调度器
-    sched = get_scheduler()
-    sched.shutdown()
-
     # 延迟重启（等响应返回后）
     async def _delayed_restart():
         import asyncio
@@ -4088,10 +3950,6 @@ async def exit_system():
     # 停止 Downloader 服务
     svc = get_services()
     svc.stop_all()
-
-    # 停止调度器
-    sched = get_scheduler()
-    sched.shutdown()
 
     # 延迟退出（等响应返回后）
     async def _delayed_exit():

@@ -20,6 +20,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from .tasks import get_task_manager
+
 # 数据目录：与主库同目录（~/.doukhub/）
 _DATA_DIR = Path.home() / ".doukhub"
 _CACHE_FILE = _DATA_DIR / "dedup_cache.json"
@@ -253,43 +255,110 @@ def find_duplicates(files: list[dict], cache: dict, on_progress=None) -> list[di
     groups.sort(key=lambda g: g["size"] * len(g["files"]), reverse=True)
     return groups
 
+def find_id_duplicates(files: list[dict], content_groups: list[dict]) -> list[dict]:
+    """仅对视频文件按作品ID分组，抓出同一作品的多份下载（可能不同清晰度/格式）。
+
+    图集图片天然不参与（扩展名不是视频的跳过），不会被误判。
+    已被内容哈希组判定为重复的组（同内容两份）不重复展示。
+    """
+    covered: set[str] = set()
+    for g in content_groups:
+        for f in g["files"]:
+            covered.add(f["path"])
+
+    by_id: dict[str, list[dict]] = {}
+    for f in files:
+        if Path(f["path"]).suffix.lower() not in VIDEO_EXTS:
+            continue
+        wid = _extract_work_id(f["name"])
+        if not wid:
+            continue
+        by_id.setdefault(wid, []).append(f)
+
+    groups = []
+    for wid, group in by_id.items():
+        if len(group) < 2:
+            continue
+        # 全组都已被内容哈希组覆盖（内容完全相同）→ 不重复展示
+        if all(f["path"] in covered for f in group):
+            continue
+        groups.append({
+            "work_id": wid,
+            "files": [{
+                "path": f["path"],
+                "name": f["name"],
+                "size": f["size"],
+                "mtime": f["mtime"],
+                "work_id": wid,
+            } for f in sorted(group, key=lambda f: f["size"], reverse=True)],
+        })
+    groups.sort(key=lambda g: sum(f["size"] for f in g["files"]), reverse=True)
+    return groups
 
 # ---------- 后台扫描 ----------
 
-def _scan_worker(roots: list[str], exts: set[str]) -> None:
+def _scan_worker(task_id: str, roots: list[str], exts: set[str]) -> None:
+    tm = get_task_manager()
+
+    def _log(msg: str, level: str = "info") -> None:
+        tm.add_log(task_id, msg, level)
+
     _set_state(running=True, stage="collecting", total_files=0, scanned=0,
                groups=0, message="正在收集文件...", started_at=_now_str(), finished_at=None)
+    tm.update(task_id, status="running")
+    _log(f"开始查重，共 {len(roots)} 个目录：")
+    for r in roots:
+        _log("  扫描目录 " + r)
     try:
         files = collect_files(roots, exts)
         total = len(files)
         _set_state(stage="hashing", total_files=total, scanned=0,
                    message=f"已收集 {total} 个文件，开始查重...")
+        tm.update(task_id, total=total)
+        _log(f"共收集 {total} 个文件，开始比对内容...")
+        if total == 0:
+            _log("没有找到匹配类型的文件", "warn")
 
         cache = _load_cache()
-        cache_changed = [False]
+        last_pct = -1
 
         def progress(done, t):
             _set_state(scanned=done, message=f"查重中 {done}/{t}...")
+            tm.update(task_id, success=done)
+            nonlocal last_pct
+            if t > 0:
+                pct = int(done * 100 / t)
+                if pct >= last_pct + 5:
+                    last_pct = pct
+                    _log(f"  查重进度 {done}/{t}（{pct}%）")
 
         groups = find_duplicates(files, cache, on_progress=progress)
+        id_groups = find_id_duplicates(files, groups)
+
+        dup_files = sum(len(g["files"]) for g in groups)
+        _log(f"查重完成：内容相同 {len(groups)} 组（{dup_files} 个文件）、作品ID相同 {len(id_groups)} 组", "ok")
         _set_state(stage="done", scanned=total, groups=len(groups),
                    message="扫描完成", finished_at=_now_str())
+        tm.update(task_id, status="done", success=total)
 
         # 落盘结果
         result = {
             "generated_at": _now_str(),
             "scanned_files": total,
             "groups": groups,
+            "id_groups": id_groups,
         }
         _RESULT_FILE.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
         _save_cache(cache)
         _set_state(running=False)
     except Exception as e:
         _set_state(running=False, stage="error", message=f"扫描失败：{e}", finished_at=_now_str())
+        tm.update(task_id, status="failed", error=str(e))
+        _log(f"扫描失败：{e}", "error")
 
 
 def start_scan(roots: list[str], exts: list[str] | None = None) -> dict:
-    """启动后台扫描。roots 为空或无效则返回错误。"""
+    """启动后台扫描，返回 task_id 供前端轮询进度与日志。"""
     if SCAN_STATE["running"]:
         return {"success": False, "error": "已有扫描在进行中"}
 
@@ -298,10 +367,13 @@ def start_scan(roots: list[str], exts: list[str] | None = None) -> dict:
         return {"success": False, "error": "没有有效的扫描目录"}
 
     ext_set = set(exts) if exts else ALL_EXTS
+    tm = get_task_manager()
+    task = tm.create("dedup")
+    task_id = task.task_id
     global _SCAN_THREAD
-    _SCAN_THREAD = threading.Thread(target=_scan_worker, args=(clean_roots, ext_set), daemon=True)
+    _SCAN_THREAD = threading.Thread(target=_scan_worker, args=(task_id, clean_roots, ext_set), daemon=True)
     _SCAN_THREAD.start()
-    return {"success": True, "roots": clean_roots}
+    return {"success": True, "roots": clean_roots, "task_id": task_id}
 
 
 # ---------- 结果读取 ----------

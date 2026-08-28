@@ -102,26 +102,6 @@ class Database:
                 )
             """)
 
-            # 表4：采集历史（这表的字段不进飞书，但 sec_user_id 与飞书一致）
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS collection_history (
-                    ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                    账号名称 TEXT,
-                    平台 TEXT,
-                    sec_user_id TEXT,
-                    采集类型 TEXT,
-                    等级 INTEGER,
-                    标签 TEXT,
-                    状态 TEXT,
-                    作品数 INTEGER,
-                    开始时间 DATETIME,
-                    结束时间 DATETIME,
-                    耗时秒数 REAL,
-                    错误信息 TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS collection_batches (
                     id TEXT PRIMARY KEY,
@@ -201,39 +181,12 @@ class Database:
                 )
             """)
 
-            # 表7：定时任务
+            # 表7：应用配置（key-value，配置文件整包存单键 JSON，随库备份）
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS scheduled_tasks (
-                    ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                    任务名称 TEXT NOT NULL,
-                    Cron表达式 TEXT NOT NULL,
-                    等级筛选 TEXT,
-                    启用 BOOLEAN DEFAULT 1,
-                    上次运行 DATETIME,
-                    下次运行 DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-
-            # 表8：采集方案（预设）
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS collection_presets (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    rating_min INTEGER NOT NULL DEFAULT 3,
-                    tags TEXT NOT NULL DEFAULT '',
-                    account_names TEXT NOT NULL DEFAULT '',
-                    platform TEXT NOT NULL DEFAULT 'douyin',
-                    mode TEXT NOT NULL DEFAULT 'incremental',
-                    folder_name TEXT NOT NULL DEFAULT '',
-                    name_format TEXT NOT NULL DEFAULT '',
-                    storage_choice TEXT NOT NULL DEFAULT 'auto',
-                    storage_primary_id TEXT NOT NULL DEFAULT '',
-                    storage_secondary_id TEXT NOT NULL DEFAULT '',
-                    is_default INTEGER NOT NULL DEFAULT 0,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TEXT
                 )
             """)
 
@@ -247,8 +200,6 @@ class Database:
                 "CREATE INDEX IF NOT EXISTS idx_share_share_code ON share_cache(share_code)",
                 "CREATE INDEX IF NOT EXISTS idx_share_sec_user_id ON share_cache(sec_user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_account_sec_user_id ON account_cache(sec_user_id)",
-                "CREATE INDEX IF NOT EXISTS idx_history_sec_user_id ON collection_history(sec_user_id)",
-                "CREATE INDEX IF NOT EXISTS idx_history_created_at ON collection_history(created_at)",
                 "CREATE INDEX IF NOT EXISTS idx_sync_history_type ON sync_history(task_type)",
                 "CREATE INDEX IF NOT EXISTS idx_sync_history_created ON sync_history(created_at)",
                 "CREATE INDEX IF NOT EXISTS idx_collection_batch_status ON collection_batches(status, created_at)",
@@ -300,14 +251,12 @@ class Database:
 
         v2 重命名：
         - 记录ID → record_id（三张同步表）
-        - 创建时间 → created_at（三张同步表 + collection_history + scheduled_tasks）
+        - 创建时间 → created_at（三张同步表）
 
         v1 历史迁移（保留兼容）：
         - account_cache: 账号标识→sec_user_id, 更新错误→备注, 更新时间→同步时间, 已更新→已获取信息
         - share_cache: 账号标识→sec_user_id, 更新时间→同步时间
-        - collection_history: 账号标识→sec_user_id
         - cookie_cache: 更新时间→同步时间
-        - scheduled_tasks: 更新时间→同步时间
         - 删除 account_cache.代理（如存在）
 
         v2 新增字段：
@@ -336,13 +285,7 @@ class Database:
                 # v3: 已获取信息 → 获取状态
                 ("已获取信息", "获取状态"),
             ],
-            "collection_history": [
-                ("账号标识", "sec_user_id"),
-            ],
             "cookie_cache": [
-                ("更新时间", "同步时间"),
-            ],
-            "scheduled_tasks": [
                 ("更新时间", "同步时间"),
             ],
         }
@@ -351,8 +294,6 @@ class Database:
             "share_cache": [("记录ID", "record_id"), ("创建时间", "created_at")],
             "account_cache": [("记录ID", "record_id"), ("创建时间", "created_at")],
             "cookie_cache": [("记录ID", "record_id"), ("创建时间", "created_at")],
-            "collection_history": [("创建时间", "created_at")],
-            "scheduled_tasks": [("创建时间", "created_at")],
         }
         # v2 新增字段
         add_columns = {
@@ -371,15 +312,6 @@ class Database:
             ],
             "collection_batches": [
                 ("preset_name", "TEXT"),
-            ],
-            "collection_presets": [
-                ("folder_name", "TEXT NOT NULL DEFAULT ''"),
-                ("name_format", "TEXT NOT NULL DEFAULT ''"),
-                ("storage_choice", "TEXT NOT NULL DEFAULT 'auto'"),
-                ("storage_primary_id", "TEXT NOT NULL DEFAULT ''"),
-                ("storage_secondary_id", "TEXT NOT NULL DEFAULT ''"),
-                ("account_created_after", "TEXT NOT NULL DEFAULT ''"),
-                ("skip_recent_days", "INTEGER NOT NULL DEFAULT 0"),
             ],
         }
         # 软删除字段（墓碑）：三张同步表都加上
@@ -1041,65 +973,6 @@ class Database:
             conn.commit()
             return True
 
-    # ========== 采集历史操作 ==========
-
-    def add_history(self, data: dict) -> int:
-        """添加采集历史记录"""
-        with self._connect() as conn:
-            fields = ", ".join(data.keys())
-            placeholders = ", ".join(["?" for _ in data])
-            cursor = conn.execute(f"INSERT INTO collection_history ({fields}) VALUES ({placeholders})", list(data.values()))
-            conn.commit()
-            return cursor.lastrowid
-
-    def get_history(self, limit: int = 100, offset: int = 0) -> list[dict]:
-        """获取采集历史记录"""
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM collection_history ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (limit, offset)
-            ).fetchall()
-            return [dict(row) for row in rows]
-
-    def get_history_count(self) -> int:
-        """获取采集历史记录总数"""
-        with self._connect() as conn:
-            row = conn.execute("SELECT COUNT(*) as count FROM collection_history").fetchone()
-            return row["count"] if row else 0
-
-    # ========== 定时任务操作 ==========
-
-    def get_all_tasks(self) -> list[dict]:
-        """获取所有定时任务"""
-        with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM scheduled_tasks ORDER BY ID").fetchall()
-            return [dict(row) for row in rows]
-
-    def add_task(self, data: dict) -> int:
-        """添加定时任务"""
-        with self._connect() as conn:
-            fields = ", ".join(data.keys())
-            placeholders = ", ".join(["?" for _ in data])
-            cursor = conn.execute(f"INSERT INTO scheduled_tasks ({fields}) VALUES ({placeholders})", list(data.values()))
-            conn.commit()
-            return cursor.lastrowid
-
-    def update_task(self, task_id: int, data: dict) -> bool:
-        """更新定时任务"""
-        with self._connect() as conn:
-            data["同步时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
-            conn.execute(f"UPDATE scheduled_tasks SET {set_clause} WHERE ID = ?", list(data.values()) + [task_id])
-            conn.commit()
-            return True
-
-    def delete_task(self, task_id: int) -> bool:
-        """删除定时任务"""
-        with self._connect() as conn:
-            conn.execute("DELETE FROM scheduled_tasks WHERE ID = ?", (task_id,))
-            conn.commit()
-            return True
-
     # ========== 软删除辅助（删除同步专用） ==========
 
     _SYNC_TABLES = {"share_cache", "account_cache", "cookie_cache"}
@@ -1154,8 +1027,6 @@ class Database:
             "share_cache",
             "account_cache",
             "cookie_cache",
-            "collection_history",
-            "scheduled_tasks",
             "sync_history",
         ]
         soft_delete_tables = {"share_cache", "account_cache", "cookie_cache"}
@@ -1188,7 +1059,7 @@ class Database:
     # 允许操作的表白名单
     VALID_TABLES = {
         "share_cache", "account_cache", "cookie_cache",
-        "collection_history", "scheduled_tasks", "sync_history",
+        "sync_history",
     }
 
     def get_record_by_id(self, table: str, record_id: str) -> Optional[dict]:
@@ -1605,15 +1476,6 @@ class Database:
                 "invalid": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE is_deleted=0 AND 状态='失效'").fetchone()[0],
                 "enabled": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE is_deleted=0 AND 启用=1").fetchone()[0],
             }
-            # 采集历史
-            stats["collection_history"] = {
-                "total": conn.execute("SELECT COUNT(*) FROM collection_history").fetchone()[0],
-            }
-            # 定时任务
-            stats["scheduled_tasks"] = {
-                "total": conn.execute("SELECT COUNT(*) FROM scheduled_tasks").fetchone()[0],
-                "enabled": conn.execute("SELECT COUNT(*) FROM scheduled_tasks WHERE 启用=1").fetchone()[0],
-            }
             # 同步历史
             stats["sync_history"] = {
                 "total": conn.execute("SELECT COUNT(*) FROM sync_history").fetchone()[0],
@@ -1655,105 +1517,3 @@ class Database:
             )
             conn.commit()
             return cursor.rowcount
-
-    # ===== 采集方案（预设）=====
-
-    def list_collection_presets(self) -> list[dict]:
-        """返回所有采集方案，按创建时间排序。"""
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM collection_presets ORDER BY created_at ASC"
-            ).fetchall()
-            return [dict(row) for row in rows]
-
-    def get_collection_preset(self, preset_id: int) -> Optional[dict]:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM collection_presets WHERE id = ?", (preset_id,)
-            ).fetchone()
-            return dict(row) if row else None
-
-    def create_collection_preset(self, data: dict) -> dict:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with self._connect() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO collection_presets
-                    (name, rating_min, tags, account_names, platform, mode,
-                     folder_name, name_format, storage_choice, storage_primary_id, storage_secondary_id,
-                     account_created_after, skip_recent_days,
-                     is_default, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    data.get("name", ""),
-                    int(data.get("rating_min", 3)),
-                    str(data.get("tags", "")),
-                    str(data.get("account_names", "")),
-                    data.get("platform", "douyin"),
-                    data.get("mode", "incremental"),
-                    str(data.get("folder_name", "")),
-                    str(data.get("name_format", "")),
-                    str(data.get("storage_choice", "auto")),
-                    str(data.get("storage_primary_id", "")),
-                    str(data.get("storage_secondary_id", "")),
-                    str(data.get("account_created_after", "")),
-                    int(data.get("skip_recent_days", 0)),
-                    1 if data.get("is_default") else 0,
-                    now, now,
-                ),
-            )
-            conn.commit()
-            return self.get_collection_preset(cursor.lastrowid)
-
-    def update_collection_preset(self, preset_id: int, data: dict) -> Optional[dict]:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        fields = {
-            "name": data.get("name"),
-            "rating_min": int(data["rating_min"]) if "rating_min" in data else None,
-            "tags": data.get("tags"),
-            "account_names": data.get("account_names"),
-            "platform": data.get("platform"),
-            "mode": data.get("mode"),
-            "folder_name": data.get("folder_name"),
-            "name_format": data.get("name_format"),
-            "storage_choice": data.get("storage_choice"),
-            "storage_primary_id": data.get("storage_primary_id"),
-            "storage_secondary_id": data.get("storage_secondary_id"),
-            "account_created_after": data.get("account_created_after"),
-            "skip_recent_days": int(data["skip_recent_days"]) if "skip_recent_days" in data else None,
-            "is_default": 1 if data.get("is_default") else None,
-            "updated_at": now,
-        }
-        valid = {k: v for k, v in fields.items() if v is not None}
-        if not valid:
-            return self.get_collection_preset(preset_id)
-        assignments = ", ".join([f'"{k}" = ?' for k in valid])
-        params = list(valid.values()) + [preset_id]
-        with self._connect() as conn:
-            conn.execute(
-                f"UPDATE collection_presets SET {assignments} WHERE id = ?",
-                params,
-            )
-            conn.commit()
-        return self.get_collection_preset(preset_id)
-
-    def delete_collection_preset(self, preset_id: int) -> bool:
-        with self._connect() as conn:
-            cursor = conn.execute(
-                "DELETE FROM collection_presets WHERE id = ?", (preset_id,)
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-
-    def set_default_collection_preset(self, preset_id: int) -> bool:
-        """将指定方案设为默认，同时取消其他方案的默认标记。"""
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with self._connect() as conn:
-            conn.execute("UPDATE collection_presets SET is_default = 0")
-            cursor = conn.execute(
-                "UPDATE collection_presets SET is_default = 1, updated_at = ? WHERE id = ?",
-                (now, preset_id),
-            )
-            conn.commit()
-            return cursor.rowcount > 0

@@ -1,11 +1,16 @@
 """DoukHub 配置管理模块"""
+import copy
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 # 用户目录下的配置（不会被项目更新覆盖）
 USER_CONFIG_DIR = Path.home() / ".doukhub"
 USER_CONFIG_FILE = USER_CONFIG_DIR / "config.json"
+
+# 主数据库文件（与 database.py 保持一致；数据库路径固定，作为唯一引导锚点）
+DB_PATH = Path.home() / ".doukhub" / "doukhub.db"
 
 # 项目目录下的配置（旧位置，用于迁移）
 PROJECT_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
@@ -112,17 +117,59 @@ DEFAULT_CONFIG = {
 }
 
 
+def _ensure_settings_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+    )
+
+
+def _try_load_db_config() -> dict | None:
+    """从数据库 settings 表读配置；库里没有返回 None。任何异常静默回退。"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            _ensure_settings_table(conn)
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key='config'"
+            ).fetchone()
+        finally:
+            conn.close()
+        return json.loads(row[0]) if row else None
+    except Exception:
+        return None
+
+
+def _try_save_db_config(data: dict) -> bool:
+    """把配置整包写入 settings 表（key='config'）。成功返回 True。"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            _ensure_settings_table(conn)
+            conn.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now','localtime')) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now','localtime')",
+                ("config", json.dumps(data, ensure_ascii=False)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return True
+    except Exception:
+        return False
+
+
 class Config:
     """DoukHub 全局配置管理"""
 
-    def __init__(self, config_path: Path | None = None):
-        self._path = config_path or self._resolve_config_path()
+    def __init__(self, config_path: Path | str | None = None):
+        self._path = Path(config_path) if config_path else self._resolve_config_path()
         self._data: dict = {}
+        self._use_db = False   # True = 配置存储于数据库 settings 表
         self.load()
 
     @staticmethod
     def _resolve_config_path() -> Path:
-        """确定配置文件路径：优先用户目录，其次项目目录"""
+        """确定旧 json 配置文件路径（仅用于首次迁移或回退）"""
         if USER_CONFIG_FILE.exists():
             return USER_CONFIG_FILE
         # 如果项目目录有旧配置，迁移到用户目录
@@ -135,15 +182,35 @@ class Config:
         return USER_CONFIG_FILE
 
     def load(self) -> None:
-        """加载配置文件，不存在则创建默认配置"""
+        """加载配置。优先级：旧 json 显式存在 → 数据库 → 默认配置。"""
         if self._path.exists():
+            # json 还在（首次迁移，或用户回退/手动放置）→ 以 json 为准
             with open(self._path, "r", encoding="utf-8") as f:
                 self._data = json.load(f)
-            # 补充缺失的默认值
             self._merge_defaults(self._data, DEFAULT_CONFIG)
-        else:
-            self._data = DEFAULT_CONFIG.copy()
-            self.save()
+            self._use_db = _try_save_db_config(self._data)   # 入库，成功即切库模式
+            if self._use_db:
+                self._backup_json_file()                     # json 留档，此后以库为准
+            return
+
+        db_data = _try_load_db_config()
+        if db_data is not None:
+            self._data = db_data
+            self._merge_defaults(self._data, DEFAULT_CONFIG)
+            self._use_db = True
+            return
+
+        # 全新环境：默认配置直接入库
+        self._data = copy.deepcopy(DEFAULT_CONFIG)
+        self._use_db = _try_save_db_config(self._data)
+
+    def _backup_json_file(self) -> None:
+        """把旧 config.json 改名为同目录的 config.json.migrated 留档。"""
+        try:
+            if self._path.exists():
+                self._path.replace(self._path.with_suffix(".json.migrated"))
+        except OSError:
+            pass
 
     def _merge_defaults(self, data: dict, defaults: dict) -> None:
         """递归补充缺失的配置项"""
@@ -154,10 +221,16 @@ class Config:
                 self._merge_defaults(data[key], value)
 
     def save(self) -> None:
-        """保存配置到文件"""
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._path, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, indent=4, ensure_ascii=False)
+        """保存配置：库模式写 settings 表；写库失败回退 json 兜底不留死角。"""
+        if self._use_db and _try_save_db_config(self._data):
+            return
+        # 库不可用 → json 兜底（内存仍持有最新配置，页面不崩）
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._path, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, indent=4, ensure_ascii=False)
+        except OSError:
+            pass
 
     def get(self, dot_path: str, default: Any = None) -> Any:
         """通过点分路径获取配置值，如 'feishu.app_id'"""

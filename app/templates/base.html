@@ -808,7 +808,7 @@
         var _taskPanelOpen = false;
         var _taskPollTimer = null;
         var _lastTasks = [];
-        var TASK_TYPE_LABEL = {update_collection: '解析账号标识', sync_account: '生成账号表', refresh_accounts: '刷新账号资料', cloud_sync: '云端同步', cloud_sync_full: '全盘同步', collection_batch: '增量采集'};
+        var TASK_TYPE_LABEL = {update_collection: '解析账号标识', sync_account: '生成账号表', refresh_accounts: '刷新账号资料', cloud_sync: '云端同步', cloud_sync_full: '全盘同步', collection_batch: '增量采集', dedup: '文件查重'};
         var TASK_STATUS_LABEL = {pending: '排队', running: '运行', cancelling: '取消中', done: '完成', failed: '失败', cancelled: '已取消'};
 
         async function pollTasks() {

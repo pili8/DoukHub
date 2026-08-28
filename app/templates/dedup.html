@@ -2,148 +2,205 @@
 {% block title %}文件查重 - DoukHub{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>文件查重</h2>
+    <div class="page-title-wrap">
+        <h2>文件查重</h2>
+        <p class="page-sub">找出目录里的重复文件。判定分两类：①内容相同（比对文件哈希）②作品ID相同（视频不同清晰度）。</p>
+    </div>
     <div class="page-header-actions">
         <button class="btn btn-secondary" onclick="loadRecycle(); showCard('recycle-card');"><i class="ph ph-archive"></i> 回收区</button>
     </div>
 </div>
 
-<!-- 扫描设置 -->
-<div class="card dedup-card">
-    <h3><i class="ph ph-radar"></i> 扫描范围</h3>
-
-    <!-- 方案目录（按 scope 分组） -->
-    <div id="scope-groups" style="margin-top:12px;"><span style="color:var(--text-muted);font-size:13px;">加载中...</span></div>
-
-    <!-- 自定义目录 -->
-    <div class="dedup-section">
-        <div class="dedup-section-label"><i class="ph ph-folder-plus"></i> 自定义目录</div>
-        <div style="display:flex;gap:8px;">
-            <input type="text" id="custom-path" placeholder="输入绝对路径，或点右侧「浏览」选择文件夹" style="flex:1;">
-            <button class="btn btn-secondary btn-sm" onclick="browseFolder()"><i class="ph ph-folder-open"></i> 浏览</button>
-            <button class="btn btn-secondary btn-sm" onclick="addCustomPath()">追加</button>
-        </div>
-        <div id="custom-slots" style="margin-top:8px;"></div>
-    </div>
-
-    <!-- 文件类型 -->
-    <div class="dedup-section">
-        <div class="dedup-section-label"><i class="ph ph-files"></i> 文件类型 <span class="label-note">（默认全选）</span></div>
-        <div class="ext-row">
-            <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="video"><span>视频</span></label>
-            <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="image"><span>图片</span></label>
-            <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="audio"><span>音频</span></label>
-            <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="meta"><span>描述文件(.json/.txt)</span></label>
+<!-- 第 1 步：设置扫描范围 -->
+<div class="card step-card">
+    <div class="step-head">
+        <span class="step-num">1</span>
+        <div>
+            <div class="step-title">设置扫描范围</div>
+            <div class="step-desc">选目录、选文件类型、定回收区，三步都在这个卡片里完成</div>
         </div>
     </div>
+    <div class="step-body">
+        <!-- 子区：扫描目录 -->
+        <div class="step-subblock">
+            <div class="step-sub">扫描目录</div>
+            <div id="scope-groups"><span style="color:var(--text-muted);font-size:13px;">加载中...</span></div>
+            <div class="add-dir-box">
+                <input type="text" id="custom-path" class="add-dir-input" placeholder="粘贴或输入文件夹的绝对路径">
+                <button class="btn btn-primary" onclick="browseFolder()"><i class="ph ph-folder-open"></i> 选择文件夹</button>
+                <button class="btn btn-secondary" onclick="addCustomPath()"><i class="ph ph-plus"></i> 添加</button>
+            </div>
+            <div id="custom-slots" style="margin-top:8px;"></div>
+        </div>
 
-    <!-- 回收区目录 -->
-    <div class="dedup-section">
-        <div class="dedup-section-label"><i class="ph ph-archive"></i> 回收区目录 <span class="label-note">（移出的重复文件放这里，留空用默认）</span></div>
-        <div style="display:flex;gap:8px;">
-            <input type="text" id="recycle-dir-input" placeholder="默认 ~/.doukhub/dedup_recycle" style="flex:1;">
-            <button class="btn btn-secondary btn-sm" onclick="saveRecycleDir()">保存</button>
+        <!-- 子区：文件类型 -->
+        <div class="step-subblock">
+            <div class="step-sub">文件类型</div>
+            <div class="ext-row">
+                <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="video"><span>视频</span></label>
+                <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="image"><span>图片</span></label>
+                <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="audio"><span>音频</span></label>
+                <label class="ext-pill"><input type="checkbox" checked class="ext-cb" value="meta"><span>描述文件(.json/.txt)</span></label>
+            </div>
+        </div>
+
+        <!-- 子区：回收区目录 -->
+        <div class="step-subblock">
+            <div class="step-sub">回收区目录 <span class="sub-note">（重复文件先移到这里，不直接删除）</span></div>
+            <div class="inline-row">
+                <input type="text" id="recycle-dir-input" placeholder="留空使用默认 ~/.doukhub/dedup_recycle" class="grow-input">
+                <button class="btn btn-secondary" onclick="saveRecycleDir()">保存</button>
+            </div>
         </div>
     </div>
+</div>
 
-    <div class="dedup-action-row">
+<!-- 第 2 步：扫描查重 -->
+<div class="card step-card">
+    <div class="step-head">
+        <span class="step-num">2</span>
+        <div>
+            <div class="step-title">扫描查重</div>
+            <div class="step-desc">在后台比对文件内容，过程可能较长，进度实时显示，可离开页面稍后再看</div>
+        </div>
+    </div>
+    <div class="step-body">
         <button class="btn btn-primary" id="scan-btn" onclick="startScan()"><i class="ph ph-magnifying-glass"></i> 开始扫描（<span id="sel-dir-count">0</span> 个目录）</button>
-    </div>
-    <div id="scan-progress" style="margin-top:14px;display:none;">
-        <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-muted);margin-bottom:6px;"><span id="scan-msg">...</span><span id="scan-pct">0%</span></div>
-        <div class="progress-track"><div id="scan-bar" class="progress-bar"></div></div>
+        <div class="scan-terminal" id="scan-terminal" style="display:none;">
+            <div class="scan-progress-row">
+                <span id="scan-status-text">扫描中...</span>
+                <span id="scan-pct" class="scan-pct"></span>
+            </div>
+            <div class="progress-bar-container"><div class="progress-bar" id="scan-bar" style="width:0;"></div></div>
+            <div class="workflow-log" id="scan-log"></div>
+        </div>
     </div>
 </div>
 
-<!-- 扫描结果 -->
-<div class="card dedup-card" id="result-card" style="display:none;">
-    <h3><i class="ph ph-copy"></i> 重复文件组</h3>
-    <div class="result-toolbar">
-        <span style="font-size:13px;color:var(--text-muted);" id="result-summary"></span>
-        <span style="font-size:13px;">保留规则：</span>
-        <select id="keep-rule" class="keep-select">
-            <option value="manual">手动勾选</option>
-            <option value="path_short">保留路径最短</option>
-            <option value="path_long">保留路径最长</option>
-            <option value="time_early">保留创建最早</option>
-            <option value="time_late">保留创建最晚</option>
-            <option value="name_short">保留文件名最短</option>
-            <option value="name_long">保留文件名最长</option>
-        </select>
-        <button class="btn btn-secondary btn-sm" onclick="applyRule()">应用规则</button>
-        <span style="flex:1;"></span>
-        <button class="btn btn-danger" onclick="moveSelected()"><i class="ph ph-tray-arrow-down"></i> 移到回收区 (<span id="sel-count">0</span>)</button>
+<!-- 第 3 步：处理结果 -->
+<div class="card step-card" id="result-card" style="display:none;">
+    <div class="step-head">
+        <span class="step-num">3</span>
+        <div>
+            <div class="step-title">处理结果</div>
+            <div class="step-desc">结果分两组：内容相同可放心清理；作品ID相同（仅视频）可能是不同清晰度，建议各瞄一眼。图集图片靠内容哈希区分，不会因ID相同被误判。</div>
+        </div>
     </div>
-    <div id="groups" style="margin-top:10px;"></div>
+    <div class="step-body">
+        <div class="result-toolbar">
+            <span style="font-size:13px;color:var(--text-muted);" id="result-summary"></span>
+            <span style="font-size:13px;">保留规则：</span>
+            <select id="keep-rule" class="keep-select">
+                <option value="manual">手动勾选</option>
+                <option value="path_short">保留路径最短</option>
+                <option value="path_long">保留路径最长</option>
+                <option value="time_early">保留创建最早</option>
+                <option value="time_late">保留创建最晚</option>
+                <option value="name_short">保留文件名最短</option>
+                <option value="name_long">保留文件名最长</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" onclick="applyRule()">应用规则</button>
+            <span style="flex:1;"></span>
+            <button class="btn btn-danger" onclick="moveSelected()"><i class="ph ph-tray-arrow-down"></i> 移到回收区 (<span id="sel-count">0</span>)</button>
+        </div>
+        <div id="groups" style="margin-top:10px;"></div>
+    </div>
 </div>
 
-<!-- 回收区 -->
-<div class="card dedup-card" id="recycle-card" style="display:none;">
-    <h3><i class="ph ph-archive"></i> 回收区</h3>
-    <p class="recycle-tip">
-        回收区目录：<code id="recycle-dir" style="font-family:var(--font-mono);">...</code>
-        — 核对无误后，点「打开文件夹」在资源管理器中删除（系统会移入回收站，可恢复）
-    </p>
-    <div class="recycle-actions">
-        <button class="btn btn-secondary btn-sm" onclick="restoreSelected()"><i class="ph ph-arrow-counter-clockwise"></i> 还原选中</button>
-        <button class="btn btn-secondary btn-sm" onclick="openRecycle()"><i class="ph ph-folder-open"></i> 打开文件夹</button>
+<!-- 第 4 步：回收核对 -->
+<div class="card step-card" id="recycle-card" style="display:none;">
+    <div class="step-head">
+        <span class="step-num">4</span>
+        <div>
+            <div class="step-title">回收核对</div>
+            <div class="step-desc">确认无误后，打开回收区文件夹手动删除（系统会移入回收站，可恢复）</div>
+        </div>
     </div>
-    <div id="recycle-list"></div>
+    <div class="step-body">
+        <p class="recycle-tip">回收区目录：<code id="recycle-dir" style="font-family:var(--font-mono);">...</code></p>
+        <div class="recycle-actions">
+            <button class="btn btn-secondary btn-sm" onclick="restoreSelected()"><i class="ph ph-arrow-counter-clockwise"></i> 还原选中</button>
+            <button class="btn btn-secondary btn-sm" onclick="openRecycle()"><i class="ph ph-folder-open"></i> 打开文件夹</button>
+        </div>
+        <div id="recycle-list"></div>
+    </div>
 </div>
 
 <style>
 /* ===== 文件查重页样式（随 content 一起渲染） ===== */
-.dedup-card h3 { display:flex; align-items:center; gap:8px; }
-.dedup-card h3 i { color:var(--accent); }
-.dedup-section { margin-top:16px; padding-top:16px; border-top:1px solid var(--border-default); }
-.dedup-section-label { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:var(--text-primary); margin-bottom:8px; }
-.dedup-section-label i { color:var(--text-muted); font-size:15px; }
-.label-note { color:var(--text-muted); font-weight:400; font-size:12px; }
-.dedup-action-row { margin-top:18px; }
 
-/* 方案分组 */
-.scope-group { margin-bottom:14px; }
-.scope-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
-.scope-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-.scope-dot.single { background:#8b5cf6; }
-.scope-dot.batch { background:#10b981; }
-.scope-title { font-size:13.5px; font-weight:600; color:var(--text-primary); }
+/* 页面副标题 */
+.page-title-wrap { min-width:0; }
+.page-sub { font-size:13px; color:var(--text-muted); margin-top:4px; line-height:1.6; }
+
+/* 步骤卡片 */
+.step-card { padding:18px; margin-bottom:14px; }
+.step-head { display:flex; align-items:flex-start; gap:12px; }
+.step-num { width:26px; height:26px; border-radius:50%; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; flex-shrink:0; margin-top:1px; }
+.step-title { font-size:15px; font-weight:600; color:var(--text-primary); }
+.step-desc { font-size:12.5px; color:var(--text-muted); margin-top:3px; line-height:1.5; }
+.step-body { margin-top:14px; }
+
+/* 子区 */
+.step-subblock { margin-bottom:18px; }
+.step-subblock:last-child { margin-bottom:0; }
+.step-sub { font-size:13px; font-weight:600; color:var(--text-primary); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+.sub-note { color:var(--text-muted); font-weight:400; font-size:12px; }
+.inline-row { display:flex; gap:8px; }
+.grow-input { flex:1; }
+
+/* 方案分组（朴素） */
+.scope-group { margin-bottom:12px; }
+.scope-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.scope-title { font-size:13px; font-weight:600; color:var(--text-primary); }
 .scope-count { font-size:12px; color:var(--text-muted); }
 .scope-checkall { margin-left:auto; font-size:12px; color:var(--accent); background:none; border:none; cursor:pointer; padding:2px 8px; border-radius:6px; }
 .scope-checkall:hover { background:var(--accent-light); }
 
-/* 方案卡片 */
-.scan-slot { display:flex; align-items:center; gap:10px; padding:11px 14px; border:1px solid var(--border-default); border-radius:12px; background:var(--surface-raised); margin-bottom:8px; cursor:pointer; transition:border-color .15s, box-shadow .15s, background .15s; }
-.scan-slot:hover { border-color:var(--accent); box-shadow:0 2px 10px rgba(0,0,0,.07); }
-.scan-slot.checked { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 6%, var(--surface-raised)); }
-.scan-slot[data-role="primary"] { border-left:3px solid #8b5cf6; }
-.scan-slot[data-role="secondary"] { border-left:3px solid #f59e0b; }
+/* 方案卡片（单一边框，无彩色边条） */
+.scan-slot { display:flex; align-items:center; gap:10px; padding:11px 14px; border:1px solid var(--border-default); border-radius:10px; background:var(--surface-raised); margin-bottom:8px; cursor:pointer; transition:border-color .15s, background .15s; }
+.scan-slot:hover { border-color:var(--accent); }
+.scan-slot.checked { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 5%, var(--surface-raised)); }
 .scan-slot input[type=checkbox] { flex-shrink:0; width:16px; height:16px; accent-color:var(--accent); cursor:pointer; }
 .scan-slot-main { flex:1; min-width:0; }
 .scan-slot-name { font-size:13.5px; font-weight:600; color:var(--text-primary); display:flex; align-items:center; gap:6px; }
 .scan-slot-path { font-size:12px; color:var(--text-muted); word-break:break-all; margin-top:2px; font-family:var(--font-mono); }
+
+/* 主/次标签：蓝色 / 中性灰 */
 .scan-badge { font-size:10.5px; padding:1px 8px; border-radius:99px; border:1px solid; line-height:1.6; flex-shrink:0; font-weight:600; }
-.scan-badge.primary { color:#8b5cf6; border-color:#8b5cf6; background:color-mix(in srgb, #8b5cf6 10%, transparent); }
-.scan-badge.secondary { color:#f59e0b; border-color:#f59e0b; background:color-mix(in srgb, #f59e0b 10%, transparent); }
+.scan-badge.primary { color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent); }
+.scan-badge.secondary { color:var(--text-muted); border-color:var(--border-default); background:var(--bg-muted); }
 .scan-remove { background:none; border:none; color:var(--text-muted); cursor:pointer; padding:2px 6px; font-size:16px; line-height:1; flex-shrink:0; border-radius:6px; }
 .scan-remove:hover { color:var(--danger); background:var(--bg-muted); }
+
+/* 大号自定义目录区 */
+.add-dir-box { display:flex; gap:8px; align-items:stretch; border:2px dashed var(--border-default); border-radius:12px; padding:10px; background:var(--bg-muted); margin-top:4px; }
+.add-dir-input { flex:1; height:42px; min-width:0; font-size:14px; padding:0 14px; border:1px solid var(--border-default); border-radius:8px; background:var(--surface-raised); color:var(--text-primary); }
+.add-dir-input:focus { border-color:var(--accent); outline:none; }
+.add-dir-box .btn { height:42px; padding:0 18px; font-size:14px; flex-shrink:0; }
 
 /* 文件类型胶囊 */
 .ext-row { display:flex; flex-wrap:wrap; }
 .ext-pill { display:inline-flex; align-items:center; gap:6px; padding:6px 13px; border:1px solid var(--border-default); border-radius:999px; font-size:13px; color:var(--text-secondary); cursor:pointer; margin-right:8px; margin-bottom:8px; transition:border-color .15s, background .15s; user-select:none; }
 .ext-pill:hover { border-color:var(--accent); }
+.ext-pill:has(input:checked) { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 6%, transparent); color:var(--text-primary); }
 .ext-pill input[type=checkbox] { width:15px; height:15px; accent-color:var(--accent); cursor:pointer; }
 
-/* 进度条 */
-.progress-track { height:6px; background:var(--bg-muted); border-radius:3px; overflow:hidden; }
-.progress-bar { height:100%; width:0; background:var(--accent); border-radius:3px; transition:width .3s; }
+/* 扫描终端进度 */
+.scan-terminal { margin-top:14px; }
+.scan-progress-row { display:flex; justify-content:space-between; align-items:center; font-size:13px; margin-bottom:2px; }
+.scan-status-text { color:var(--text-primary); }
+.scan-pct { color:var(--text-muted); font-weight:600; }
+.scan-terminal .workflow-log { max-height:260px; margin-top:8px; }
 
 /* 结果工具栏 */
-.result-toolbar { display:flex; align-items:center; gap:10px; margin:8px 0 4px; flex-wrap:wrap; }
+.result-toolbar { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
 .keep-select { font-size:13px; padding:5px 8px; border-radius:var(--radius-sm); border:1px solid var(--border-default); background:var(--surface-raised); color:var(--text-primary); }
 
 /* 重复组卡片 */
-.dp-group { border:1px solid var(--border-default); border-radius:12px; margin-bottom:10px; overflow:hidden; background:var(--surface-raised); }
+.gp-section-title { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:var(--text-primary); margin:14px 0 8px; }
+.gp-section-title i { color:var(--accent); }
+.dp-group { border:1px solid var(--border-default); border-radius:10px; margin-bottom:10px; overflow:hidden; background:var(--surface-raised); }
 .dp-group .gp-head { display:flex; align-items:center; gap:8px; padding:11px 14px; background:var(--bg-muted); cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); }
 .dp-group .gp-head .gp-arrow { color:var(--text-muted); font-size:14px; transition:transform .15s; }
 .dp-group .gp-files { padding:6px 14px 10px; }
@@ -161,15 +218,16 @@
 
 {% block scripts %}
 <script>
-    const EXT_MAP = {
+    var EXT_MAP = {
         video: ['.mp4','.mov','.m4v','.mkv','.webm','.avi','.flv','.ts'],
         image: ['.jpg','.jpeg','.png','.webp','.heic','.bmp','.gif'],
         audio: ['.mp3','.m4a','.wav','.aac'],
         meta: ['.json','.txt'],
     };
-    let dirItems = [];        // 所有目录项 {path, name, role, scope, custom, checked}
-    let resultData = null;
-    let pollTimer = null;
+    var dirItems = [];        // 所有目录项 {path, name, role, scope, custom, checked}
+    var resultData = null;
+    var scanTimer = null;
+    var scanLogRendered = 0;
 
     function fmtSize(b) {
         if (!b) return '0 B';
@@ -194,14 +252,13 @@
     }
     function renderScopeGroups() {
         const wrap = document.getElementById('scope-groups');
-        const scopes = [['single', '单作品方案', 'single'], ['batch', '批量方案', 'batch']];
-        const html = scopes.map(([scope, title, cls]) => {
+        const scopes = [['single', '单作品方案'], ['batch', '批量方案']];
+        const html = scopes.map(([scope, title]) => {
             const items = dirItems.filter(d => d.scope === scope);
             if (items.length === 0) return '';
             const checked = items.filter(i => i.checked).length;
             return `<div class="scope-group">
                 <div class="scope-head">
-                    <span class="scope-dot ${cls}"></span>
                     <span class="scope-title">${title}</span>
                     <span class="scope-count">${checked}/${items.length} 个目录</span>
                     <button class="scope-checkall" onclick="toggleScope('${scope}')">${checked === items.length ? '全不选' : '全选'}</button>
@@ -209,13 +266,13 @@
                 ${items.map((d, i) => slotHtml(d, scope + '-' + i)).join('')}
             </div>`;
         }).join('');
-        wrap.innerHTML = html || '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">存储方案里还没有目录，请在下方自定义添加。</div>';
+        wrap.innerHTML = html || '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">存储方案里还没有目录，可在下方大输入框里添加。</div>';
         renderCustomSlots();
         updateDirCount();
     }
     function slotHtml(d, key) {
         const badge = d.role === 'primary' ? '<span class="scan-badge primary">主</span>' : (d.role === 'secondary' ? '<span class="scan-badge secondary">次</span>' : '');
-        return `<label class="scan-slot ${d.checked ? 'checked' : ''}" data-role="${d.role}">
+        return `<label class="scan-slot ${d.checked ? 'checked' : ''}">
             <input type="checkbox" ${d.checked ? 'checked' : ''} onchange="toggleDir('${key}')">
             <span class="scan-slot-main">
                 <span class="scan-slot-name">${esc(d.name)} ${badge}</span>
@@ -228,10 +285,10 @@
         const items = dirItems.filter(d => d.custom);
         wrap.innerHTML = items.map((d, i) => {
             const key = 'custom-' + i;
-            return `<div class="scan-slot ${d.checked ? 'checked' : ''}" style="border-left:3px solid var(--text-muted);">
+            return `<div class="scan-slot ${d.checked ? 'checked' : ''}">
                 <input type="checkbox" ${d.checked ? 'checked' : ''} onchange="toggleDir('${key}')">
                 <span class="scan-slot-main">
-                    <span class="scan-slot-name">自定义</span>
+                    <span class="scan-slot-name"><span class="scan-badge secondary">自定义</span></span>
                     <span class="scan-slot-path">${esc(d.path)}</span>
                 </span>
                 <button class="scan-remove" title="移除" onclick="removeCustom(${i})"><i class="ph ph-x"></i></button>
@@ -260,7 +317,7 @@
     function addCustomPath() {
         const inp = document.getElementById('custom-path');
         const v = inp.value.trim();
-        if (!v) return;
+        if (!v) { showToast('请先输入文件夹路径', 'error'); return; }
         if (!dirItems.some(d => d.path === v)) {
             dirItems.push({ path: v, name: '自定义', role: '', scope: 'custom', custom: true, checked: true });
         }
@@ -305,71 +362,138 @@
         else showToast('保存失败', 'error');
     }
 
-    // ---------- 扫描 ----------
+    // ---------- 扫描（接入后台任务 + 终端进度） ----------
     async function startScan() {
         const roots = dirItems.filter(d => d.checked).map(d => d.path);
-        if (roots.length === 0) { showToast('请先勾选要扫描的目录', 'error'); return; }
+        if (roots.length === 0) { showToast('请先勾选或添加要扫描的目录', 'error'); return; }
         const exts = getExts();
         if (exts.length === 0) { showToast('请至少选择一种文件类型', 'error'); return; }
         const data = await apiCall('/api/dedup/scan', 'POST', { roots, exts });
         if (!data.success) { showToast(data.error || '启动失败', 'error'); return; }
+        showScanTerminal();
         document.getElementById('scan-btn').disabled = true;
-        document.getElementById('scan-progress').style.display = '';
-        pollTimer = setInterval(pollStatus, 1500);
+        scanLogRendered = 0;
+        document.getElementById('scan-log').innerHTML = '';
+        scanTimer = setInterval(() => pollScanTask(data.task_id), 1500);
+        pollScanTask(data.task_id);
     }
-    async function pollStatus() {
-        const s = await apiCall('/api/dedup/status', 'GET');
-        const msg = document.getElementById('scan-msg');
-        const pct = document.getElementById('scan-pct');
-        const bar = document.getElementById('scan-bar');
-        if (s.stage === 'collecting') { msg.textContent = s.message; pct.textContent = ''; bar.style.width = '4%'; }
-        else if (s.stage === 'hashing') {
-            const p = s.total_files > 0 ? Math.round(s.scanned / s.total_files * 100) : 0;
-            msg.textContent = s.message; pct.textContent = p + '%'; bar.style.width = p + '%';
+    function showScanTerminal() {
+        document.getElementById('scan-terminal').style.display = '';
+    }
+    function renderScanLog(logs) {
+        const el = document.getElementById('scan-log');
+        if (!el) return;
+        for (let i = scanLogRendered; i < logs.length; i++) {
+            const l = logs[i];
+            const cls = l.level === 'ok' ? 'log-ok' : (l.level === 'error' ? 'log-err' : (l.level === 'warn' ? 'log-warn' : 'log-info'));
+            const div = document.createElement('div');
+            div.className = cls;
+            div.textContent = l.message;
+            el.appendChild(div);
         }
-        if (!s.running) {
-            clearInterval(pollTimer);
+        scanLogRendered = logs.length;
+        el.scrollTop = el.scrollHeight;
+    }
+    async function pollScanTask(taskId) {
+        let t;
+        try {
+            t = await apiCall('/api/tasks/' + taskId, 'GET');
+        } catch (e) { return; }
+        const total = t.total || 0;
+        const done = t.success || 0;
+        const pct = total > 0 ? Math.round(done / total * 100) : 0;
+
+        if (t.status === 'running') {
+            const statusText = total > 0 ? `查重中 ${done}/${total}` : '正在扫描目录、收集文件...';
+            document.getElementById('scan-status-text').textContent = statusText;
+            document.getElementById('scan-pct').textContent = total > 0 ? pct + '%' : '';
+            document.getElementById('scan-bar').style.width = (total > 0 ? pct : 4) + '%';
+        }
+        renderScanLog(t.log || []);
+
+        if (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled') {
+            clearInterval(scanTimer);
             document.getElementById('scan-btn').disabled = false;
-            document.getElementById('scan-progress').style.display = 'none';
-            if (s.stage === 'error') { showToast(s.message, 'error'); return; }
-            showToast('扫描完成，发现 ' + s.groups + ' 组重复文件');
-            await loadResult();
+            if (t.status === 'done') {
+                document.getElementById('scan-status-text').textContent = total > 0 ? `已完成，共 ${total} 个文件` : '已完成';
+                document.getElementById('scan-pct').textContent = '100%';
+                document.getElementById('scan-bar').style.width = '100%';
+                showToast('扫描完成', 'success');
+                await loadResult();
+            } else if (t.status === 'failed') {
+                document.getElementById('scan-status-text').textContent = '扫描失败';
+                document.getElementById('scan-pct').textContent = '';
+                showToast(t.error || '扫描失败', 'error');
+            } else {
+                document.getElementById('scan-status-text').textContent = '已取消';
+                document.getElementById('scan-pct').textContent = '';
+            }
+        }
+    }
+    async function restoreRunningScan() {
+        // 页面进入/刷新时，若后台还有查重任务在跑，恢复进度展示
+        const data = await apiCall('/api/tasks', 'GET');
+        const running = (data.tasks || []).find(t => t.type === 'dedup' && (t.status === 'running' || t.status === 'pending'));
+        if (running) {
+            showScanTerminal();
+            document.getElementById('scan-btn').disabled = true;
+            scanLogRendered = 0;
+            document.getElementById('scan-log').innerHTML = '';
+            scanTimer = setInterval(() => pollScanTask(running.task_id), 1500);
+            pollScanTask(running.task_id);
         }
     }
 
     // ---------- 结果 ----------
     async function loadResult() {
         const data = await apiCall('/api/dedup/result', 'GET');
+        if (!data || !data.result) return;   // 从未扫描过，不展示结果卡片
         resultData = data.result;
+        const contentCount = (resultData.groups || []).length;
+        const idCount = (resultData.id_groups || []).length;
         const summary = document.getElementById('result-summary');
-        if (!resultData || !resultData.groups || resultData.groups.length === 0) {
+        if (contentCount === 0 && idCount === 0) {
             document.getElementById('groups').innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">未发现重复文件</div>';
             summary.textContent = '';
         } else {
             renderGroups();
-            summary.textContent = `共 ${resultData.groups.length} 组重复，涉及 ${resultData.groups.reduce((a,g)=>a+g.files.length,0)} 个文件`;
+            summary.textContent = `内容相同 ${contentCount} 组、作品ID相同 ${idCount} 组`;
         }
         showCard('result-card');
     }
     function renderGroups() {
         const el = document.getElementById('groups');
-        el.innerHTML = resultData.groups.map((g, gi) => `
-            <div class="dp-group">
+        const contentGroups = (resultData.groups || []);
+        const idGroups = (resultData.id_groups || []);
+        const all = contentGroups.map(g => ({ kind: 'content', ...g }))
+            .concat(idGroups.map(g => ({ kind: 'id', ...g })));
+        window._allGroups = all;
+        el.innerHTML = all.map((g, gi) => {
+            let sectionTitle = '';
+            if (gi === 0 && g.kind === 'content') {
+                sectionTitle = `<div class="gp-section-title"><i class="ph ph-files"></i> 内容相同（${contentGroups.length} 组）· 放心清理</div>`;
+            } else if (gi === contentGroups.length && g.kind === 'id') {
+                sectionTitle = `<div class="gp-section-title"><i class="ph ph-video"></i> 作品ID相同（${idGroups.length} 组，仅视频）· 可能是不同清晰度</div>`;
+            }
+            const headText = g.kind === 'id'
+                ? `作品 ${g.work_id}：${g.files.length} 个文件`
+                : `组 ${gi + 1}：${g.files.length} 个相同文件（每个 ${fmtSize(g.size)}）`;
+            return sectionTitle + `<div class="dp-group">
                 <div class="gp-head" onclick="toggleGroup(${gi})">
                     <i class="ph ph-caret-right gp-arrow" id="gp-arrow-${gi}"></i>
-                    <span>组 ${gi+1}：${g.files.length} 个相同文件（每个 ${fmtSize(g.size)}）</span>
+                    <span>${headText}</span>
                 </div>
                 <div class="gp-files" id="gp-files-${gi}" style="display:none;">
                     ${g.files.map((f, fi) => `
                         <div class="dp-file" id="df-${gi}-${fi}">
                             <input type="checkbox" id="cb-${gi}-${fi}" onchange="updSel()">
                             <span class="fp-path" title="${esc(f.path)}">${esc(f.path)}</span>
-                            <span class="fp-meta">${fmtSize(f.size)}${f.work_id ? ' · id:'+f.work_id : ''}</span>
+                            <span class="fp-meta">${fmtSize(f.size)}</span>
                         </div>
                     `).join('')}
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
         updateSelCount();
     }
     function toggleGroup(gi) {
@@ -385,7 +509,7 @@
     function applyRule() {
         const rule = document.getElementById('keep-rule').value;
         if (rule === 'manual') return;
-        resultData.groups.forEach((g, gi) => {
+        (window._allGroups || []).forEach((g, gi) => {
             const idx = g.files.map((_, i) => i);
             const sorted = [...idx].sort((a, b) => {
                 const fa = g.files[a], fb = g.files[b];
@@ -404,7 +528,7 @@
     }
     function selectedFiles() {
         const out = [];
-        resultData.groups.forEach((g, gi) => {
+        (window._allGroups || []).forEach((g, gi) => {
             g.files.forEach((f, fi) => {
                 if (document.getElementById('cb-' + gi + '-' + fi)?.checked) out.push(f.path);
             });
@@ -472,5 +596,7 @@
 
     loadScope();
     loadSettings();
+    restoreRunningScan();
+    loadResult();
 </script>
 {% endblock %}

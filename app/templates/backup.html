@@ -18,6 +18,28 @@
         <button class="btn btn-secondary btn-sm" onclick="vacuumDb()"><i class="ph ph-broom"></i> 压缩数据库</button>
         <span style="font-size:12px;color:var(--text-muted);margin-left:8px;">回收删除数据后遗留的空闲空间，压缩前会自动备份</span>
     </div>
+    <div style="margin-top:16px;border-top:1px solid var(--border-default);padding-top:14px;">
+        <button class="btn btn-secondary" onclick="openCleanModal()"><i class="ph ph-broom"></i> 清理日志 / 缓存</button>
+        <span style="font-size:12px;color:var(--text-muted);margin-left:8px;">清理批次日志、应用日志、查重缓存等过程性文件，不影响账号、数据与作品</span>
+    </div>
+</div>
+
+<!-- ===== 清理日志 / 缓存弹窗 ===== -->
+<div class="dh-modal-overlay" id="clean-modal">
+    <div class="dh-modal-box" style="max-width:560px;">
+        <div class="dh-modal-header">
+            <h3><i class="ph ph-broom"></i> <span>清理日志 / 缓存</span></h3>
+            <button class="dh-modal-close" onclick="closeCleanModal()"><i class="ph ph-x"></i></button>
+        </div>
+        <div style="padding:16px 20px 20px;">
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;line-height:1.6;">勾选要清理的项目（均为过程性文件，不影响业务数据）。</div>
+            <div id="clean-modal-items" style="font-size:13px;">加载中...</div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;border-top:1px solid var(--border-default);padding-top:14px;">
+                <button class="btn btn-secondary" onclick="closeCleanModal()">取消</button>
+                <button class="btn btn-danger" onclick="doClean()"><i class="ph ph-trash"></i> 清理选中</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="card">
@@ -139,6 +161,46 @@
             showToast('删除失败：' + (data.error || '未知错误'), 'error');
         }
         loadData();
+    }
+
+    async function openCleanModal() {
+        document.getElementById('clean-modal').classList.add('dh-show');
+        const el = document.getElementById('clean-modal-items');
+        el.innerHTML = '<div style="color:var(--text-muted);">加载中...</div>';
+        try {
+            const data = await apiCall('/api/maintenance/items', 'GET');
+            const items = data.items || [];
+            if (!items.length) { el.innerHTML = '<div style="color:var(--text-muted);">没有可清理项</div>'; return; }
+            el.innerHTML = items.map(it => `
+                <label style="display:flex;align-items:flex-start;gap:10px;padding:9px 4px;border-bottom:1px dashed var(--border-default);cursor:pointer;">
+                    <input type="checkbox" class="clean-cb" data-id="${it.id}" checked style="margin-top:3px;width:15px;height:15px;accent-color:var(--accent);">
+                    <span style="flex:1;min-width:0;">
+                        <span style="display:block;font-size:13px;color:var(--text-primary);">${it.name}
+                            <span style="font-size:12px;color:var(--text-muted);margin-left:6px;">${it.count} 个 · ${formatSize(it.size_bytes)}</span>
+                        </span>
+                        <span style="display:block;font-size:12px;color:var(--text-muted);margin-top:2px;">${it.desc}</span>
+                    </span>
+                </label>`).join('');
+        } catch (e) {
+            el.textContent = '加载失败';
+        }
+    }
+    function closeCleanModal() {
+        document.getElementById('clean-modal').classList.remove('dh-show');
+    }
+    async function doClean() {
+        const ids = [];
+        document.querySelectorAll('#clean-modal-items .clean-cb:checked').forEach(cb => ids.push(cb.dataset.id));
+        if (!ids.length) { showToast('请先勾选要清理的项目', 'error'); return; }
+        const ok = await confirmDialog(`将清理勾选的 ${ids.length} 项，清理后不可恢复。确定吗？`, { title: '清理确认', confirmText: '清理' });
+        if (!ok) return;
+        const data = await apiCall('/api/maintenance/clean', 'POST', { items: ids });
+        if (data.success) {
+            showToast('已清理，释放 ' + formatSize(data.total_freed || 0));
+            closeCleanModal();
+        } else {
+            showToast('清理失败', 'error');
+        }
     }
 
     async function vacuumDb() {

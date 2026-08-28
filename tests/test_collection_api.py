@@ -78,6 +78,24 @@ def test_batch_detail_contains_items_and_log(batch_client):
     assert data["batch"]["id"] == "b1"
     assert data["items"][0]["sec_user_id"] == "sec1"
     assert data["log"] == ["raw log"]
+    # 批次无 log_path → log_exists 应为 False
+    assert data["log_exists"] is False
+
+
+def test_batch_detail_log_exists_true_when_file_present(batch_client, tmp_path):
+    client, database, _ = batch_client
+    log_file = tmp_path / "batch.log"
+    log_file.write_text("line\n", encoding="utf-8")
+
+    database.get_collection_batch.return_value = {
+        "id": "b1",
+        "platform": "douyin",
+        "status": "pending",
+        "log_path": str(log_file),
+    }
+    response = client.get("/api/collection/batches/b1")
+    assert response.status_code == 200
+    assert response.json()["log_exists"] is True
 
 
 def test_cancel_batch(batch_client):

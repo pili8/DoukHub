@@ -2,7 +2,6 @@
 {% block title %}增量采集 - DoukHub{% endblock %}
 {% block content %}
 <style>
-#task-modal > div { max-width: 90vw; width: 420px; max-height: 90vh; overflow-y: auto; }
 /* 批次历史:移动端卡片样式(仅 ≤768px 渲染时输出) */
 @media (max-width: 768px) {
   .batch-card {
@@ -37,23 +36,6 @@
   .stat-cards .stat-card .stat-label { font-size: 10px; color: var(--dh-text-muted, var(--text-muted)); }
   /* 筛选栏:触控目标加大 */
   .batch-filter-bar select { min-height: 36px; padding: 6px 10px; font-size: 13px; }
-  /* 定时任务表:窄屏卡片化 */
-  .sched-card { background: var(--dh-surface, var(--bg-muted)); border: 1px solid var(--dh-border, var(--border-default)); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; }
-  .sched-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .sched-card-name { font-weight: 600; font-size: 13px; }
-  .sched-card-body { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 12px; color: var(--dh-text-secondary, var(--text-secondary)); margin-bottom: 8px; }
-  .sched-card-cell { display: flex; justify-content: space-between; min-width: 0; }
-  .sched-card-label { color: var(--dh-text-muted, var(--text-muted)); flex-shrink: 0; margin-right: 6px; }
-  .sched-card-ops { display: flex; gap: 8px; }
-  .sched-card-ops .btn { flex: 1; justify-content: center; }
-  /* 定时任务表格 → 卡片化(data-label 方案,纯 CSS 无需 JS) */
-  .sched-table table thead { display: none; }
-  .sched-table table, .sched-table table tbody, .sched-table table tr, .sched-table table td { display: block; width: 100%; }
-  .sched-table table tr { background: var(--dh-surface, var(--bg-muted)); border: 1px solid var(--dh-border, var(--border-default)); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; }
-  .sched-table table td { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; font-size: 12px; border: none; }
-  .sched-table table td::before { content: attr(data-label); color: var(--dh-text-muted, var(--text-muted)); font-weight: 500; flex-shrink: 0; }
-  .sched-table table td:last-child { justify-content: flex-end; gap: 6px; padding-top: 6px; border-top: 1px solid var(--dh-border, var(--border-default)); margin-top: 4px; }
-  .sched-table table td:last-child::before { display: none; }
   /* 保存方案底部操作栏:窄屏紧凑 */
   .preset-form-footer { flex-wrap: wrap; gap: 6px; }
   .preset-form-footer .btn { flex: 1 1 auto; min-width: 80px; justify-content: center; }
@@ -63,6 +45,14 @@
   .preview-stat-label { font-size: 9px; }
   .stat-cards .stat-card .stat-value { font-size: 16px; }
 }
+/* 批次详情弹窗 */
+.batch-detail-summary { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; font-size:13px; color:var(--dh-text-secondary, var(--text-secondary)); padding:12px 0 14px; border-bottom:1px solid var(--dh-border, var(--border-default)); margin-bottom:12px; }
+.batch-detail-summary span { white-space:nowrap; }
+.batch-detail-table td { font-size:12.5px; }
+.batch-detail-sec { margin-top:14px; }
+.batch-detail-sec-title { display:flex; align-items:baseline; gap:8px; font-size:12.5px; font-weight:600; color:var(--dh-text, var(--text-strong)); padding-bottom:8px; border-bottom:1px solid var(--dh-border, var(--border-default)); }
+.batch-detail-sec-note { font-size:11px; font-weight:400; color:var(--dh-text-muted, var(--text-muted)); }
+.run-works-count { display:block; font-size:11px; font-weight:600; color:var(--dh-accent, var(--accent)); margin:6px 0 2px; }
 </style>
 
 <div class="page-head">
@@ -246,61 +236,6 @@
     </div>
 </div>
 
-<!-- ===== 定时任务 ===== -->
-<div class="workflow-panel">
-    <div class="workflow-header">
-        <div class="workflow-title">
-            <i data-lucide="calendar-clock"></i>
-            <span>定时任务</span>
-            <span class="workflow-count">（可选）</span>
-        </div>
-        <div class="workflow-actions">
-            <button class="btn btn-secondary btn-sm" onclick="showAddTask()">
-                <i data-lucide="plus"></i> 新建定时任务
-            </button>
-        </div>
-    </div>
-    <div id="task-list">
-        {% if tasks %}
-        <div class="table-scroll sched-table"><table>
-            <thead>
-                <tr>
-                    <th>任务名</th>
-                    <th>Cron</th>
-                    <th>等级</th>
-                    <th>状态</th>
-                    <th>下次执行</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for task in tasks %}
-                <tr>
-                    <td data-label="任务名">{{ task.name }}</td>
-                    <td data-label="Cron"><code>{{ task.cron_expression }}</code></td>
-                    <td data-label="等级">{{ task.rating_filter }}</td>
-                    <td data-label="状态">
-                        {% if task.enabled %}
-                        <span class="workflow-status running">启用</span>
-                        {% else %}
-                        <span class="workflow-status pending">禁用</span>
-                        {% endif %}
-                    </td>
-                    <td data-label="下次执行">{{ task.next_run or '-' }}</td>
-                    <td data-label="操作">
-                        <button class="btn btn-sm btn-secondary" onclick="toggleTask({{ task.id }})">{{ '禁用' if task.enabled else '启用' }}</button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteTask({{ task.id }})"><i data-lucide="trash-2"></i></button>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table></div>
-        {% else %}
-        <div class="empty-state"><i data-lucide="calendar-x"></i>暂无定时任务</div>
-        {% endif %}
-    </div>
-</div>
-
 <!-- ===== 采集筛选方案弹窗（左右分栏） ===== -->
 <div class="dh-modal-overlay" id="preset-manager-modal">
     <div class="dh-modal-box dh-modal-box-preset">
@@ -427,29 +362,14 @@
     </div>
 </div>
 
-<!-- ===== 定时任务弹窗 ===== -->
-<div id="task-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
-    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg-surface);padding:24px;border-radius:var(--radius-lg);width:420px;border:1px solid var(--border-default);box-shadow:var(--shadow-lg);">
-        <h3 style="margin-bottom:16px;"><i data-lucide="circle-plus"></i> 新建定时任务</h3>
-        <form onsubmit="addTask(event)">
-            <div class="form-group">
-                <label>任务名称</label>
-                <input type="text" name="name" required placeholder="如: 每日采集4星以上账号">
-            </div>
-            <div class="form-group">
-                <label>Cron 表达式</label>
-                <input type="text" name="cron_expression" required placeholder="0 2 * * *">
-                <small>格式: 分 时 日 月 周 | 示例: 0 2 * * * = 每天凌晨2点</small>
-            </div>
-            <div class="form-group">
-                <label>等级筛选（逗号分隔）</label>
-                <input type="text" name="rating_filter" value="3,4" placeholder="3,4">
-            </div>
-            <div class="btn-group" style="justify-content:flex-end;">
-                <button type="button" class="btn btn-secondary" onclick="hideAddTask()">取消</button>
-                <button type="submit" class="btn btn-primary">创建</button>
-            </div>
-        </form>
+<!-- ===== 批次详情弹窗（历史批次流水） ===== -->
+<div class="dh-modal-overlay" id="batch-detail-modal">
+    <div class="dh-modal-box" style="max-width:660px;">
+        <div class="dh-modal-header">
+            <h3><i data-lucide="table"></i> <span>批次详情</span></h3>
+            <button class="dh-modal-close" onclick="closeBatchDetail()"><i data-lucide="x"></i></button>
+        </div>
+        <div id="batch-detail-body"></div>
     </div>
 </div>
 
@@ -883,7 +803,7 @@ function renderBatchHistory() {
 
 // ===== 批次详情弹窗（用 confirmDialog 的变体，简单用 toast + 运行面板） =====
 async function showBatchDetail(batchId) {
-    // 如果是运行中批次，显示在运行面板
+    // 运行中批次：显示在运行面板
     var batch = allBatches.find(b => b.id === batchId);
     if (batch && ['pending', 'running', 'cancelling'].includes(batch.status)) {
         activeBatchId = batchId;
@@ -892,18 +812,88 @@ async function showBatchDetail(batchId) {
         document.getElementById('running-panel').scrollIntoView({ behavior: 'smooth' });
         return;
     }
-    // 非运行中：简单显示摘要
-    if (!batch) return;
+    // 历史批次：展示流水详情弹窗
+    await showHistoryBatchDetail(batchId);
+}
+
+// ===== 批次详情弹窗（历史批次流水） =====
+async function showHistoryBatchDetail(batchId) {
+    var data = await apiCall('/api/collection/batches/' + batchId, 'GET');
+    var batch = data.batch || {};
+    var items = data.items || [];
+    var works = data.works || {};
+    var logExists = !!data.log_exists;
     var elapsed = batchElapsedSeconds(batch);
-    showToast(
-        batch.platform + ' · ' + formatBatchStatus(batch.status) +
-        ' · 总 ' + (batch.total_accounts || 0) +
-        ' · 成功 ' + (batch.success_accounts || 0) +
-        ' · 失败 ' + (batch.failed_accounts || 0) +
-        ' · 跳过 ' + (batch.skipped_accounts || 0) +
-        ' · 时长 ' + formatDuration(elapsed),
-        'info'
-    );
+
+    var summaryHtml = '<div class="batch-detail-summary">'
+        + '<span><b>' + formatPlatform(batch.platform) + '</b></span>'
+        + '<span class="workflow-status ' + (batch.status === 'completed' || batch.status === 'success' ? 'success' : (batch.status === 'failed' ? 'failed' : 'warning')) + '">' + formatBatchStatus(batch.status) + '</span>'
+        + (batch.preset_name ? '<span>方案：' + escapeHtml(batch.preset_name) + '</span>' : '')
+        + '<span>总 ' + (batch.total_accounts || items.length) + '</span>'
+        + '<span>成功 ' + (batch.success_accounts || 0) + '</span>'
+        + '<span>失败 ' + (batch.failed_accounts || 0) + '</span>'
+        + '<span>跳过 ' + (batch.skipped_accounts || 0) + '</span>'
+        + '<span>时长 ' + formatDuration(elapsed) + '</span>'
+        + (batch.created_at ? '<span>' + escapeHtml(String(batch.created_at)) + '</span>' : '')
+        + '</div>';
+
+    // —— 区块1：账号明细（来自数据库，持久可靠）——
+    var rowsHtml = '<div class="batch-detail-sec"><div class="batch-detail-sec-title">账号明细</div>';
+    if (!items.length) {
+        rowsHtml += '<div class="empty-state" style="padding:14px 0;">暂无明细</div>';
+    } else {
+        rowsHtml += '<div class="table-scroll"><table class="batch-detail-table"><thead><tr>'
+            + '<th>账号</th><th>状态</th><th>结果 / 原因</th></tr></thead><tbody>';
+        items.forEach(function(item) {
+            var st = (item.status === 'success' || item.status === 'completed') ? 'success'
+                   : (item.status === 'failed' || item.status === 'error') ? 'failed' : 'warning';
+            var statusHtml = '<span class="workflow-status ' + st + '">' + formatBatchStatus(item.status) + '</span>';
+            var msgHtml = (item.status === 'failed' || item.status === 'error')
+                ? '<span style="color:var(--dh-danger);font-size:12px;">' + escapeHtml(item.message || '') + '</span>'
+                : '<span class="text-muted" style="font-size:12px;">' + escapeHtml(item.message || '') + '</span>';
+            rowsHtml += '<tr>'
+                + '<td data-label="账号">' + escapeHtml(item.account_name || item.sec_user_id || '-') + '</td>'
+                + '<td data-label="状态">' + statusHtml + '</td>'
+                + '<td data-label="结果/原因">' + msgHtml + '</td>'
+                + '</tr>';
+        });
+        rowsHtml += '</tbody></table></div>';
+    }
+    rowsHtml += '</div>';
+
+    // —— 区块2：作品明细（来自批次日志，可能被清理）——
+    var logHtml = '<div class="batch-detail-sec"><div class="batch-detail-sec-title">作品明细 <span class="batch-detail-sec-note">来自批次日志，日志清理后不再显示</span></div>';
+    if (!logExists) {
+        logHtml += '<div class="empty-state" style="padding:14px 0;font-size:12px;">批次日志已被清理，仅保留账号明细</div>';
+    } else {
+        var groupsHtml = '';
+        var anyWorks = false;
+        Object.keys(works).forEach(function(accName) {
+            var w = works[accName];
+            if (!w || !w.total) return;
+            anyWorks = true;
+            groupsHtml += '<div class="run-works-group" style="min-width:230px;"><span class="run-works-kind">' + escapeHtml(accName) + '</span>';
+            [['video', '视频'], ['image', '图集'], ['live', '实况']].forEach(function(kv) {
+                var list = w[kv[0]] || [];
+                if (list.length) {
+                    groupsHtml += '<span class="run-works-count">' + kv[1] + ' ' + list.length + '</span><ul class="run-works-list">' +
+                        list.map(function(t) { return '<li>' + escapeHtml(t) + '</li>'; }).join('') +
+                        '</ul>';
+                }
+            });
+            groupsHtml += '</div>';
+        });
+        logHtml += anyWorks
+            ? '<div class="run-works-box">' + groupsHtml + '</div>'
+            : '<div class="empty-state" style="padding:14px 0;font-size:12px;">日志存在，但未解析到作品记录</div>';
+    }
+    logHtml += '</div>';
+
+    document.getElementById('batch-detail-body').innerHTML = summaryHtml + rowsHtml + logHtml;
+    document.getElementById('batch-detail-modal').classList.add('dh-show');
+}
+function closeBatchDetail() {
+    document.getElementById('batch-detail-modal').classList.remove('dh-show');
 }
 
 async function cancelBatch(batchId) {
@@ -1244,39 +1234,6 @@ async function markPresetDefault() {
         await loadPresets();
         openPresetManager();
         selectPresetForEdit(currentPresetId);
-    }
-}
-
-// ===== 定时任务 =====
-function showAddTask() { document.getElementById('task-modal').style.display = 'flex'; }
-function hideAddTask() { document.getElementById('task-modal').style.display = 'none'; }
-
-async function addTask(e) {
-    e.preventDefault();
-    var form = new FormData(e.target);
-    var data = await apiCall('/api/schedule', 'POST', form);
-    if (data.success) {
-        showToast('任务创建成功');
-        setTimeout(() => location.reload(), 1000);
-    } else {
-        showToast(data.message, 'error');
-    }
-}
-
-async function toggleTask(id) {
-    var data = await apiCall('/api/schedule/' + id + '/toggle', 'POST');
-    if (data.success) {
-        showToast(data.enabled ? '已启用' : '已禁用');
-        setTimeout(() => location.reload(), 500);
-    }
-}
-
-async function deleteTask(id) {
-    if (!await confirmDialog('将永久删除此任务，此操作不可撤销。', { title: '删除确认', confirmText: '删除' })) return;
-    var data = await apiCall('/api/schedule/' + id + '/delete', 'POST');
-    if (data.success) {
-        showToast('已删除');
-        setTimeout(() => location.reload(), 500);
     }
 }
 
