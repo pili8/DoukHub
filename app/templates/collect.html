@@ -52,6 +52,32 @@
 .batch-detail-sec { margin-top:14px; }
 .batch-detail-sec-title { display:flex; align-items:baseline; gap:8px; font-size:12.5px; font-weight:600; color:var(--dh-text, var(--text-strong)); padding-bottom:8px; border-bottom:1px solid var(--dh-border, var(--border-default)); }
 .batch-detail-sec-note { font-size:11px; font-weight:400; color:var(--dh-text-muted, var(--text-muted)); }
+/* 详情弹窗增强：过渡动画 */
+#batch-detail-modal { animation: bdFadeIn 0.18s ease; }
+#batch-detail-modal .dh-modal-box { animation: bdSlideUp 0.22s cubic-bezier(0.16,1,0.3,1); }
+@keyframes bdFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bdSlideUp { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+/* 详情弹窗增强：工具栏 */
+.batch-detail-toolbar { display:flex; align-items:center; gap:8px; margin:10px 0 8px; flex-wrap:wrap; }
+.batch-detail-toolbar input[type="text"] { flex:1 1 140px; min-width:120px; max-width:220px; padding:5px 10px; font-size:12.5px; border:1px solid var(--dh-border, var(--border-default)); border-radius:8px; background:var(--dh-bg, transparent); color:var(--dh-text, var(--text-strong)); outline:none; }
+.batch-detail-toolbar input[type="text"]:focus { border-color:var(--dh-accent, var(--accent)); box-shadow:0 0 0 2px color-mix(in srgb, var(--dh-accent, var(--accent)) 18%, transparent); }
+.batch-detail-toolbar select { padding:5px 8px; font-size:12.5px; border:1px solid var(--dh-border, var(--border-default)); border-radius:8px; background:var(--dh-bg, transparent); color:var(--dh-text, var(--text-strong)); outline:none; }
+.batch-detail-toolbar .bd-count { font-size:11.5px; color:var(--dh-text-muted, var(--text-muted)); margin-left:auto; white-space:nowrap; }
+/* 详情弹窗增强：失败汇总 */
+.bd-fail-summary { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 2px; padding:8px 10px; border:1px solid color-mix(in srgb, var(--dh-danger, #C2410C) 35%, transparent); background:color-mix(in srgb, var(--dh-danger, #C2410C) 7%, transparent); border-radius:10px; }
+.bd-fail-chip { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color:var(--dh-danger, #C2410C); max-width:100%; }
+.bd-fail-chip b { flex-shrink:0; }
+.bd-fail-chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 详情弹窗增强：作品汇总 */
+.bd-works-summary { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:10px 0 2px; }
+.bd-works-chip { display:inline-flex; align-items:baseline; gap:5px; font-size:12px; color:var(--dh-text-secondary, var(--text-secondary)); padding:4px 10px; border-radius:999px; background:color-mix(in srgb, var(--dh-accent, var(--accent)) 8%, transparent); border:1px solid color-mix(in srgb, var(--dh-accent, var(--accent)) 22%, transparent); }
+.bd-works-chip b { font-size:14px; color:var(--dh-accent, var(--accent)); }
+.bd-works-chip.works-image b { color:var(--dh-success, var(--success-text, #16A34A)); }
+.bd-works-chip.works-live b { color:var(--dh-warning, #D97706); }
+/* 详情弹窗增强：骨架屏 */
+.bd-skel { border-radius:8px; background:linear-gradient(90deg, color-mix(in srgb, var(--dh-text-muted, #888) 10%, transparent) 25%, color-mix(in srgb, var(--dh-text-muted, #888) 18%, transparent) 37%, color-mix(in srgb, var(--dh-text-muted, #888) 10%, transparent) 63%); background-size:400% 100%; animation:bdShimmer 1.3s ease infinite; }
+@keyframes bdShimmer { from { background-position:100% 0; } to { background-position:0 0; } }
+.load-more-row { text-align:center; padding:10px 0 2px; }
 .run-works-count { display:block; font-size:11px; font-weight:600; color:var(--dh-accent, var(--accent)); margin:6px 0 2px; }
 </style>
 
@@ -198,17 +224,18 @@
 
     <!-- 筛选栏 -->
     <div class="batch-filter-bar">
-        <select id="history-platform-filter" onchange="renderBatchHistory()">
+        <select id="history-platform-filter" onchange="onHistoryFilterChange()">
             <option value="">全部平台</option>
             <option value="douyin">douyin</option>
             <option value="tiktok">tiktok</option>
         </select>
-        <select id="history-status-filter" onchange="renderBatchHistory()">
+        <select id="history-status-filter" onchange="onHistoryFilterChange()">
             <option value="">全部状态</option>
             <option value="completed">已完成</option>
             <option value="failed">失败</option>
             <option value="cancelled">已取消</option>
         </select>
+        <input type="text" id="history-kw-filter" placeholder="搜索批次ID / 方案名" oninput="onHistoryKwInput()" style="flex:1 1 150px; max-width:220px; padding:5px 10px; font-size:12.5px; border:1px solid var(--dh-border, var(--border-default)); border-radius:8px; background:var(--dh-bg, transparent); color:var(--dh-text, var(--text-strong)); outline:none;">
     </div>
 
     <!-- 批次列表 -->
@@ -364,7 +391,7 @@
 
 <!-- ===== 批次详情弹窗（历史批次流水） ===== -->
 <div class="dh-modal-overlay" id="batch-detail-modal">
-    <div class="dh-modal-box" style="max-width:660px;">
+    <div class="dh-modal-box" style="max-width:760px;">
         <div class="dh-modal-header">
             <h3><i data-lucide="table"></i> <span>批次详情</span></h3>
             <button class="dh-modal-close" onclick="closeBatchDetail()"><i data-lucide="x"></i></button>
@@ -726,22 +753,36 @@ async function cancelRunningBatch() {
 }
 
 // ===== 批次历史渲染（含筛选） =====
+var _batchHistoryVisible = 20;   // 历史列表当前显示条数（分页加载）
+var _batchHistoryPageSize = 20;
+function onHistoryFilterChange() { _batchHistoryVisible = _batchHistoryPageSize; renderBatchHistory(); }
+var _historyKwTimer = null;
+function onHistoryKwInput() {
+    if (_historyKwTimer) clearTimeout(_historyKwTimer);
+    _historyKwTimer = setTimeout(function() { onHistoryFilterChange(); }, 200);
+}
+function loadMoreBatches() { _batchHistoryVisible += _batchHistoryPageSize; renderBatchHistory(); }
 function renderBatchHistory() {
     var body = document.getElementById('batch-table-body');
     var pf = document.getElementById('history-platform-filter').value;
     var sf = document.getElementById('history-status-filter').value;
+    var kwEl = document.getElementById('history-kw-filter');
+    var kw = kwEl ? (kwEl.value || '').trim().toLowerCase() : '';
     var filtered = allBatches.filter(function(b) {
         if (pf && b.platform !== pf) return false;
         if (sf && b.status !== sf) return false;
+        if (kw && (String(b.id || '') + ' ' + String(b.preset_name || '')).toLowerCase().indexOf(kw) < 0) return false;
         return true;
     });
+    var shown = filtered.slice(0, _batchHistoryVisible);
+    var moreCount = filtered.length - shown.length;
     // 移动端(≤768px):渲染为卡片列表,替代宽表格,便于触控浏览
     if (window.matchMedia('(max-width: 768px)').matches) {
-        if (!filtered.length) {
+        if (!shown.length) {
             body.innerHTML = '<tr><td colspan="11" class="text-muted" style="text-align:center;padding:20px;">暂无批次</td></tr>';
             return;
         }
-        body.innerHTML = filtered.map(function(batch) {
+        body.innerHTML = shown.map(function(batch) {
             var elapsed = batchElapsedSeconds(batch);
             var isActive = ['pending', 'running', 'cancelling'].includes(batch.status);
             var hasFailed = (batch.failed_accounts || 0) > 0;
@@ -772,13 +813,14 @@ function renderBatchHistory() {
                 '</div>' +
             '</td></tr>';
         }).join('');
+        if (moreCount > 0) body.innerHTML += '<tr><td colspan="11" class="load-more-row"><button class="btn btn-secondary btn-sm" onclick="loadMoreBatches()">加载更多（剩余 ' + moreCount + ' 条）</button></td></tr>';
         return;
     }
-    if (!filtered.length) {
+    if (!shown.length) {
         body.innerHTML = '<tr><td colspan="11" class="text-muted">暂无批次</td></tr>';
         return;
     }
-    body.innerHTML = filtered.map(function(batch) {
+    body.innerHTML = shown.map(function(batch) {
         var elapsed = batchElapsedSeconds(batch);
         var isActive = ['pending', 'running', 'cancelling'].includes(batch.status);
         var hasFailed = (batch.failed_accounts || 0) > 0;
@@ -799,6 +841,7 @@ function renderBatchHistory() {
             '<td>' + ops + '</td>' +
         '</tr>';
     }).join('');
+    if (moreCount > 0) body.innerHTML += '<tr><td colspan="11" class="load-more-row"><button class="btn btn-secondary btn-sm" onclick="loadMoreBatches()">加载更多（剩余 ' + moreCount + ' 条）</button></td></tr>';
 }
 
 // ===== 批次详情弹窗（用 confirmDialog 的变体，简单用 toast + 运行面板） =====
@@ -817,12 +860,90 @@ async function showBatchDetail(batchId) {
 }
 
 // ===== 批次详情弹窗（历史批次流水） =====
+var _bdData = null;                       // 当前详情数据缓存
+var _bdFilter = { kw: '', st: '' };       // 账号明细筛选状态
+
+function _bdSkeletonHtml() {
+    var bar = function(w, h) { return '<div class="bd-skel" style="width:' + w + ';height:' + h + ';margin:8px 0;"></div>'; };
+    return bar('40%', '14px') + bar('100%', '12px') + bar('92%', '12px') + bar('96%', '12px')
+        + bar('30%', '14px') + bar('100%', '12px') + bar('85%', '12px');
+}
+
 async function showHistoryBatchDetail(batchId) {
-    var data = await apiCall('/api/collection/batches/' + batchId, 'GET');
-    var batch = data.batch || {};
-    var items = data.items || [];
-    var works = data.works || {};
-    var logExists = !!data.log_exists;
+    // 先展示骨架屏，数据到达后再渲染
+    document.getElementById('batch-detail-body').innerHTML = _bdSkeletonHtml();
+    document.getElementById('batch-detail-modal').classList.add('dh-show');
+    var data;
+    try {
+        data = await apiCall('/api/collection/batches/' + batchId, 'GET');
+    } catch (e) {
+        document.getElementById('batch-detail-body').innerHTML = '<div class="empty-state" style="padding:20px 0;">详情加载失败：' + escapeHtml(e.message || '') + '</div>';
+        return;
+    }
+    _bdData = { batch: data.batch || {}, items: data.items || [], works: data.works || {}, log_exists: !!data.log_exists };
+    _bdFilter = { kw: '', st: '' };
+    renderBatchDetailBody();
+}
+
+function _bdStatusGroup(status) {
+    if (status === 'success' || status === 'completed') return 'success';
+    if (status === 'failed' || status === 'error') return 'failed';
+    if (status === 'skipped') return 'skipped';
+    if (status === 'cancelled') return 'cancelled';
+    return 'other';
+}
+
+function _bdFilterItems() {
+    var items = (_bdData && _bdData.items) || [];
+    return items.filter(function(item) {
+        if (_bdFilter.st && _bdStatusGroup(item.status) !== _bdFilter.st) return false;
+        if (_bdFilter.kw) {
+            var hay = (String(item.account_name || '') + ' ' + String(item.sec_user_id || '')).toLowerCase();
+            if (hay.indexOf(_bdFilter.kw) < 0) return false;
+        }
+        return true;
+    });
+}
+
+function renderBdItems() {
+    var tbody = document.getElementById('bd-items-body');
+    var countEl = document.getElementById('bd-count');
+    if (!tbody || !_bdData) return;
+    var items = _bdFilterItems();
+    if (countEl) countEl.textContent = '显示 ' + items.length + ' / ' + (_bdData.items || []).length + ' 条';
+    if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:16px;">无匹配的账号明细</td></tr>';
+        return;
+    }
+    tbody.innerHTML = items.map(function(item) {
+        var g = _bdStatusGroup(item.status);
+        var stCls = g === 'success' ? 'success' : (g === 'failed' ? 'failed' : 'warning');
+        var statusHtml = '<span class="workflow-status ' + stCls + '">' + formatBatchStatus(item.status) + '</span>';
+        var msgHtml = g === 'failed'
+            ? '<span style="color:var(--dh-danger);font-size:12px;">' + escapeHtml(item.message || '') + '</span>'
+            : '<span class="text-muted" style="font-size:12px;">' + escapeHtml(item.message || '') + '</span>';
+        return '<tr>'
+            + '<td data-label="账号">' + escapeHtml(item.account_name || item.sec_user_id || '-') + '</td>'
+            + '<td data-label="状态">' + statusHtml + '</td>'
+            + '<td data-label="结果/原因">' + msgHtml + '</td>'
+            + '</tr>';
+    }).join('');
+}
+
+function onBdFilterChange() {
+    var kwEl = document.getElementById('bd-kw');
+    var stEl = document.getElementById('bd-st');
+    _bdFilter.kw = kwEl ? (kwEl.value || '').trim().toLowerCase() : '';
+    _bdFilter.st = stEl ? stEl.value : '';
+    renderBdItems();
+}
+
+function renderBatchDetailBody() {
+    if (!_bdData) return;
+    var batch = _bdData.batch;
+    var items = _bdData.items || [];
+    var works = _bdData.works || {};
+    var logExists = _bdData.log_exists;
     var elapsed = batchElapsedSeconds(batch);
 
     var summaryHtml = '<div class="batch-detail-summary">'
@@ -837,27 +958,39 @@ async function showHistoryBatchDetail(batchId) {
         + (batch.created_at ? '<span>' + escapeHtml(String(batch.created_at)) + '</span>' : '')
         + '</div>';
 
+    // —— 失败原因汇总（按错误信息去重计数）——
+    var failMsgs = {};
+    var failCount = 0;
+    items.forEach(function(item) {
+        if (_bdStatusGroup(item.status) !== 'failed') return;
+        failCount++;
+        var m = String(item.message || '未知原因').trim() || '未知原因';
+        failMsgs[m] = (failMsgs[m] || 0) + 1;
+    });
+    var failHtml = '';
+    if (failCount > 0) {
+        var chips = Object.keys(failMsgs).sort(function(a, b) { return failMsgs[b] - failMsgs[a]; }).slice(0, 5).map(function(m) {
+            return '<span class="bd-fail-chip" title="' + escapeHtml(m) + '"><b>' + failMsgs[m] + '×</b><span>' + escapeHtml(m) + '</span></span>';
+        }).join('');
+        failHtml = '<div class="bd-fail-summary">' + chips + '</div>';
+    }
+
     // —— 区块1：账号明细（来自数据库，持久可靠）——
     var rowsHtml = '<div class="batch-detail-sec"><div class="batch-detail-sec-title">账号明细</div>';
+    rowsHtml += '<div class="batch-detail-toolbar">'
+        + '<input type="text" id="bd-kw" placeholder="搜索账号..." oninput="onBdFilterChange()">'
+        + '<select id="bd-st" onchange="onBdFilterChange()">'
+        + '<option value="">全部状态</option><option value="success">成功</option>'
+        + '<option value="failed">失败</option><option value="skipped">跳过</option>'
+        + '<option value="cancelled">已取消</option></select>'
+        + '<span class="bd-count" id="bd-count"></span>'
+        + '</div>';
     if (!items.length) {
         rowsHtml += '<div class="empty-state" style="padding:14px 0;">暂无明细</div>';
     } else {
-        rowsHtml += '<div class="table-scroll"><table class="batch-detail-table"><thead><tr>'
-            + '<th>账号</th><th>状态</th><th>结果 / 原因</th></tr></thead><tbody>';
-        items.forEach(function(item) {
-            var st = (item.status === 'success' || item.status === 'completed') ? 'success'
-                   : (item.status === 'failed' || item.status === 'error') ? 'failed' : 'warning';
-            var statusHtml = '<span class="workflow-status ' + st + '">' + formatBatchStatus(item.status) + '</span>';
-            var msgHtml = (item.status === 'failed' || item.status === 'error')
-                ? '<span style="color:var(--dh-danger);font-size:12px;">' + escapeHtml(item.message || '') + '</span>'
-                : '<span class="text-muted" style="font-size:12px;">' + escapeHtml(item.message || '') + '</span>';
-            rowsHtml += '<tr>'
-                + '<td data-label="账号">' + escapeHtml(item.account_name || item.sec_user_id || '-') + '</td>'
-                + '<td data-label="状态">' + statusHtml + '</td>'
-                + '<td data-label="结果/原因">' + msgHtml + '</td>'
-                + '</tr>';
-        });
-        rowsHtml += '</tbody></table></div>';
+        rowsHtml += '<div class="table-scroll" style="max-height:280px;overflow-y:auto;"><table class="batch-detail-table"><thead><tr>'
+            + '<th>账号</th><th>状态</th><th>结果 / 原因</th></tr></thead>'
+            + '<tbody id="bd-items-body"></tbody></table></div>';
     }
     rowsHtml += '</div>';
 
@@ -866,12 +999,29 @@ async function showHistoryBatchDetail(batchId) {
     if (!logExists) {
         logHtml += '<div class="empty-state" style="padding:14px 0;font-size:12px;">批次日志已被清理，仅保留账号明细</div>';
     } else {
-        var groupsHtml = '';
-        var anyWorks = false;
+        // 作品汇总统计
+        var totals = { video: 0, image: 0, live: 0 }, accCount = 0;
         Object.keys(works).forEach(function(accName) {
             var w = works[accName];
             if (!w || !w.total) return;
-            anyWorks = true;
+            accCount++;
+            totals.video += (w.video || []).length;
+            totals.image += (w.image || []).length;
+            totals.live += (w.live || []).length;
+        });
+        var anyWorks = accCount > 0;
+        if (anyWorks) {
+            logHtml += '<div class="bd-works-summary">'
+                + '<span class="bd-works-chip"><b>' + totals.video + '</b> 视频</span>'
+                + '<span class="bd-works-chip works-image"><b>' + totals.image + '</b> 图集</span>'
+                + (totals.live ? '<span class="bd-works-chip works-live"><b>' + totals.live + '</b> 实况</span>' : '')
+                + '<span class="text-muted" style="font-size:11.5px;">覆盖 ' + accCount + ' 个账号</span>'
+                + '</div>';
+        }
+        var groupsHtml = '';
+        Object.keys(works).forEach(function(accName) {
+            var w = works[accName];
+            if (!w || !w.total) return;
             groupsHtml += '<div class="run-works-group" style="min-width:230px;"><span class="run-works-kind">' + escapeHtml(accName) + '</span>';
             [['video', '视频'], ['image', '图集'], ['live', '实况']].forEach(function(kv) {
                 var list = w[kv[0]] || [];
@@ -884,14 +1034,16 @@ async function showHistoryBatchDetail(batchId) {
             groupsHtml += '</div>';
         });
         logHtml += anyWorks
-            ? '<div class="run-works-box">' + groupsHtml + '</div>'
+            ? '<div class="run-works-box" style="max-height:320px;overflow-y:auto;">' + groupsHtml + '</div>'
             : '<div class="empty-state" style="padding:14px 0;font-size:12px;">日志存在，但未解析到作品记录</div>';
     }
     logHtml += '</div>';
 
-    document.getElementById('batch-detail-body').innerHTML = summaryHtml + rowsHtml + logHtml;
-    document.getElementById('batch-detail-modal').classList.add('dh-show');
+    document.getElementById('batch-detail-body').innerHTML = summaryHtml + failHtml + rowsHtml + logHtml;
+    // 工具栏事件改为即时过滤（input 事件由内联 oninput 处理）
+    renderBdItems();
 }
+
 function closeBatchDetail() {
     document.getElementById('batch-detail-modal').classList.remove('dh-show');
 }
