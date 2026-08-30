@@ -181,6 +181,28 @@ class Database:
                 )
             """)
 
+            # 表8：作品下载明细（批次内每个作品一条，实时写入）
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS collection_works (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    batch_id TEXT NOT NULL,
+                    sec_user_id TEXT DEFAULT '',
+                    account_name TEXT DEFAULT '',
+                    platform TEXT DEFAULT '',
+                    aweme_id TEXT NOT NULL,
+                    title TEXT DEFAULT '',
+                    kind TEXT DEFAULT 'video',
+                    work_url TEXT DEFAULT '',
+                    file_name TEXT DEFAULT '',
+                    download_dir TEXT DEFAULT '',
+                    file_path TEXT DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'success',
+                    message TEXT DEFAULT '',
+                    collected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(batch_id, aweme_id)
+                )
+            """)
+
             # 表7：应用配置（key-value，配置文件整包存单键 JSON，随库备份）
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
@@ -205,6 +227,9 @@ class Database:
                 "CREATE INDEX IF NOT EXISTS idx_collection_batch_status ON collection_batches(status, created_at)",
                 "CREATE INDEX IF NOT EXISTS idx_collection_batch_item_batch ON collection_batch_items(batch_id, sec_user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_single_work_history_created ON single_work_history(created_at)",
+                "CREATE INDEX IF NOT EXISTS idx_collection_works_batch ON collection_works(batch_id)",
+                "CREATE INDEX IF NOT EXISTS idx_collection_works_sec ON collection_works(sec_user_id)",
+                "CREATE INDEX IF NOT EXISTS idx_collection_works_aweme ON collection_works(aweme_id)",
             ]:
                 try:
                     conn.execute(sql)
@@ -806,6 +831,109 @@ class Database:
             )
             conn.commit()
             return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # 作品下载明细（collection_works）
+    # ------------------------------------------------------------------
+    def upsert_collection_work(
+        self,
+        batch_id: str,
+        sec_user_id: str = "",
+        account_name: str = "",
+        platform: str = "",
+        aweme_id: str = "",
+        title: str = "",
+        kind: str = "video",
+        work_url: str = "",
+        file_name: str = "",
+        download_dir: str = "",
+        file_path: str = "",
+        status: str = "success",
+        message: str = "",
+    ) -> bool:
+        """写入/更新一条作品明细。
+
+        同批次同作品只保留一行：失败后重试成功会覆盖为成功；
+        已是成功的记录不再被覆盖（图集多文件只记首个成功文件）。
+        """
+        if not batch_id or not aweme_id:
+            return False
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO collection_works(
+                    batch_id, sec_user_id, account_name, platform, aweme_id,
+                    title, kind, work_url, file_name, download_dir, file_path,
+                    status, message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(batch_id, aweme_id) DO UPDATE SET
+                    status = excluded.status,
+                    file_name = CASE WHEN excluded.status = 'success'
+                        THEN excluded.file_name ELSE collection_works.file_name END,
+                    download_dir = CASE WHEN excluded.status = 'success'
+                        THEN excluded.download_dir ELSE collection_works.download_dir END,
+                    file_path = CASE WHEN excluded.status = 'success'
+                        THEN excluded.file_path ELSE collection_works.file_path END,
+                    message = excluded.message
+                WHERE collection_works.status != 'success'
+                """,
+                (
+                    batch_id, sec_user_id or "", account_name or "", platform or "",
+                    str(aweme_id), title or "", kind or "video", work_url or "",
+                    file_name or "", download_dir or "", file_path or "",
+                    status or "success", message or "",
+                ),
+            )
+            conn.commit()
+        return True
+
+    def count_batch_works(self, batch_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM collection_works WHERE batch_id = ?", (batch_id,)
+            ).fetchone()
+            return int(row[0]) if row else 0
+
+    def list_batch_works(self, batch_id: str) -> list[dict]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM collection_works WHERE batch_id = ? ORDER BY id",
+                (batch_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def list_account_works(
+        self, sec_user_id: str = "", account_name: str = "", limit: int = 2000
+    ) -> list[dict]:
+        """按账号聚合全部批次的作品明细，带跨批次/同批次重复标记。"""
+        conds, params = [], []
+        if sec_user_id:
+            conds.append("sec_user_id = ?")
+            params.append(sec_user_id)
+        if account_name and not sec_user_id:
+            conds.append("account_name = ?")
+            params.append(account_name)
+        if not conds:
+            return []
+        where = " AND ".join(conds)
+        sql = f"""
+            SELECT * FROM (
+                SELECT w.*,
+                    (SELECT COUNT(*) FROM collection_works d2
+                      WHERE d2.aweme_id = w.aweme_id) AS dup_total,
+                    (SELECT COUNT(*) FROM collection_works d3
+                      WHERE d3.aweme_id = w.aweme_id AND d3.batch_id = w.batch_id) AS dup_in_batch
+                FROM collection_works w
+                WHERE {where}
+                ORDER BY w.id DESC LIMIT ?
+            ) ORDER BY id
+        """
+        params.append(limit)
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(r) for r in rows]
 
     def refresh_collection_batch_counts(self, batch_id: str) -> dict:
         with self._connect() as conn:

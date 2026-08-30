@@ -52,33 +52,77 @@
 .batch-detail-sec { margin-top:14px; }
 .batch-detail-sec-title { display:flex; align-items:baseline; gap:8px; font-size:12.5px; font-weight:600; color:var(--dh-text, var(--text-strong)); padding-bottom:8px; border-bottom:1px solid var(--dh-border, var(--border-default)); }
 .batch-detail-sec-note { font-size:11px; font-weight:400; color:var(--dh-text-muted, var(--text-muted)); }
-/* 详情弹窗增强：过渡动画 */
+/* ===== 批次详情弹窗：入库作品行 ===== */
+.bdw-table { display:flex; flex-direction:column; gap:6px; }
+.bdw-row { position:relative; display:flex; align-items:center; gap:8px; padding:7px 10px; border:1px solid var(--dh-border, #eee9e2); border-radius:8px; background:var(--dh-surface-muted, #faf8f5); padding-right:64px; }
+.bdw-row.is-fail { border-color: color-mix(in srgb, var(--dh-danger, #C2410C) 30%, transparent); }
+.bdw-dot { width:7px; height:7px; border-radius:50%; background:var(--dh-success, #16A34A); flex-shrink:0; }
+.bdw-row.is-fail .bdw-dot { background:var(--dh-danger, #C2410C); }
+.bdw-title { flex:1; min-width:0; font-size:12.5px; color:var(--dh-text, var(--text-strong)); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bdw-kind { font-size:11px; padding:1px 7px; border-radius:20px; background:var(--dh-surface, #fff); border:1px solid var(--dh-border, #eee9e2); color:var(--dh-text-secondary); flex-shrink:0; }
+.bdw-reason { font-size:11px; color:var(--dh-danger, #C2410C); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0; }
+.bdw-ops { display:flex; gap:4px; flex-shrink:0; }
+.bdw-ops a { display:inline-flex; padding:3px; border-radius:6px; color:var(--dh-text-secondary); cursor:pointer; }
+.bdw-ops a:hover { background:var(--dh-surface, #fff); color:var(--dh-text, var(--text-strong)); }
+.bdw-ops svg, .bdw-ops i { width:14px; height:14px; }
+.bdw-sub { position:absolute; left:10px; right:64px; bottom:-2px; transform:translateY(100%); font-size:10.5px; color:var(--dh-text-muted); background:var(--dh-surface-muted, #faf8f5); padding:2px 4px; border-radius:0 0 6px 6px; display:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; z-index:2; }
+.bdw-row:hover .bdw-sub { display:block; }
+/* ===== 批次详情弹窗（重设计） ===== */
 #batch-detail-modal { animation: bdFadeIn 0.18s ease; }
-#batch-detail-modal .dh-modal-box { animation: bdSlideUp 0.22s cubic-bezier(0.16,1,0.3,1); }
+#batch-detail-modal .dh-modal-box { animation: bdSlideUp 0.22s cubic-bezier(0.16,1,0.3,1); background: var(--dh-surface, #fff); border: 1px solid var(--dh-border); box-shadow: 0 24px 64px rgba(31,27,23,.20), 0 2px 8px rgba(31,27,23,.08); }
 @keyframes bdFadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes bdSlideUp { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-/* 详情弹窗增强：工具栏 */
-.batch-detail-toolbar { display:flex; align-items:center; gap:8px; margin:10px 0 8px; flex-wrap:wrap; }
-.batch-detail-toolbar input[type="text"] { flex:1 1 140px; min-width:120px; max-width:220px; padding:5px 10px; font-size:12.5px; border:1px solid var(--dh-border, var(--border-default)); border-radius:8px; background:var(--dh-bg, transparent); color:var(--dh-text, var(--text-strong)); outline:none; }
-.batch-detail-toolbar input[type="text"]:focus { border-color:var(--dh-accent, var(--accent)); box-shadow:0 0 0 2px color-mix(in srgb, var(--dh-accent, var(--accent)) 18%, transparent); }
-.batch-detail-toolbar select { padding:5px 8px; font-size:12.5px; border:1px solid var(--dh-border, var(--border-default)); border-radius:8px; background:var(--dh-bg, transparent); color:var(--dh-text, var(--text-strong)); outline:none; }
-.batch-detail-toolbar .bd-count { font-size:11.5px; color:var(--dh-text-muted, var(--text-muted)); margin-left:auto; white-space:nowrap; }
-/* 详情弹窗增强：失败汇总 */
-.bd-fail-summary { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 2px; padding:8px 10px; border:1px solid color-mix(in srgb, var(--dh-danger, #C2410C) 35%, transparent); background:color-mix(in srgb, var(--dh-danger, #C2410C) 7%, transparent); border-radius:10px; }
-.bd-fail-chip { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color:var(--dh-danger, #C2410C); max-width:100%; }
-.bd-fail-chip b { flex-shrink:0; }
-.bd-fail-chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-/* 详情弹窗增强：作品汇总 */
-.bd-works-summary { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:10px 0 2px; }
-.bd-works-chip { display:inline-flex; align-items:baseline; gap:5px; font-size:12px; color:var(--dh-text-secondary, var(--text-secondary)); padding:4px 10px; border-radius:999px; background:color-mix(in srgb, var(--dh-accent, var(--accent)) 8%, transparent); border:1px solid color-mix(in srgb, var(--dh-accent, var(--accent)) 22%, transparent); }
-.bd-works-chip b { font-size:14px; color:var(--dh-accent, var(--accent)); }
-.bd-works-chip.works-image b { color:var(--dh-success, var(--success-text, #16A34A)); }
-.bd-works-chip.works-live b { color:var(--dh-warning, #D97706); }
-/* 详情弹窗增强：骨架屏 */
-.bd-skel { border-radius:8px; background:linear-gradient(90deg, color-mix(in srgb, var(--dh-text-muted, #888) 10%, transparent) 25%, color-mix(in srgb, var(--dh-text-muted, #888) 18%, transparent) 37%, color-mix(in srgb, var(--dh-text-muted, #888) 10%, transparent) 63%); background-size:400% 100%; animation:bdShimmer 1.3s ease infinite; }
-@keyframes bdShimmer { from { background-position:100% 0; } to { background-position:0 0; } }
+#batch-detail-body { max-height: 74vh; overflow-y: auto; }
+/* 状态横幅 */
+.bd-banner { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; padding:12px 16px; border-radius: var(--dh-radius-lg, 12px); border:1px solid transparent; margin-top:12px; }
+.bd-banner .bd-banner-status { font-size:13px; font-weight:700; display:inline-flex; align-items:center; gap:7px; }
+.bd-banner .bd-banner-status svg, .bd-banner .bd-banner-status i { width:16px; height:16px; }
+.bd-banner .bd-banner-meta { font-size:12px; color: var(--dh-text-secondary); white-space:nowrap; }
+.bd-banner.is-success { background: var(--dh-success-soft, #ECFDF3); border-color: color-mix(in srgb, var(--dh-success, #16A34A) 22%, transparent); }
+.bd-banner.is-success .bd-banner-status { color: var(--dh-success, #16A34A); }
+.bd-banner.is-failed { background: var(--dh-danger-soft, #FEF1EB); border-color: color-mix(in srgb, var(--dh-danger, #C2410C) 22%, transparent); }
+.bd-banner.is-failed .bd-banner-status { color: var(--dh-danger, #C2410C); }
+.bd-banner.is-warning { background: var(--dh-warning-soft, #FEF3C7); border-color: color-mix(in srgb, var(--dh-warning, #B45309) 22%, transparent); }
+.bd-banner.is-warning .bd-banner-status { color: var(--dh-warning, #B45309); }
+/* 左边条指标卡 */
+.bd-metrics { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:8px; margin-top:10px; }
+@media (max-width: 640px) { .bd-metrics { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+.bd-metric { background: var(--dh-surface, #fff); border:1px solid var(--dh-border); border-left-width:3px; border-radius: var(--dh-radius, 8px); padding:10px 12px; min-width:0; }
+.bd-metric .bd-metric-val { display:block; font-size:19px; font-weight:700; line-height:1.2; font-variant-numeric: tabular-nums; color: var(--dh-text); }
+.bd-metric .bd-metric-label { display:block; font-size:11px; color: var(--dh-text-muted); margin-top:2px; }
+.bd-metric.m-succ { border-left-color: var(--dh-success, #16A34A); } .bd-metric.m-succ .bd-metric-val { color: var(--dh-success, #16A34A); }
+.bd-metric.m-fail { border-left-color: var(--dh-danger, #C2410C); } .bd-metric.m-fail .bd-metric-val { color: var(--dh-danger, #C2410C); }
+.bd-metric.m-skip { border-left-color: var(--dh-text-muted); } .bd-metric.m-skip .bd-metric-val { color: var(--dh-text-secondary); }
+.bd-metric.m-works { border-left-color: var(--dh-accent); } .bd-metric.m-works .bd-metric-val { color: var(--dh-accent); }
+/* 失败原因卡 */
+.bd-fail-card { margin-top:10px; background: var(--dh-danger-soft, #FEF1EB); border:1px solid color-mix(in srgb, var(--dh-danger, #C2410C) 22%, transparent); border-radius: var(--dh-radius, 8px); padding:9px 12px; display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; }
+.bd-fail-card .bd-fail-title { font-size:11.5px; font-weight:700; color: var(--dh-danger, #C2410C); }
+.bd-fail-card .bd-fail-chip { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color: var(--dh-danger, #C2410C); max-width:100%; }
+.bd-fail-card .bd-fail-chip b { flex-shrink:0; }
+.bd-fail-card .bd-fail-chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 账号明细列表卡 */
+.bd-list-card { margin-top:10px; border:1px solid var(--dh-border); border-radius: var(--dh-radius-lg, 12px); background: var(--dh-surface, #fff); }
+.bd-list-head { display:flex; align-items:center; gap:8px; padding:9px 14px; border-bottom:1px solid var(--dh-border); }
+.bd-list-title { font-size:12.5px; font-weight:600; color: var(--dh-text); flex-shrink:0; }
+.bd-list-head input[type="text"] { flex:1 1 120px; min-width:100px; max-width:200px; padding:5px 10px; font-size:12.5px; border:1px solid transparent; border-radius:999px; background: var(--dh-surface-muted, var(--bg-muted)); color: var(--dh-text); outline:none; transition: border-color .12s, background .12s; }
+.bd-list-head input[type="text"]:focus { background: var(--dh-surface, #fff); border-color: var(--dh-accent); }
+.bd-list-head select { padding:5px 8px; font-size:12.5px; border:1px solid transparent; border-radius:999px; background: var(--dh-surface-muted, var(--bg-muted)); color: var(--dh-text); outline:none; }
+.bd-list-count { margin-left:auto; font-size:11.5px; color: var(--dh-text-muted); white-space:nowrap; }
+.bd-list-body { max-height: 44vh; overflow-y:auto; }
+.bd-row { padding:9px 14px; border-bottom:1px solid color-mix(in srgb, var(--dh-border) 60%, transparent); transition: background .12s; }
+.bd-row:hover { background: color-mix(in srgb, var(--dh-accent, var(--accent)) 4%, transparent); }
+.bd-row:last-child { border-bottom:none; }
+.bd-row-main { display:flex; align-items:center; gap:10px; min-width:0; }
+.bd-row-name { display:flex; align-items:center; gap:6px; font-weight:600; font-size:13px; color: var(--dh-text); min-width:0; white-space:nowrap; overflow:hidden; }
+.bd-row-name > span.nm { overflow:hidden; text-overflow:ellipsis; }
+.bd-row-status { flex-shrink:0; }
+.bd-row-msg { margin-left:auto; font-size:12px; color: var(--dh-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:46%; text-align:right; }
+.bd-row-msg.is-fail { color: var(--dh-danger, #C2410C); }
+.bd-works-row { display:none; margin:8px 0 2px 34px; }
+.bd-works-panel { background: var(--dh-surface-muted, var(--bg-muted)); border-radius: var(--dh-radius, 8px); padding:8px 12px; }
+.bd-works-row.open { display:block; animation: bdSlideUp 0.16s ease; }
+.bd-log-note { font-size:11.5px; color: var(--dh-text-muted); }
 .load-more-row { text-align:center; padding:10px 0 2px; }
-.run-works-count { display:block; font-size:11px; font-weight:600; color:var(--dh-accent, var(--accent)); margin:6px 0 2px; }
 </style>
 
 <div class="page-head">
@@ -622,7 +666,9 @@ async function showRunningDetail(batchId) {
 
         // 展开详情（账号明细 + 流式日志，一次折叠收展）
         var works = data.works || {};
-        var rows = items.map(function(item, idx) {
+        if (!_bdVisible) _bdVisible = _BD_CHUNK;
+    var shownItems = items.slice(0, _bdVisible);
+    var rows = shownItems.map(function(item, idx) {
             var isCur = item.status === 'running';
             var mini = '';
             if (isCur) {
@@ -875,13 +921,14 @@ async function showHistoryBatchDetail(batchId) {
     document.getElementById('batch-detail-modal').classList.add('dh-show');
     var data;
     try {
-        data = await apiCall('/api/collection/batches/' + batchId, 'GET');
+        data = await apiCall('/api/collection/batches/' + batchId + '?include_log=false', 'GET');
     } catch (e) {
         document.getElementById('batch-detail-body').innerHTML = '<div class="empty-state" style="padding:20px 0;">详情加载失败：' + escapeHtml(e.message || '') + '</div>';
         return;
     }
-    _bdData = { batch: data.batch || {}, items: data.items || [], works: data.works || {}, log_exists: !!data.log_exists };
+    _bdData = { batch: data.batch || {}, items: data.items || [], works: data.works || {}, works_db: data.works_db || [], works_source: data.works_source || 'log', log_exists: !!data.log_exists };
     _bdFilter = { kw: '', st: '' };
+    _bdVisible = 0;
     renderBatchDetailBody();
 }
 
@@ -905,29 +952,151 @@ function _bdFilterItems() {
     });
 }
 
+function escapeJs(s) {
+    return String(s == null ? '' : s).replace(/[\\'"&<>]/g, function(c) {
+        return ({'\\': '\\\\', "'": "\\'", '"': '\\"', '&': '&amp;', '<': '&lt;', '>': '&gt;'})[c];
+    });
+}
+
+// db 模式：账号展开面板渲染作品行（标题/类型/状态/原因 + 文件操作）
+function _bdWorkRowsHtml(item, idx) {
+    var works = _bdData.works_db || [];
+    var sec = String(item.sec_user_id || '');
+    var name = String(item.account_name || '');
+    var rows = works.filter(function(w) {
+        if (sec) return (w.sec_user_id || '') === sec;
+        return (w.account_name || '') === name;
+    });
+    if (!rows.length) return '<div style="color:var(--dh-text-muted);font-size:12px;padding:4px 0;">该账号无入库作品记录</div>';
+    var html = '<div class="bdw-table">';
+    rows.forEach(function(w) {
+        var ok = w.status === 'success';
+        html += '<div class="bdw-row' + (ok ? '' : ' is-fail') + '">'
+            + '<span class="bdw-dot"></span>'
+            + '<span class="bdw-title" title="' + escapeHtml(w.title || w.file_name || w.aweme_id) + '">' + escapeHtml(w.title || w.file_name || w.aweme_id || '（无标题）') + '</span>'
+            + '<span class="bdw-kind">' + (w.kind === 'image' ? '图集' : (w.kind === 'live' ? '实况' : '视频')) + '</span>'
+            + (ok ? '' : '<span class="bdw-reason" title="' + escapeHtml(w.message || '下载失败') + '">' + escapeHtml(w.message || '下载失败') + '</span>')
+            + '<span class="bdw-ops">'
+            + '<a href="javascript:void(0)" onclick="AW_open(' + w.id + ',\'file\')" title="打开文件"><i data-lucide="file-video"></i></a>'
+            + '<a href="javascript:void(0)" onclick="AW_open(' + w.id + ',\'dir\')" title="打开目录"><i data-lucide="folder-open"></i></a>'
+            + (w.work_url ? '<a href="' + escapeHtml(w.work_url) + '" target="_blank" rel="noopener" title="原作品"><i data-lucide="external-link"></i></a>' : '')
+            + '</span>'
+            + '<div class="bdw-sub">文件名 ' + escapeHtml(w.file_name || '未记录') + ' · 目录 ' + escapeHtml(w.download_dir || '未记录') + '</div>'
+            + '</div>';
+    });
+    html += '</div>';
+    return html;
+}
+
+var _bdVisible = 0;          // 当前已渲染明细行数
+var _BD_CHUNK = 120;         // 每块渲染行数
 function renderBdItems() {
-    var tbody = document.getElementById('bd-items-body');
+    var listEl = document.getElementById('bd-list-body');
     var countEl = document.getElementById('bd-count');
-    if (!tbody || !_bdData) return;
+    if (!listEl || !_bdData) return;
+    var logExists = _bdData.log_exists;
+    var works = _bdData.works || {};
     var items = _bdFilterItems();
-    if (countEl) countEl.textContent = '显示 ' + items.length + ' / ' + (_bdData.items || []).length + ' 条';
+    var total = (_bdData.items || []).length;
+    if (countEl) countEl.textContent = !logExists ? '作品记录已随日志清理' : ('显示 ' + items.length + ' / ' + total + ' 条');
     if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:16px;">无匹配的账号明细</td></tr>';
+        listEl.innerHTML = '<div class="bd-row" style="justify-content:center;text-align:center;color:var(--dh-text-muted);">无匹配的账号明细</div>';
         return;
     }
-    tbody.innerHTML = items.map(function(item) {
+    var matched = {};
+    items.forEach(function(item) {
+        var accName = item.account_name || item.sec_user_id || '';
+        if (accName) matched[accName] = true;
+    });
+    var rows = items.map(function(item, idx) {
         var g = _bdStatusGroup(item.status);
         var stCls = g === 'success' ? 'success' : (g === 'failed' ? 'failed' : 'warning');
-        var statusHtml = '<span class="workflow-status ' + stCls + '">' + formatBatchStatus(item.status) + '</span>';
-        var msgHtml = g === 'failed'
-            ? '<span style="color:var(--dh-danger);font-size:12px;">' + escapeHtml(item.message || '') + '</span>'
-            : '<span class="text-muted" style="font-size:12px;">' + escapeHtml(item.message || '') + '</span>';
-        return '<tr>'
-            + '<td data-label="账号">' + escapeHtml(item.account_name || item.sec_user_id || '-') + '</td>'
-            + '<td data-label="状态">' + statusHtml + '</td>'
-            + '<td data-label="结果/原因">' + msgHtml + '</td>'
-            + '</tr>';
+        var accName = item.account_name || item.sec_user_id || '';
+        var w = logExists ? works[accName] : null;
+        var worksPanel = '';
+        var canExpand = !!(w && w.total > 0);
+        if (canExpand) {
+            if (_bdData.works_source === 'db') {
+                worksPanel = '<div class="bd-works-row" data-bd-works="' + idx + '"><div class="bd-works-panel run-works-box">' + _bdWorkRowsHtml(item, idx) + '</div></div>';
+            } else {
+                var groupsHtml = '';
+                [['video', '视频'], ['image', '图集'], ['live', '实况']].forEach(function(kv) {
+                    var list = w[kv[0]] || [];
+                    if (list.length) {
+                        groupsHtml += '<div class="run-works-group"><span class="run-works-kind">' + kv[1] + ' ' + list.length + '</span><ul class="run-works-list">' +
+                            list.map(function(t) { return '<li>' + escapeHtml(t) + '</li>'; }).join('') +
+                            '</ul></div>';
+                    }
+                });
+                worksPanel = '<div class="bd-works-row" data-bd-works="' + idx + '"><div class="bd-works-panel run-works-box">' + groupsHtml + '</div></div>';
+            }
+        }
+        var expandCell = canExpand
+            ? '<span class="run-expand-btn" data-bd-idx="' + idx + '" onclick="toggleBdWorks(this)" title="展开作品明细"><i data-lucide="folder-open"></i></span><span class="run-expand-tag">' + w.total + '</span>'
+            : (logExists ? '<span class="run-expand-btn is-empty"></span>' : '');
+        var msg = item.message || '';
+        return '<div class="bd-row">'
+            + '<div class="bd-row-main">'
+            + expandCell
+            + '<span class="bd-row-name"><span class="nm" title="' + escapeHtml(item.account_name || item.sec_user_id || '-') + '（点击查看该账号全部作品）" style="cursor:pointer;" onclick="openAccountWorks({sec_user_id:\'' + escapeJs(item.sec_user_id || '') + '\', name: \'' + escapeJs(item.account_name || '') + '\'})">' + escapeHtml(item.account_name || item.sec_user_id || '-') + '</span></span>'
+            + '<span class="bd-row-status"><span class="workflow-status ' + stCls + '">' + formatBatchStatus(item.status) + '</span></span>'
+            + '<span class="bd-row-msg' + (g === 'failed' ? ' is-fail' : '') + '" title="' + escapeHtml(msg) + '">' + escapeHtml(msg) + '</span>'
+            + '</div>'
+            + worksPanel
+            + '</div>';
     }).join('');
+    // 未匹配到账号的作品兜底归集，避免静默丢失
+    if (logExists) {
+        var orphanWorks = {};
+        Object.keys(works).forEach(function(accName) {
+            var w = works[accName];
+            if (w && w.total && !matched[accName]) orphanWorks[accName] = w;
+        });
+        if (Object.keys(orphanWorks).length) {
+            var groupsHtml = '';
+            Object.keys(orphanWorks).forEach(function(accName) {
+                var w = orphanWorks[accName];
+                [['video', '视频'], ['image', '图集'], ['live', '实况']].forEach(function(kv) {
+                    var list = w[kv[0]] || [];
+                    if (list.length) {
+                        groupsHtml += '<div class="run-works-group"><span class="run-works-kind">' + escapeHtml(accName) + ' · ' + kv[1] + ' ' + list.length + '</span><ul class="run-works-list">' +
+                            list.map(function(t) { return '<li>' + escapeHtml(t) + '</li>'; }).join('') +
+                            '</ul></div>';
+                    }
+                });
+            });
+            rows += '<div class="bd-row">'
+                + '<div class="bd-row-main">'
+                + '<span class="run-expand-btn" data-bd-idx="orphans" onclick="toggleBdWorks(this)" title="展开作品明细"><i data-lucide="folder-open"></i></span>'
+                + '<span class="bd-row-name"><span class="nm">未关联账号的作品</span></span>'
+                + '<span class="bd-row-msg">账号名变更等原因未能关联</span>'
+                + '</div>'
+                + '<div class="bd-works-row" data-bd-works="orphans"><div class="bd-works-panel run-works-box">' + groupsHtml + '</div></div>'
+                + '</div>';
+        }
+    }
+    if (items.length > shownItems.length) {
+        rows += '<div class="load-more-row"><button class="btn btn-secondary btn-sm" onclick="loadMoreBdItems()">加载更多（剩余 ' + (items.length - shownItems.length) + ' 条）</button></div>';
+    }
+    listEl.innerHTML = rows;
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(listEl);
+}
+
+function loadMoreBdItems() {
+    _bdVisible += _BD_CHUNK;
+    renderBdItems();
+}
+
+function toggleBdWorks(btn) {
+    var container = btn.closest('.bd-row');
+    if (!container) return;
+    var idx = btn.dataset.bdIdx;
+    var panel = container.querySelector('.bd-works-row[data-bd-works="' + idx + '"]');
+    if (!panel) return;
+    var opened = panel.classList.toggle('open');
+    btn.classList.toggle('open', opened);
+    btn.style.opacity = opened ? '1' : '0.6';
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
 }
 
 function onBdFilterChange() {
@@ -935,6 +1104,7 @@ function onBdFilterChange() {
     var stEl = document.getElementById('bd-st');
     _bdFilter.kw = kwEl ? (kwEl.value || '').trim().toLowerCase() : '';
     _bdFilter.st = stEl ? stEl.value : '';
+    _bdVisible = _BD_CHUNK;
     renderBdItems();
 }
 
@@ -946,21 +1116,30 @@ function renderBatchDetailBody() {
     var logExists = _bdData.log_exists;
     var elapsed = batchElapsedSeconds(batch);
 
-    var summaryHtml = '<div class="batch-detail-summary">'
-        + '<span><b>' + formatPlatform(batch.platform) + '</b></span>'
-        + '<span class="workflow-status ' + (batch.status === 'completed' || batch.status === 'success' ? 'success' : (batch.status === 'failed' ? 'failed' : 'warning')) + '">' + formatBatchStatus(batch.status) + '</span>'
-        + (batch.preset_name ? '<span>方案：' + escapeHtml(batch.preset_name) + '</span>' : '')
-        + '<span>总 ' + (batch.total_accounts || items.length) + '</span>'
-        + '<span>成功 ' + (batch.success_accounts || 0) + '</span>'
-        + '<span>失败 ' + (batch.failed_accounts || 0) + '</span>'
-        + '<span>跳过 ' + (batch.skipped_accounts || 0) + '</span>'
-        + '<span>时长 ' + formatDuration(elapsed) + '</span>'
-        + (batch.created_at ? '<span>' + escapeHtml(String(batch.created_at)) + '</span>' : '')
+    // —— 状态横幅 ——
+    var st = batch.status;
+    var bannerCls = (st === 'completed' || st === 'success') ? 'is-success' : (st === 'failed' ? 'is-failed' : 'is-warning');
+    var bannerIcon = bannerCls === 'is-success' ? 'check-circle-2' : (bannerCls === 'is-failed' ? 'x-circle' : 'clock-4');
+    var bannerHtml = '<div class="bd-banner ' + bannerCls + '">'
+        + '<span class="bd-banner-status"><i data-lucide="' + bannerIcon + '"></i>' + formatBatchStatus(st) + '</span>'
+        + '<span class="bd-banner-meta"><b>' + formatPlatform(batch.platform) + '</b></span>'
+        + (batch.preset_name ? '<span class="bd-banner-meta">方案 ' + escapeHtml(batch.preset_name) + '</span>' : '')
+        + (batch.started_at ? '<span class="bd-banner-meta">开始 ' + escapeHtml(String(batch.started_at).replace('T', ' ').slice(0, 16)) + '</span>' : '')
+        + '<span class="bd-banner-meta">时长 ' + formatDuration(elapsed) + '</span>'
         + '</div>';
 
-    // —— 失败原因汇总（按错误信息去重计数）——
-    var failMsgs = {};
-    var failCount = 0;
+    // —— 指标卡（左边条）——
+    var workTotal = 0;
+    Object.keys(works).forEach(function(accName) { workTotal += (works[accName] || {}).total || 0; });
+    var metricsHtml = '<div class="bd-metrics">'
+        + '<div class="bd-metric m-succ"><span class="bd-metric-val">' + (batch.success_accounts || 0) + '</span><span class="bd-metric-label">成功账号</span></div>'
+        + '<div class="bd-metric m-fail"><span class="bd-metric-val">' + (batch.failed_accounts || 0) + '</span><span class="bd-metric-label">失败账号</span></div>'
+        + '<div class="bd-metric m-skip"><span class="bd-metric-val">' + (batch.skipped_accounts || 0) + '</span><span class="bd-metric-label">跳过账号</span></div>'
+        + '<div class="bd-metric m-works"><span class="bd-metric-val">' + (logExists ? workTotal : '-') + '</span><span class="bd-metric-label">作品下载</span></div>'
+        + '</div>';
+
+    // —— 失败原因卡 ——
+    var failMsgs = {}, failCount = 0;
     items.forEach(function(item) {
         if (_bdStatusGroup(item.status) !== 'failed') return;
         failCount++;
@@ -969,79 +1148,29 @@ function renderBatchDetailBody() {
     });
     var failHtml = '';
     if (failCount > 0) {
-        var chips = Object.keys(failMsgs).sort(function(a, b) { return failMsgs[b] - failMsgs[a]; }).slice(0, 5).map(function(m) {
+        var chips = Object.keys(failMsgs).sort(function(a, b) { return failMsgs[b] - failMsgs[a]; }).slice(0, 4).map(function(m) {
             return '<span class="bd-fail-chip" title="' + escapeHtml(m) + '"><b>' + failMsgs[m] + '×</b><span>' + escapeHtml(m) + '</span></span>';
         }).join('');
-        failHtml = '<div class="bd-fail-summary">' + chips + '</div>';
+        failHtml = '<div class="bd-fail-card"><span class="bd-fail-title">失败 ' + failCount + ' 个</span>' + chips + '</div>';
     }
 
-    // —— 区块1：账号明细（来自数据库，持久可靠）——
-    var rowsHtml = '<div class="batch-detail-sec"><div class="batch-detail-sec-title">账号明细</div>';
-    rowsHtml += '<div class="batch-detail-toolbar">'
+    // —— 账号明细列表卡 ——
+    var listHtml = '<div class="bd-list-card">'
+        + '<div class="bd-list-head">'
+        + '<span class="bd-list-title">账号明细</span>'
         + '<input type="text" id="bd-kw" placeholder="搜索账号..." oninput="onBdFilterChange()">'
         + '<select id="bd-st" onchange="onBdFilterChange()">'
         + '<option value="">全部状态</option><option value="success">成功</option>'
         + '<option value="failed">失败</option><option value="skipped">跳过</option>'
         + '<option value="cancelled">已取消</option></select>'
-        + '<span class="bd-count" id="bd-count"></span>'
+        + '<span class="bd-list-count" id="bd-count"></span>'
+        + '</div>'
+        + '<div class="bd-list-body" id="bd-list-body"></div>'
         + '</div>';
-    if (!items.length) {
-        rowsHtml += '<div class="empty-state" style="padding:14px 0;">暂无明细</div>';
-    } else {
-        rowsHtml += '<div class="table-scroll" style="max-height:280px;overflow-y:auto;"><table class="batch-detail-table"><thead><tr>'
-            + '<th>账号</th><th>状态</th><th>结果 / 原因</th></tr></thead>'
-            + '<tbody id="bd-items-body"></tbody></table></div>';
-    }
-    rowsHtml += '</div>';
 
-    // —— 区块2：作品明细（来自批次日志，可能被清理）——
-    var logHtml = '<div class="batch-detail-sec"><div class="batch-detail-sec-title">作品明细 <span class="batch-detail-sec-note">来自批次日志，日志清理后不再显示</span></div>';
-    if (!logExists) {
-        logHtml += '<div class="empty-state" style="padding:14px 0;font-size:12px;">批次日志已被清理，仅保留账号明细</div>';
-    } else {
-        // 作品汇总统计
-        var totals = { video: 0, image: 0, live: 0 }, accCount = 0;
-        Object.keys(works).forEach(function(accName) {
-            var w = works[accName];
-            if (!w || !w.total) return;
-            accCount++;
-            totals.video += (w.video || []).length;
-            totals.image += (w.image || []).length;
-            totals.live += (w.live || []).length;
-        });
-        var anyWorks = accCount > 0;
-        if (anyWorks) {
-            logHtml += '<div class="bd-works-summary">'
-                + '<span class="bd-works-chip"><b>' + totals.video + '</b> 视频</span>'
-                + '<span class="bd-works-chip works-image"><b>' + totals.image + '</b> 图集</span>'
-                + (totals.live ? '<span class="bd-works-chip works-live"><b>' + totals.live + '</b> 实况</span>' : '')
-                + '<span class="text-muted" style="font-size:11.5px;">覆盖 ' + accCount + ' 个账号</span>'
-                + '</div>';
-        }
-        var groupsHtml = '';
-        Object.keys(works).forEach(function(accName) {
-            var w = works[accName];
-            if (!w || !w.total) return;
-            groupsHtml += '<div class="run-works-group" style="min-width:230px;"><span class="run-works-kind">' + escapeHtml(accName) + '</span>';
-            [['video', '视频'], ['image', '图集'], ['live', '实况']].forEach(function(kv) {
-                var list = w[kv[0]] || [];
-                if (list.length) {
-                    groupsHtml += '<span class="run-works-count">' + kv[1] + ' ' + list.length + '</span><ul class="run-works-list">' +
-                        list.map(function(t) { return '<li>' + escapeHtml(t) + '</li>'; }).join('') +
-                        '</ul>';
-                }
-            });
-            groupsHtml += '</div>';
-        });
-        logHtml += anyWorks
-            ? '<div class="run-works-box" style="max-height:320px;overflow-y:auto;">' + groupsHtml + '</div>'
-            : '<div class="empty-state" style="padding:14px 0;font-size:12px;">日志存在，但未解析到作品记录</div>';
-    }
-    logHtml += '</div>';
-
-    document.getElementById('batch-detail-body').innerHTML = summaryHtml + failHtml + rowsHtml + logHtml;
-    // 工具栏事件改为即时过滤（input 事件由内联 oninput 处理）
+    document.getElementById('batch-detail-body').innerHTML = bannerHtml + metricsHtml + failHtml + listHtml;
     renderBdItems();
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
 }
 
 function closeBatchDetail() {

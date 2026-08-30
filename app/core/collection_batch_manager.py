@@ -158,7 +158,11 @@ class CollectionBatchManager:
             return []
         with path.open("r", encoding="utf-8", errors="replace") as file:
             lines = [line.rstrip("\r\n") for line in file]
-        all_lines = [self._classify_log_line(line) for line in lines if line.strip()]
+        all_lines = [
+            self._classify_log_line(line)
+            for line in lines
+            if line.strip() and '"type": "work"' not in line and '"type":"work"' not in line
+        ]
         if max_lines is not None and max_lines > 0:
             all_lines = all_lines[-max_lines:]
         return all_lines
@@ -176,6 +180,14 @@ class CollectionBatchManager:
         path = Path(batch["log_path"])
         if not path.exists():
             return {}
+        stat = path.stat()
+        cache = getattr(self, "_works_cache", None)
+        if cache is None:
+            cache = self._works_cache = {}
+        sig = (stat.st_mtime_ns, stat.st_size)
+        cached = cache.get(batch_id)
+        if cached and cached[0] == sig:
+            return cached[1]
         with path.open("r", encoding="utf-8", errors="replace") as file:
             lines = [line.rstrip("\r\n") for line in file]
 
@@ -235,6 +247,7 @@ class CollectionBatchManager:
         for acc in works:
             for k in ("video", "image", "live"):
                 works[acc][k] = works[acc][k][:30]
+        cache[batch_id] = (sig, works)
         return works
 
     @staticmethod
@@ -296,11 +309,13 @@ class CollectionBatchManager:
         """判断一行日志是否应进入主日志(账号级摘要)。
 
         规则:
-        - __DOUKHUB__ 标记行: 全部保留(account_start / account_result / summary)
+        - __DOUKHUB__ 标记行: account/summary 保留，work 行不保留(作品级降噪)
         - 普通终端行: 只保留关键状态行(开始/完成/失败/汇总统计/参数/警告)，
           过滤掉"作品级"行(每个作品一行)避免刷屏
         """
         if "__DOUKHUB__" in line:
+            if '"type": "work"' in line or '"type":"work"' in line:
+                return False  # 作品级标记行不进主日志
             return True
         # 作品级行过滤: 单个文件下载/图集/视频条目/时间戳残片
         stripped = line.strip()
@@ -618,6 +633,8 @@ class CollectionBatchManager:
 
     def _apply_marker(self, batch_id: str, marker: dict) -> bool:
         marker_type = marker.get("type")
+        if marker_type == "work":
+            return self._apply_work_marker(batch_id, marker)
         if marker_type not in ("account_start", "account_result"):
             return False
         sec_user_id = str(marker.get("sec_user_id") or "")
@@ -656,6 +673,104 @@ class CollectionBatchManager:
             )
         self.db.refresh_collection_batch_counts(batch_id)
         return True
+
+    @staticmethod
+    def _clean_work_title(show: str) -> tuple[str, str]:
+        """从 TTD 下载显示名解析 (kind, title)。
+
+        show 形如 '【视频】2026-08-30-账号名-标题'，与日志解析规则一致：
+        去掉类型前缀后按前 3 个 '-' 切分，取剩余部分为标题。
+        """
+        show = (show or "").strip()
+        kind = "video"
+        if "【图集】" in show or "图集" in show[:6]:
+            kind = "image"
+        elif "【实况】" in show or "实况" in show[:6]:
+            kind = "live"
+        clean = (
+            show.replace("【视频】", "")
+            .replace("【图集】", "")
+            .replace("【实况】", "")
+            .strip()
+        )
+        parts = clean.split("-", 3)
+        if len(parts) >= 4:
+            clean = "-".join(parts[3:])
+        return kind, clean
+
+    @staticmethod
+    def _build_work_url(platform: str, kind: str, aweme_id: str) -> str:
+        if not aweme_id:
+            return ""
+        if platform == "douyin":
+            if kind == "image":
+                return f"https://www.douyin.com/note/{aweme_id}"
+            return f"https://www.douyin.com/video/{aweme_id}"
+        return ""
+
+    def _apply_work_marker(self, batch_id: str, marker: dict) -> bool:
+        """把 TTD 下载挂钩上报的作品事件实时写入 collection_works。"""
+        aweme_id = str(marker.get("aweme_id") or "")
+        if not aweme_id:
+            return False
+        batch = self.db.get_collection_batch(batch_id)
+        platform = str((batch or {}).get("platform") or "")
+        kind, title = self._clean_work_title(str(marker.get("show") or ""))
+        status = "success" if marker.get("status") == "success" else "failed"
+        file_path = str(marker.get("file_path") or "")
+        from pathlib import Path as _Path
+
+        fname = ""
+        fdir = ""
+        if file_path:
+            pp = _Path(file_path)
+            fname = pp.name
+            fdir = str(pp.parent)
+        try:
+            self.db.upsert_collection_work(
+                batch_id=batch_id,
+                sec_user_id=str(marker.get("sec_user_id") or ""),
+                account_name=str(marker.get("account_name") or ""),
+                platform=platform,
+                aweme_id=aweme_id,
+                title=title,
+                kind=kind,
+                work_url=self._build_work_url(platform, kind, aweme_id),
+                file_name=fname,
+                download_dir=fdir,
+                file_path=file_path,
+                status=status,
+                message="下载失败" if status == "failed" else "",
+            )
+        except Exception:
+            return False
+        return True
+
+    def read_batch_works_from_db(self, batch_id: str) -> list[dict]:
+        """读取某批次已入库的作品明细（新批次数据源）。"""
+        return self.db.list_batch_works(batch_id)
+
+    @staticmethod
+    def aggregate_db_works(works: list[dict]) -> dict:
+        """把库中的作品明细聚合成旧日志解析的兼容格式。
+
+        返回 { account_name: {"video": [...], "image": [...], "live": [...], "total": int} }
+        仅统计成功作品，与日志解析口径一致。
+        """
+        agg: dict = {}
+        for w in works:
+            if w.get("status") != "success":
+                continue
+            name = w.get("account_name") or w.get("sec_user_id") or "未知账号"
+            entry = agg.setdefault(
+                name, {"video": [], "image": [], "live": [], "total": 0}
+            )
+            kind = w.get("kind") or "video"
+            if kind not in ("video", "image", "live"):
+                kind = "video"
+            entry[kind].append(w.get("title") or w.get("file_name") or w.get("aweme_id") or "")
+            entry["total"] += 1
+        return agg
 
     def _finalize(
         self,

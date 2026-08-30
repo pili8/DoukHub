@@ -3726,30 +3726,113 @@ async def api_preview_collection_batch(request: CollectionBatchRequest):
 
 
 @app.get("/api/collection/batches/{batch_id}")
-async def api_collection_batch_detail(batch_id: str):
+async def api_collection_batch_detail(batch_id: str, include_log: bool = True):
+    """批次详情。
+
+    include_log=False（历史详情弹窗）：跳过日志全量读取与账号表关联，
+    只返回批次/明细/聚合作品（works 解析带 mtime 缓存），大幅降低响应耗时。
+    运行中面板走默认 include_log=True，保留流式日志。
+    """
     db = get_database()
     batch = db.get_collection_batch(batch_id)
     if not batch:
         return JSONResponse({"success": False, "message": "批次不存在"}, status_code=404)
     items = db.get_collection_batch_items(batch_id)
-    accounts = {
-        row["record_id"]: row
-        for row in db.get_all_accounts()
-        if row.get("record_id")
-    }
-    for item in items:
-        account = accounts.get(item.get("account_record_id"))
-        item["last_collected_at"] = account.get("last_collected_at") if account else None
+    if include_log:
+        accounts = {
+            row["record_id"]: row
+            for row in db.get_all_accounts()
+            if row.get("record_id")
+        }
+        for item in items:
+            account = accounts.get(item.get("account_record_id"))
+            item["last_collected_at"] = account.get("last_collected_at") if account else None
     log_path = (batch.get("log_path") or "") if batch else ""
     log_exists = bool(log_path) and Path(log_path).exists()
+    manager = get_collection_batch_manager()
+    works_db = manager.read_batch_works_from_db(batch_id)
+    if works_db:
+        works = manager.aggregate_db_works(works_db)
+        works_source = "db"
+    else:
+        works = manager.read_account_works(batch_id)
+        works_source = "log"
     return {
         "batch": batch,
         "items": items,
-        "log": get_collection_batch_manager().read_log(batch_id),
-        "works": get_collection_batch_manager().read_account_works(batch_id),
+        "log": manager.read_log(batch_id) if include_log else [],
+        "works": works,
+        "works_db": works_db,
+        "works_source": works_source,
         "log_exists": log_exists,
     }
 
+
+
+# ---------------- 作品明细（collection_works）----------------
+
+@app.get("/api/collection/account-works")
+async def api_account_works(sec_user_id: str = "", name: str = ""):
+    """按账号聚合全部批次的作品明细（带跨批次/同批次重复标记）。"""
+    db = get_database()
+    works = db.list_account_works(sec_user_id=sec_user_id, account_name=name)
+    stats = {
+        "total": len(works),
+        "success": sum(1 for w in works if w.get("status") == "success"),
+        "failed": sum(1 for w in works if w.get("status") != "success"),
+        "dup_total": sum(1 for w in works if int(w.get("dup_total") or 0) > 1),
+        "dup_in_batch": sum(1 for w in works if int(w.get("dup_in_batch") or 0) > 1),
+    }
+    return {"success": True, "works": works, "stats": stats}
+
+
+class WorkOpenRequest(BaseModel):
+    work_id: int
+    mode: str = "file"  # file=资源管理器定位文件, dir=打开目录
+
+
+@app.post("/api/collection/works/open")
+async def api_collection_work_open(request: WorkOpenRequest):
+    """打开作品下载文件或其所在目录。"""
+    db = get_database()
+    with db._connect() as conn:
+        import sqlite3
+
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM collection_works WHERE id = ?", (request.work_id,)
+        ).fetchone()
+    if not row:
+        return {"success": False, "message": "记录不存在"}
+    work = dict(row)
+    import os
+    import subprocess
+    import sys
+
+    if request.mode == "dir":
+        target = work.get("download_dir") or ""
+        if not target or not os.path.isdir(target):
+            return {"success": False, "message": f"目录不存在: {target or '未记录'}"}
+        try:
+            os.startfile(target)
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+    target = work.get("file_path") or ""
+    if not target:
+        return {"success": False, "message": "该记录无文件路径"}
+    if not os.path.isfile(target):
+        return {"success": False, "message": f"文件不存在（可能已被移动）: {target}"}
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select,", target])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", target])
+        else:
+            subprocess.Popen(["xdg-open", os.path.dirname(target)])
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 @app.post("/api/collection/batches/{batch_id}/cancel")
 async def api_cancel_collection_batch(batch_id: str):

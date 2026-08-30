@@ -1188,6 +1188,18 @@ async function copyCookieValue(recordId) {
     }
 }
 
+// 账号表 sec_user_id 渲染器：显示 sec + "作品"入口按钮
+function accountWorksRenderer(params) {
+    var val = params.value;
+    if (!val) return '<span style="color: var(--text-muted);">-</span>';
+    var display = val.length > 20 ? val.substring(0, 20) + '…' : val;
+    var safe = val.replace(/'/g, "\\'");
+    return '<span style="display:inline-flex;align-items:center;gap:6px;">'
+        + '<span style="color: var(--text-secondary);font-weight:500;">' + display + '</span>'
+        + '<a href="javascript:void(0)" onclick="openAccountWorks({sec_user_id:\'' + safe + '\'})" title="查看该账号采集的作品" style="font-size:11px;padding:2px 8px;border:1px solid var(--border-default);border-radius:20px;color:var(--text-secondary);text-decoration:none;white-space:nowrap;">作品</a>'
+        + '</span>';
+}
+
 // sec_user_id 链接渲染器：仅在分享表中使用，点击跳转到账号表并高亮对应行
 function secUserIdLinkRenderer(params) {
     var val = params.value;
@@ -1640,6 +1652,11 @@ var FIELD_RENDERERS = {
             // 分享表的 sec_user_id 用链接渲染器，点击跳转到账号表
             if (tableName === 'share_cache' && field.name === 'sec_user_id') {
                 colDef.cellRenderer = secUserIdLinkRenderer;
+            }
+
+            // 账号表的 sec_user_id：查看该账号采集作品的入口
+            if (tableName === 'account_cache' && field.name === 'sec_user_id') {
+                colDef.cellRenderer = accountWorksRenderer;
             }
 
             colDefs.push(colDef);

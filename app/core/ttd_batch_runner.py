@@ -80,6 +80,44 @@ async def run_platform(platform: str) -> int:
     from src.application.main_terminal import TikTok
     from src.custom import suspend
 
+    # 当前账号上下文：download 挂钩上报作品事件时携带归属
+    work_ctx = {"sec_user_id": "", "account_name": ""}
+
+    def _install_download_hook():
+        """挂钩 Downloader.download_file，把每个作品的下载结果以 work 标记输出。
+
+        必须在 TikTokDownloader 实例化之前安装（Downloader 类级 patch）。
+        """
+        from src.downloader.download import Downloader
+
+        original = Downloader.download_file
+
+        async def download_file_patched(
+            self, cache, actual, show, id_, response, content, position, count, progress
+        ):
+            ok = await original(
+                self, cache, actual, show, id_, response, content, position, count, progress
+            )
+            try:
+                emit_marker(
+                    {
+                        "type": "work",
+                        "status": "success" if ok else "failed",
+                        "aweme_id": str(id_),
+                        "show": str(show or ""),
+                        "file_path": str(actual.resolve()),
+                        "sec_user_id": work_ctx.get("sec_user_id", ""),
+                        "account_name": work_ctx.get("account_name", ""),
+                    }
+                )
+            except Exception:
+                pass
+            return ok
+
+        Downloader.download_file = download_file_patched
+
+    _install_download_hook()
+
     with (root / "Volume" / "settings.json").open("r", encoding="utf-8-sig") as file:
         settings = json.load(file)
     key = "accounts_urls" if platform == "douyin" else "accounts_urls_tiktok"
@@ -120,6 +158,8 @@ async def run_platform(platform: str) -> int:
                 resolved = await terminal.check_sec_user_id(item.url, tiktok)
                 if not resolved:
                     raise RuntimeError("无法从账号链接提取 sec_user_id")
+                work_ctx["sec_user_id"] = str(resolved or "")
+                work_ctx["account_name"] = str(name or "")
                 result = bool(
                     await terminal.deal_account_detail(
                         index,
@@ -152,6 +192,8 @@ async def run_platform(platform: str) -> int:
                     "message": message,
                 }
             )
+            work_ctx["sec_user_id"] = ""
+            work_ctx["account_name"] = ""
             if index != total and result:
                 await suspend(index, terminal.console)
 
