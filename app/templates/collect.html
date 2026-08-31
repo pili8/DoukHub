@@ -555,7 +555,19 @@ async function startCollection() {
     btn.innerHTML = '<i data-lucide="loader-circle"></i> 采集进行中...';
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     try {
-        var data = await apiCall('/api/collection/batches', 'POST', { preset_id: presetId });
+        var data = await apiCall('/api/collection/batches', 'POST', { preset_id: presetId, force_low_space: window._forceLowSpace === true });
+        window._forceLowSpace = false;
+        // 低空间提醒：needs_confirm 时弹确认，用户同意则带标记重发一次
+        if (data && data.needs_confirm) {
+            btn.disabled = false;
+            btn.innerHTML = '<i data-lucide="download"></i> 开始采集';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+            if (confirm(data.message || '下载目录剩余空间不足，是否仍然开始采集？')) {
+                window._forceLowSpace = true;
+                return startCollection();
+            }
+            return;
+        }
         showToast('已创建 ' + (data.batches || []).length + ' 个批次', 'success');
         await refreshCollectionBatches();
     } catch (e) {
@@ -1151,7 +1163,17 @@ function renderBatchDetailBody() {
         var chips = Object.keys(failMsgs).sort(function(a, b) { return failMsgs[b] - failMsgs[a]; }).slice(0, 4).map(function(m) {
             return '<span class="bd-fail-chip" title="' + escapeHtml(m) + '"><b>' + failMsgs[m] + '×</b><span>' + escapeHtml(m) + '</span></span>';
         }).join('');
-        failHtml = '<div class="bd-fail-card"><span class="bd-fail-title">失败 ' + failCount + ' 个</span>' + chips + '</div>';
+        // 路径嫌疑归纳：多个失败原因集中指向存储路径问题时给出明确提醒
+        var pathKw = ['不存在', '找不到', 'No such', 'Permission', '拒绝访问', '目录', '路径', 'disk', 'space', '空间'];
+        var pathFails = 0;
+        Object.keys(failMsgs).forEach(function(m) {
+            var lm = m.toLowerCase();
+            if (pathKw.some(function(k) { return lm.indexOf(k.toLowerCase()) >= 0; })) pathFails += failMsgs[m];
+        });
+        var pathHint = pathFails >= 3
+            ? '<span class="bd-fail-chip" style="color:var(--dh-danger,#C2410C);font-weight:700;"><b>!</b><span>多个失败疑似与下载目录有关，请检查存储方案路径是否有效</span></span>'
+            : '';
+        failHtml = '<div class="bd-fail-card"><span class="bd-fail-title">失败 ' + failCount + ' 个</span>' + pathHint + chips + '</div>';
     }
 
     // —— 账号明细列表卡 ——

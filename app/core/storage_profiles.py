@@ -166,7 +166,10 @@ def check_path(path_str: str, timeout: float = 3.0) -> tuple[bool, str]:
             p = Path(raw).expanduser()
         except Exception as exc:  # 非法路径
             return False, f"路径格式无效: {exc}"
+        created = False
         try:
+            if not p.exists():
+                created = True
             p.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             return False, f"目录不可创建: {exc.strerror or exc}"
@@ -179,6 +182,8 @@ def check_path(path_str: str, timeout: float = 3.0) -> tuple[bool, str]:
         try:
             probe.write_text("ok", encoding="utf-8")
             probe.unlink(missing_ok=True)
+            if created:
+                return True, "可用（该路径原先不存在，已自动创建）"
             return True, "可用"
         except OSError as exc:
             return False, f"目录不可写: {exc.strerror or exc}"

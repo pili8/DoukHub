@@ -830,6 +830,50 @@
         // 命名编辑器为共享组件（name_editor.js），按需打开时按方案解析 name_format，无需预载
         renderStorageList('single');
         renderStorageList('batch');
+        probeStorageAll();  // 打开设置页即探测，徽标显示新鲜状态
+    }
+
+    // ---- 存储方案路径探测 ----
+    var _probeTimer = {};
+    function probeStorageAll() {
+        ['single', 'batch'].forEach(function(scope) { probeStorageScope(scope); });
+    }
+    async function probeStorageScope(scope) {
+        var list = scopeProfiles(scope).filter(function(p) { return (p.path || '').trim() && p.enabled !== false; });
+        if (!list.length) return;
+        try {
+            var data = await apiCall('/api/collection/storage/check', 'POST', {
+                items: list.map(function(p) { return { id: scope + ':' + p.id, path: p.path }; }),
+                timeout: 3.0
+            });
+            var results = (data && data.results) || {};
+            var now = new Date();
+            var hhmm = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
+            list.forEach(function(p) {
+                var r = results[scope + ':' + p.id];
+                if (!r) return;
+                p._status = r.ok ? 'ok' : 'fail';
+                p._statusReason = r.reason || '';
+                p._probedAt = hhmm;
+                if (r.ok && r.reason && r.reason.indexOf('已自动创建') >= 0) {
+                    showToast('方案「' + (p.name || '未命名') + '」的路径不存在，已自动创建，请确认是否填错', 'info');
+                }
+                var stEl = document.getElementById('slot-status-' + scope + '-' + list.indexOf(p));
+                if (stEl) {
+                    stEl.className = 's-badge ' + (r.ok ? 'ok' : 'fail');
+                    stEl.textContent = r.ok ? '可用' : '不可用';
+                    stEl.title = (r.reason || '') + '（探测于 ' + hhmm + '）';
+                }
+            });
+        } catch(e) { /* 探测失败静默，徽标保持原状 */ }
+    }
+    function scheduleProbe(scope, idx) {
+        clearTimeout(_probeTimer[scope + ':' + idx]);
+        _probeTimer[scope + ':' + idx] = setTimeout(function() {
+            var p = scopeProfiles(scope)[idx];
+            if (!p || !(p.path || '').trim()) return;
+            probeStorageScope(scope);
+        }, 900);
     }
 
     // ---- 方案列表渲染 ----
@@ -935,7 +979,8 @@
     function _profileCard(scope, p, idx, total) {
         var draft = !(p.path || '').trim();
         var statusText = p._status === 'ok' ? '可用' : (p._status === 'fail' ? '不可用' : '');
-        var statusBadge = '<span class="s-badge ' + (p._status === 'ok' ? 'ok' : p._status === 'fail' ? 'fail' : 'none') + '" id="slot-status-' + scope + '-' + idx + '">' + statusText + '</span>';
+        var statusTitle = (p._statusReason || '') + (p._probedAt ? '（探测于 ' + p._probedAt + '）' : '');
+        var statusBadge = '<span class="s-badge ' + (p._status === 'ok' ? 'ok' : p._status === 'fail' ? 'fail' : 'none') + '" id="slot-status-' + scope + '-' + idx + '"' + (statusTitle ? ' title="' + statusTitle + '"' : '') + '>' + statusText + '</span>';
         var badges =
             (p.role === 'primary' ? '<span class="s-badge lead">默认主</span>' : '') +
             (p.role === 'secondary' ? '<span class="s-badge warn">默认次</span>' : '') +
@@ -1068,6 +1113,7 @@
             p._status = undefined;
             var stEl = document.getElementById('slot-status-' + scope + '-' + idx);
             if (stEl) { stEl.textContent = ''; stEl.className = 's-badge none'; }
+            if (field === 'path') scheduleProbe(scope, idx);
             if (field === 'name_format') {
                 renderProfilePreview(scope, list);
                 // 命名代码输入框与效果同步（可视化编辑器写回时更新输入框；手动输入时输入框已是源头，不覆盖）

@@ -1802,6 +1802,7 @@ class CollectionBatchRequest(BaseModel):
     preset_id: int | None = None
     storage_primary_id: str = ""   # 主方案 ID（空=用预设/默认主）
     storage_secondary_id: str = ""  # 次方案 ID（空=用预设/默认次）
+    force_low_space: bool = False   # 低空间提醒确认后重发时为 True
 
 
 class CollectionRetryRequest(BaseModel):
@@ -3631,6 +3632,14 @@ async def api_start_collection_batch(request: CollectionBatchRequest):
             )
     if not folder_name:
         folder_name = defaults.get("folder_name", "Download")
+    # 磁盘空间检查：剩余不足 5GB 时不直接拒绝，返回 needs_confirm 交由前端确认
+    import shutil as _shutil
+
+    free_gb = None
+    try:
+        free_gb = _shutil.disk_usage(folder_name).free / 1024**3
+    except OSError:
+        pass  # 网络盘不可达等场景由存储方案探测负责报错
     if not name_format:
         name_format = sp.resolve_name_format(config, "batch", active_profile)
         if not name_format:
@@ -3646,6 +3655,19 @@ async def api_start_collection_batch(request: CollectionBatchRequest):
     platforms = (
         ("douyin", "tiktok") if platform == "all" else (platform,)
     )
+    # 低空间确认：剩余不足 5GB 时先返回 needs_confirm，由前端确认后带 force_low_space 重发
+    if free_gb is not None and free_gb < 5 and not request.force_low_space:
+        return JSONResponse(
+            {
+                "success": False,
+                "needs_confirm": True,
+                "message": (
+                    f"下载目录剩余空间不足 5GB（当前剩 {free_gb:.1f}GB），"
+                    "采集可能中途失败。是否仍然开始？"
+                ),
+            },
+            status_code=200,
+        )
     try:
         batches = await manager.start(
             accounts=db.get_all_accounts(),
