@@ -338,19 +338,49 @@ class CollectionBatchManager:
         text = stripped.lower()
         return any(k in text for k in key)
 
-    def _pick_cookie(self, platform: str) -> str:
-        """从数据库选取一个有效 Cookie。platform 为 douyin/tiktok。"""
+    def _pick_cookie(self, platform: str) -> tuple[str, str]:
+        """从数据库选取一个有效 Cookie，返回 (cookie, record_id)。
+
+        优选策略：状态正常的候选中取「最久未使用」的一个，均衡轮换，
+        避免单一 Cookie 被高频使用触发风控。
+        """
         expected = platform
         cookies = self.db.get_enabled_cookies()
         candidates = [c for c in cookies if c.get("平台") == expected]
         if not candidates:
             candidates = [c for c in cookies if c.get("平台") == expected and c.get("启用")]
         if not candidates:
-            return ""
+            return "", ""
+        candidates.sort(key=lambda c: str(c.get("last_used_at") or ""))
         chosen = candidates[0]
         if chosen.get("record_id"):
             self.db.record_cookie_usage(chosen["record_id"])
-        return str(chosen.get("Cookie", ""))
+        return str(chosen.get("Cookie", "")), str(chosen.get("record_id") or "")
+
+    _LOGIN_FAIL_KEYWORDS = ("登录", "cookie", "Cookie", "验证", "403")
+
+    def _note_account_failure(self, message: str) -> None:
+        """批次内累计疑似登录态失效的账号失败，用于批次后闭环标记 Cookie。"""
+        msg = str(message or "")
+        if any(k in msg for k in self._LOGIN_FAIL_KEYWORDS):
+            self._batch_login_fail += 1
+
+    def _close_cookie_loop(self, batch_id: str, cookie_record_id: str) -> None:
+        """批次结束：疑似登录态失败账号达到阈值时，把本次使用的 Cookie 标记失效。"""
+        if not cookie_record_id or self._batch_login_fail < 3:
+            return
+        try:
+            self.db.mark_cookie_invalid(cookie_record_id)
+            batch = self.db.get_collection_batch(batch_id)
+            log_path = (batch or {}).get("log_path")
+            if log_path:
+                with Path(log_path).open("a", encoding="utf-8", errors="replace") as f:
+                    f.write(
+                        f"[DoukHub] {self._batch_login_fail} 个账号报登录态相关错误，"
+                        f"已自动将本次使用的 Cookie（{cookie_record_id}）标记为失效\n"
+                    )
+        except Exception:
+            pass
 
     def recover_interrupted_batches(self) -> None:
         for batch in self.db.list_active_collection_batches():
@@ -498,6 +528,8 @@ class CollectionBatchManager:
     async def _run_batch(self, batch_id: str) -> str:
         self._active_batch_id = batch_id
         self._cancel_requested = False
+        self._batch_login_fail = 0
+        self._batch_cookie_rid = ""
         batch = self.db.get_collection_batch(batch_id)
         items = self.db.get_collection_batch_items(batch_id)
         # 从 filter_json 中解析采集设置
@@ -539,13 +571,15 @@ class CollectionBatchManager:
                 )
                 for item in pending
             ]
+            cookie_str, cookie_rid = self._pick_cookie(batch["platform"])
+            self._batch_cookie_rid = cookie_rid
             write_ttd_accounts(
                 self.ttd_path / "Volume" / "settings.json",
                 batch["platform"],
                 planned_items,
                 folder_name=folder_name,
                 name_format=name_format,
-                cookie=self._pick_cookie(batch["platform"]),
+                cookie=cookie_str,
                 engine_params=engine_params,
             )
         except Exception as error:
@@ -595,16 +629,35 @@ class CollectionBatchManager:
             log_path.parent.mkdir(parents=True, exist_ok=True)
 
             with log_path.open("w", encoding="utf-8", errors="replace") as log_file:
-                while True:
-                    raw = await process.stdout.readline()
-                    if not raw:
-                        break
-                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-                    log_file.write(line + "\n")
-                    log_file.flush()
-                    marker = marker_line(line)
-                    if marker:
-                        self._apply_marker(batch_id, marker)
+                last_output = time.monotonic()
+
+                async def _watchdog() -> None:
+                    """引擎心跳看门狗：长时间无输出时写入警告日志（不杀进程）。"""
+                    while process.returncode is None:
+                        await asyncio.sleep(60)
+                        silent = time.monotonic() - last_output
+                        if silent > 300:
+                            log_file.write(
+                                f"[DoukHub watchdog] 引擎已 {int(silent)} 秒无输出，"
+                                "请检查 TTD 进程是否卡住\n"
+                            )
+                            log_file.flush()
+
+                watchdog_task = asyncio.create_task(_watchdog())
+                try:
+                    while True:
+                        raw = await process.stdout.readline()
+                        if not raw:
+                            break
+                        last_output = time.monotonic()
+                        line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                        log_file.write(line + "\n")
+                        log_file.flush()
+                        marker = marker_line(line)
+                        if marker:
+                            self._apply_marker(batch_id, marker)
+                finally:
+                    watchdog_task.cancel()
 
             return_code = await process.wait()
         except Exception as error:
@@ -622,6 +675,32 @@ class CollectionBatchManager:
         else:
             final_status = "completed" if return_code == 0 else "failed"
             message = "" if return_code == 0 else f"TTD 进程退出码: {return_code}"
+
+        self._close_cookie_loop(batch_id, self._batch_cookie_rid)
+
+        # 失败账号自动重试一轮（仅一次）：网络抖动/瞬时风控当场补上，不留给下一轮
+        if (
+            final_status == "completed"
+            and not filter_data.get("retried")
+            and not self._cancel_requested
+        ):
+            failed_items = [
+                it for it in self.db.get_collection_batch_items(batch_id)
+                if it["status"] == "failed"
+            ]
+            if failed_items:
+                filter_data["retried"] = True
+                self.db.update_collection_batch(
+                    batch_id,
+                    filter_json=json.dumps(filter_data, ensure_ascii=False),
+                )
+                for it in failed_items:
+                    self.db.update_collection_batch_item(
+                        it["id"], status="pending", message="首轮失败，自动重试中"
+                    )
+                self._clear_active_batch()
+                await asyncio.sleep(20)  # 降温间隔，降低连续请求触发风控的概率
+                return await self._run_batch(batch_id)
 
         self._clear_active_batch()
         self._finalize(batch_id, final_status, return_code, message)
@@ -660,10 +739,13 @@ class CollectionBatchManager:
             return True
 
         status = "success" if marker.get("status") == "success" else "failed"
+        message = str(marker.get("message") or "")
+        if status != "success":
+            self._note_account_failure(message)
         self.db.update_collection_batch_item(
             item["id"],
             status=status,
-            message=str(marker.get("message") or ""),
+            message=message,
             finished_at=now,
         )
         batch_start_date = str((batch or {}).get("started_at") or "")[:10]
