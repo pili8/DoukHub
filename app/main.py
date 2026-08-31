@@ -258,7 +258,7 @@ async def lifespan(app: FastAPI):
         single_work_client = None
 
 
-app = FastAPI(title="DoukHub", version="2.2.4", lifespan=lifespan)
+app = FastAPI(title="DoukHub", version="2.2.5", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
