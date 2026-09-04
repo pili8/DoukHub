@@ -77,11 +77,16 @@ class TestPageRoutes:
         assert "采集" in r.text
 
     def test_collect_page_contains_batch_controls(self, app_env):
+        # 2026-08-20 改版后：批次列表仍内置在采集页（含失败重试按钮，文案为「重试」），
+        # 「批次记录」标题迁至采集总览页 /collect/overview
         client, *_ = app_env
         r = client.get("/collect")
         assert "采集模式" in r.text
-        assert "批次记录" in r.text
-        assert "失败重试" in r.text
+        assert "retryBatch" in r.text
+        r2 = client.get("/collect/overview")
+        assert r2.status_code == 200
+        # 「最近批次」标题在有无数据时都会渲染（空状态文案「暂无批次记录」仅在无数据分支）
+        assert "最近批次" in r2.text
 
     def test_sync_overview_page(self, app_env):
         client, *_ = app_env
@@ -138,12 +143,8 @@ class TestAPIEndpoints:
         assert r.json()["success"] is True
         assert config.concurrent_accounts == 5
 
-    def test_get_schedule(self, app_env):
-        client, *_ = app_env
-        r = client.get("/api/schedule")
-        assert r.status_code == 200
-        data = r.json()
-        assert "tasks" in data
+    # /api/schedule 定时任务端点已随功能下线移除（commit 4e95235），
+    # 原 test_get_schedule 一并删除，无替代端点。
 
     def test_get_accounts_empty(self, app_env):
         client, *_ = app_env
