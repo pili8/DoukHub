@@ -337,7 +337,7 @@
     --ag-header-column-resize-handle-color: var(--border-default);
     --ag-font-family: var(--font-sans);
     --ag-font-size: 13px;
-    --ag-cell-horizontal-padding: 14px;
+    --ag-cell-horizontal-padding: 10px;
     --ag-header-height: 40px;
     --ag-row-height: 40px;
     --ag-border-radius: 0;
@@ -417,18 +417,24 @@
     text-transform: uppercase;
 }
 
-/* 表头筛选按钮（漏斗图标）：默认隐藏，悬停列头才显示；有筛选/排序时常驻 */
+/* 表头筛选按钮（漏斗图标）：悬浮定位，不占文字空间；悬停列头才显示，有筛选/排序时常驻 */
 .tbl-header-menu-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
     display: inline-flex !important;
     align-items: center;
     justify-content: center;
-    width: 22px; height: 22px;
+    width: 20px; height: 20px;
     border: none; background: transparent;
     color: var(--text-muted); cursor: pointer;
     border-radius: 4px; flex-shrink: 0;
+    pointer-events: auto;
 }
 .ag-header-cell:hover .tbl-header-menu-btn {
     opacity: 1;
+    background: var(--bg-hover);
 }
 .tbl-header-menu-btn:hover {
     background: var(--bg-hover);
@@ -1281,6 +1287,7 @@ return el;
     }
 
     function actionsRenderer(params) {
+        if (!params.data) return ''; // infinite 模型占位行无数据
         const recordId = params.data.record_id || String(params.data.ID || '');
         if (!recordId) return '';
         const safeId = recordId.replace(/'/g, "\\'");
@@ -1298,6 +1305,7 @@ async function copyCookieValue(recordId) {
     let val = '';
     if (gridApi) {
         gridApi.forEachNode(function(node) {
+            if (!node.data) return;
             if ((node.data.record_id || String(node.data.ID || '')) === recordId) {
                 val = node.data.Cookie || '';
             }
@@ -1362,7 +1370,7 @@ var FIELD_RENDERERS = {
             this.field = params.column.getColDef().field;
             this.displayName = params.displayName;
             this.gui = document.createElement('div');
-            this.gui.style.cssText = 'display:flex;align-items:center;justify-content:space-between;width:100%;height:100%;padding:0 8px;cursor:default;user-select:none;';
+            this.gui.style.cssText = 'display:flex;align-items:center;width:100%;height:100%;padding:0 6px;cursor:default;user-select:none;position:relative;box-sizing:border-box;';
             this._render();
         }
         _render() {
@@ -1375,8 +1383,9 @@ var FIELD_RENDERERS = {
             const safeField = htmlEscape(this.field);
             const funnelSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5z"/></svg>';
             this.gui.innerHTML =
-                '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' +
-                safeName + '">' + safeName +
+                '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
+                (btnActive ? 'padding-right:22px;' : 'padding-right:4px;') +
+                '" title="' + safeName + '">' + safeName +
                 (isSorted ? '<span style="color:var(--accent);margin-left:4px;font-weight:700;">' + arrow + '</span>' : '') +
                 '</span>' +
                 '<button class="tbl-header-menu-btn' + (btnActive ? ' is-active' : '') + '" data-field="' + safeField + '" title="排序 / 筛选">' +
@@ -1878,6 +1887,9 @@ var FIELD_RENDERERS = {
                             if (seq !== _dsSeq) return;
                             cache.blocks.set(nextStart, r2);
                             cache.prefetching.delete(nextStart);
+                            // 预取的块也算进"已加载"，状态条才准确
+                            cache.loaded = Math.max(cache.loaded, nextStart + BLOCK_SIZE);
+                            _renderLoadStatus(cache);
                         }).catch(function() { cache.prefetching.delete(nextStart); });
                     }
                 }).catch(function() {
@@ -1940,7 +1952,7 @@ var FIELD_RENDERERS = {
                 datasource: makeDatasource(),
                 cacheBlockSize: BLOCK_SIZE,
                 maxBlocksInCache: 10,
-                blockLoadDebounce: 150,
+                blockLoadDebounce: 50,
                 rowSelection: 'multiple',
                 suppressRowClickSelection: true,
                 animateRows: false,
@@ -1956,6 +1968,9 @@ var FIELD_RENDERERS = {
                 overlayLoadingTemplate: '<div style="padding: 20px;"><i class="ph ph-circle-notch" style="font-size: 24px; animation: spin 0.8s linear infinite; display: inline-block; color: var(--accent);"></i> <span style="color:var(--text-muted);font-size:13px;">加载中…</span></div>',
                 overlayNoRowsTemplate: '<div style="padding: 40px; text-align: center; color: var(--text-muted);"><i class="ph ph-database" style="font-size: 36px; opacity: 0.3; display: block; margin-bottom: 10px;"></i><span style="font-size:14px;">暂无数据</span></div>',
                 getRowId: (params) => {
+                    // infinite 模型的"加载中"占位行没有 data，必须先判空，
+                    // 否则渲染骨架行时抛异常，行回收被打断（滚动会明显卡顿）
+                    if (!params.data) return undefined;
                     return params.data.record_id || ('ID_' + (params.data.ID || ''));
                 },
                 onCellValueChanged: onCellValueChanged,
