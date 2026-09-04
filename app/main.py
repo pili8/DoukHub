@@ -275,7 +275,7 @@ async def lifespan(app: FastAPI):
         single_work_client = None
 
 
-app = FastAPI(title="DoukHub", version="2.2.5", lifespan=lifespan)
+app = FastAPI(title="DoukHub", version="2.2.6", lifespan=lifespan)
 
 
 

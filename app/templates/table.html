@@ -15,7 +15,8 @@
 <div class="card tbl-toolbar-card">
     <div class="tbl-toolbar-row">
         <div id="table-tabs" class="tbl-tabs"></div>
-<div class="tbl-search-group">
+        <div class="tbl-search-group">
+            <div class="tbl-search-combo">
                 <select id="search-field" class="tbl-search-field" onchange="onSearchFieldChange(this.value)" title="搜索范围：默认只搜文本字段，全字段搜索较慢"></select>
                 <div class="tbl-search-wrapper">
                     <i class="ph ph-magnifying-glass tbl-search-icon"></i>
@@ -23,11 +24,15 @@
                     <button class="tbl-search-clear" id="search-clear-btn" onclick="clearSearch()" style="display:none;"><i class="ph ph-x"></i></button>
                 </div>
             </div>
+        </div>
     </div>
 </div>
 
 <!-- 主内容区 -->
 <div id="table-main" class="tbl-main" style="display:none;">
+    <!-- 已应用的筛选 / 排序条件条 -->
+    <div id="filter-bar" class="tbl-filter-bar" hidden></div>
+
     <!-- 内容工具栏 -->
     <div class="tbl-content-toolbar">
         <div class="tbl-title-group">
@@ -168,36 +173,41 @@
 .tab-btn .tab-icon { font-size: 15px; transition: transform var(--transition-fast); }
 .tab-btn:hover .tab-icon { transform: scale(1.15); }
 
-/* ===== 搜索框 ===== */
-.tbl-search-group { display: flex; gap: 6px; align-items: center; margin-left: auto; }
-.tbl-search-wrapper { position: relative; display: flex; align-items: center; }
+/* ===== 搜索框（字段选择 + 输入 连体组合） ===== */
+.tbl-search-group { display: flex; align-items: center; margin-left: auto; }
+.tbl-search-combo {
+    display: flex; align-items: stretch;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    overflow: hidden;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.tbl-search-combo:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-light);
+}
+.tbl-search-wrapper { position: relative; display: flex; align-items: center; flex: 1; }
 .tbl-search-icon {
-    position: absolute; left: 12px; top: 50%;
+    position: absolute; left: 10px; top: 50%;
     transform: translateY(-50%);
     font-size: 14px; color: var(--text-muted);
     pointer-events: none;
     transition: color var(--transition-fast);
 }
 .tbl-search-input {
-    padding: 7px 32px 7px 34px;
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
-    min-width: 220px;
-    background: var(--bg-input);
+    padding: 7px 32px 7px 30px;
+    border: none;
+    border-radius: 0;
+    min-width: 200px; width: 100%;
+    background: transparent;
     color: var(--text-primary);
     font-size: 13px;
     font-family: inherit;
-    transition: all var(--transition);
-}
-.tbl-search-input:focus {
     outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-light);
 }
-.tbl-search-input:focus + .tbl-search-icon,
-.tbl-search-wrapper:focus-within .tbl-search-icon {
-    color: var(--accent);
-}
+/* 焦点态由外层 combo 统一承载：高亮时图标跟着变强调色 */
+.tbl-search-combo:focus-within .tbl-search-icon { color: var(--accent); }
 .tbl-search-input::placeholder { color: var(--text-muted); }
 .tbl-search-clear {
     position: absolute; right: 8px; top: 50%;
@@ -210,7 +220,7 @@
     font-size: 11px;
     transition: all var(--transition-fast);
 }
-.tbl-search-clear:hover { background: var(--danger); color: #fff; }
+.tbl-search-clear:hover { background: var(--danger); color: var(--text-on-accent); }
 
 /* ===== 主内容区 ===== */
 /* 页面主容器铺满视口,表格弹性占满剩余空间 */
@@ -243,6 +253,7 @@
 .tbl-content-toolbar {
     display: flex; justify-content: space-between; align-items: center;
     margin-bottom: 12px; gap: 8px; flex-wrap: wrap;
+    flex-shrink: 0;
 }
 .tbl-title-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tbl-content-title {
@@ -264,6 +275,94 @@
 }
 .tbl-action-group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .tbl-divider-v { width: 1px; height: 20px; background: var(--border-default); }
+
+/* ===== 已应用条件条：筛选/排序状态可视化，可逐条撤销 ===== */
+/* 中性底 + 左侧强调竖条：与"已选 N 条"的批量条（accent 底）区分开，
+   前者是常驻状态说明，后者是需要立即处理的瞬时动作态。 */
+.tbl-filter-bar {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    flex-shrink: 0;
+    margin-bottom: 10px; padding: 8px 10px 8px 12px;
+    background: var(--bg-muted);
+    border: 1px solid var(--border-default);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-lg);
+    animation: tbl-bar-in 180ms cubic-bezier(0.2, 0, 0, 1);
+}
+.tbl-filter-bar[hidden] { display: none; }
+@keyframes tbl-bar-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.tbl-fb-label {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11.5px; font-weight: 700;
+    color: var(--accent-text);
+    letter-spacing: .02em;
+    flex-shrink: 0;
+}
+.tbl-fb-label i { font-size: 14px; }
+/* 条件胶囊：字段名弱化 + 值加粗，右侧 × 移除 */
+.tbl-fb-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    max-width: 320px;
+    padding: 3px 4px 3px 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-full);
+    font-size: 12px; line-height: 20px;
+    color: var(--text-primary);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.tbl-fb-chip:hover { border-color: var(--accent); box-shadow: var(--shadow-xs); }
+.tbl-fb-chip .fb-k {
+    color: var(--text-secondary); font-weight: 600; flex-shrink: 0;
+}
+.tbl-fb-chip .fb-v {
+    font-weight: 600; letter-spacing: .01em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tbl-fb-chip .fb-n {
+    font-size: 11px; font-weight: 700; color: var(--accent-text);
+    background: var(--accent-light);
+    padding: 0 6px; border-radius: var(--radius-full);
+    flex-shrink: 0;
+}
+.tbl-fb-chip .fb-x {
+    width: 18px; height: 18px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; border-radius: 50%;
+    background: transparent; color: var(--text-muted);
+    cursor: pointer; font-size: 11px; font-family: inherit;
+    transition: background .12s, color .12s;
+}
+.tbl-fb-chip .fb-x:hover { background: var(--danger-light); color: var(--danger-text); }
+/* 排序胶囊：与筛选区分，用中性底 + 虚线边 */
+.tbl-fb-chip.is-sort {
+    background: var(--bg-muted);
+    border-style: dashed;
+}
+.tbl-fb-chip.is-sort .fb-v { color: var(--accent-text); }
+/* 搜索胶囊：字段名用引号包值，弱化于筛选 */
+.tbl-fb-chip.is-search .fb-k { font-weight: 500; }
+.tbl-fb-chip.is-search .fb-v {
+    color: var(--text-secondary); font-weight: 600;
+    font-family: var(--font-mono); font-size: 11.5px;
+}
+/* 清除全部：视觉上弱于胶囊，避免与"应用"类主操作抢注意力 */
+.tbl-fb-clear {
+    margin-left: auto;
+    padding: 3px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px; font-family: inherit;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: background .12s, color .12s;
+}
+.tbl-fb-clear:hover { background: var(--danger-light); color: var(--danger-text); }
 
 /* ===== 批量操作(并入工具栏) ===== */
 .tbl-action-normal,
@@ -363,20 +462,24 @@
     --ag-item-active-color: var(--menu-hover);
 }
 
-/* ===== 搜索范围选择器 ===== */
+/* ===== 搜索范围选择器（组合控件左半段，无独立边框，靠细分隔线与输入区分界） ===== */
 .tbl-search-field {
     padding: 7px 8px;
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-sm);
-    background: var(--bg-input);
-    color: var(--text-primary);
+    border: none;
+    border-right: 1px solid var(--border-default);
+    border-radius: 0;
+    background: var(--bg-muted);
+    color: var(--text-secondary);
     font-size: 12.5px;
     font-family: inherit;
     cursor: pointer;
-    max-width: 150px;
-    transition: border-color var(--transition-fast);
+    max-width: 130px;
+    flex-shrink: 0;
+    outline: none;
+    transition: color var(--transition-fast), background-color var(--transition-fast);
 }
-.tbl-search-field:focus { outline: none; border-color: var(--accent); }
+.tbl-search-field:hover { color: var(--text-primary); }
+.tbl-search-combo:focus-within .tbl-search-field { color: var(--accent-text); }
 
 /* ===== 加载状态条（替代分页条） ===== */
 .tbl-load-status {
@@ -481,11 +584,33 @@
 }
 .tbl-header-menu-btn svg { display: block; }
 
+/* 表头标题 + 排序箭头：纯视觉指示，不响应点击（排序/筛选统一走漏斗按钮） */
+.ag-theme-quartz .tbl-hdr-label {
+    flex: 1; min-width: 0;
+    display: inline-flex; align-items: center; gap: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    transition: color var(--transition-fast);
+}
+.ag-theme-quartz .tbl-hdr-label.is-active {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+.ag-theme-quartz .tbl-sort-arrow {
+    pointer-events: none;
+    font-size: 11px; font-weight: 700;
+    color: var(--accent);
+}
+/* 无数据提示：与页面其他空态保持同一 muted 语气 */
+.ag-theme-quartz .ag-overlay-no-rows-center {
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
 /* ===== 筛选弹窗 ===== */
 .tbl-filter-popup {
     position: fixed;
     z-index: 20000;
-    width: 252px;
+    width: 300px;
     padding: 0;
     background: var(--bg-surface);
     border: 1px solid var(--border-default);
@@ -497,15 +622,25 @@
     animation: tbl-menu-in 130ms cubic-bezier(0.2, 0, 0, 1);
     user-select: none;
 }
-/* 头部：字段名 + 关闭 */
+/* 头部：字段类型图标 + 字段名 + 关闭 */
 .tbl-filter-popup .fp-head {
-    display: flex; align-items: center; gap: 8px;
-    padding: 10px 8px 8px 12px;
+    display: flex; align-items: center; gap: 7px;
+    padding: 10px 8px 9px 12px;
+    border-bottom: 1px solid var(--border-default);
+    background: var(--bg-muted);
+}
+.tbl-filter-popup .fp-type {
+    width: 22px; height: 22px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--radius-xs);
+    background: var(--accent-light);
+    color: var(--accent-text);
+    font-size: 13px;
 }
 .tbl-filter-popup .fp-title {
     flex: 1; min-width: 0;
-    font-size: 12px; font-weight: 600;
-    color: var(--text-secondary);
+    font-size: 12.5px; font-weight: 700;
+    color: var(--text-primary);
     letter-spacing: .01em;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -542,6 +677,21 @@
     font-weight: 600; box-shadow: var(--shadow-xs);
 }
 .tbl-filter-popup .fp-seg-btn .fp-arrow { font-weight: 700; }
+/* 分组小标题：让"排序 / 筛选值"两个区块一眼可分 */
+.tbl-filter-popup .fp-sec {
+    display: flex; align-items: center; gap: 6px;
+    margin: 2px 12px 5px;
+    font-size: 10.5px; font-weight: 700;
+    letter-spacing: .06em;
+    color: var(--text-muted);
+}
+.tbl-filter-popup .fp-sec .fp-sec-n {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-weight: 600; font-size: 10.5px;
+    letter-spacing: 0;
+    color: var(--text-tertiary);
+}
 /* 值检索 */
 .tbl-filter-popup .fp-search-wrap {
     position: relative;
@@ -555,7 +705,7 @@
 }
 .tbl-filter-popup .fp-search {
     width: 100%; box-sizing: border-box;
-    padding: 6px 8px 6px 26px;
+    padding: 6px 26px 6px 26px;
     border: 1px solid var(--border-default);
     border-radius: var(--radius-sm);
     font-size: 12px; background: var(--bg-input); color: var(--text-primary);
@@ -567,6 +717,19 @@
     box-shadow: 0 0 0 3px var(--accent-light);
 }
 .tbl-filter-popup .fp-search::placeholder { color: var(--text-muted); }
+/* 检索框内清空按钮：有输入时才出现 */
+.tbl-filter-popup .fp-search-clear {
+    position: absolute; right: 5px; top: 50%;
+    transform: translateY(-50%);
+    width: 18px; height: 18px;
+    display: none; align-items: center; justify-content: center;
+    border: none; border-radius: 50%;
+    background: var(--bg-hover); color: var(--text-muted);
+    cursor: pointer; font-size: 10px; font-family: inherit; line-height: 1;
+    transition: background .12s, color .12s;
+}
+.tbl-filter-popup .fp-search-clear:hover { background: var(--danger-light); color: var(--danger-text); }
+.tbl-filter-popup .fp-search-wrap.has-text .fp-search-clear { display: inline-flex; }
 /* 全选 + 已选计数 */
 .tbl-filter-popup .fp-meta {
     display: flex; align-items: center; gap: 8px;
@@ -580,8 +743,30 @@
     cursor: pointer;
 }
 .tbl-filter-popup .fp-all:hover { color: var(--accent); }
-.tbl-filter-popup .fp-count {
+/* 全选/清空：一排轻量文字按钮，与计数同处一条 meta 行 */
+.tbl-filter-popup .fp-act {
+    border: none; background: transparent;
+    padding: 2px 6px; border-radius: var(--radius-xs);
+    font-size: 11.5px; font-family: inherit;
+    color: var(--text-secondary); cursor: pointer;
+    transition: background .12s, color .12s;
+}
+.tbl-filter-popup .fp-act:hover { background: var(--accent-light); color: var(--accent-text); }
+.tbl-filter-popup .fp-act:disabled { opacity: .4; cursor: not-allowed; background: transparent; color: var(--text-muted); }
+/* meta 行右侧的"已选 N / 未筛选"统计（与每行值右侧的 .fp-count 记录数区分开） */
+.tbl-filter-popup .fp-selcount {
     margin-left: auto;
+    font-size: 11px; font-weight: 600;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+}
+.tbl-filter-popup .fp-selcount.is-on { color: var(--accent-text); }
+/* 每个值右侧的记录数：弱化、右对齐、等宽定宽不跳动 */
+.tbl-filter-popup .fp-opt .fp-count {
+    margin-left: auto;
+    min-width: 22px;
+    text-align: right;
     font-size: 11px; font-weight: 600;
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
@@ -589,7 +774,7 @@
 }
 /* 值列表 */
 .tbl-filter-popup .fp-list {
-    max-height: 216px; overflow-y: auto;
+    max-height: 264px; overflow-y: auto;
     padding: 0 6px 4px;
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong) transparent;
@@ -603,7 +788,7 @@
 .tbl-filter-popup .fp-list::-webkit-scrollbar-track { background: transparent; }
 .tbl-filter-popup .fp-opt {
     display: flex; align-items: center; gap: 8px;
-    padding: 5px 8px; cursor: pointer;
+    padding: 6px 8px; cursor: pointer;
     border-radius: var(--radius-sm); font-size: 12.5px;
     color: var(--text-primary);
     transition: background .1s, color .1s;
@@ -659,6 +844,8 @@
 }
 .tbl-filter-popup .fp-footer .fp-clear:hover { background: var(--danger-light); }
 .tbl-filter-popup .fp-footer .btn { padding: 5px 14px; font-size: 12px; }
+/* 主操作"应用"给足视觉分量，与次要按钮拉开层次 */
+.tbl-filter-popup .fp-footer .btn-primary { min-width: 64px; font-weight: 600; }
 .fp-empty-hint {
     display: flex; flex-direction: column; align-items: center; gap: 6px;
     font-size: 12px; color: var(--text-muted);
@@ -666,71 +853,35 @@
 }
 .fp-empty-hint i { font-size: 18px; opacity: .45; }
 
-/* 条件式筛选面板（金山多维表风格） */
-.tbl-filter-popup .fp-mode-row {
-    display: flex; align-items: center; gap: 6px;
-    margin: 8px 0 8px;
+/* 值加载中骨架：避免"先插入空弹窗再异步拉值"期间的空白闪烁 */
+.tbl-filter-popup .fp-skeleton { padding: 6px 6px 10px; }
+.tbl-filter-popup .fp-sk-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 8px;
 }
-.tbl-filter-popup .fp-mode-label { font-size: 12px; color: var(--text-muted); }
-.tbl-filter-popup .fp-mode-btn {
-    border: 1px solid var(--border-default); background: var(--bg-input);
-    color: var(--text-primary); font-size: 12px; padding: 2px 12px;
-    border-radius: var(--radius-xs); cursor: pointer;
+.tbl-filter-popup .fp-sk-box {
+    width: 15px; height: 15px; flex-shrink: 0;
+    border-radius: 4px;
+    background: var(--bg-muted);
 }
-.tbl-filter-popup .fp-mode-btn.active {
-    background: var(--accent); border-color: var(--accent); color: #fff;
+.tbl-filter-popup .fp-sk-bar {
+    height: 10px; border-radius: var(--radius-full);
+    background: var(--bg-muted);
 }
-.tbl-filter-popup .fp-conds {
-    display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;
+.tbl-filter-popup .fp-sk-row:nth-child(3n+1) .fp-sk-bar { width: 62%; }
+.tbl-filter-popup .fp-sk-row:nth-child(3n+2) .fp-sk-bar { width: 84%; }
+.tbl-filter-popup .fp-sk-row:nth-child(3n+3) .fp-sk-bar { width: 45%; }
+.tbl-filter-popup .fp-sk-box,
+.tbl-filter-popup .fp-sk-bar {
+    animation: fp-sk-pulse 1.1s ease-in-out infinite;
 }
-.tbl-filter-popup .fp-cond {
-    border: 1px solid var(--border-default); border-radius: var(--radius-xs);
-    padding: 6px; background: var(--bg-base);
+@keyframes fp-sk-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .45; }
 }
-.tbl-filter-popup .fp-cond-l1 { display: flex; align-items: center; gap: 6px; }
-.tbl-filter-popup .fp-fsel { flex: 1.1; min-width: 0; }
-.tbl-filter-popup .fp-opsel { flex: 1; min-width: 0; }
-.tbl-filter-popup .fp-del {
-    border: none; background: transparent; color: var(--text-muted);
-    font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; flex-shrink: 0;
-}
-.tbl-filter-popup .fp-del:hover { color: var(--danger); }
-.tbl-filter-popup .fp-cond-l2 { margin-top: 6px; }
-.tbl-filter-popup .fp-sel {
-    padding: 4px 6px; border: 1px solid var(--border-default); border-radius: var(--radius-xs);
-    font-size: 12px; background: var(--bg-input); color: var(--text-primary);
-}
-.tbl-filter-popup .fp-range { display: flex; align-items: center; gap: 6px; }
-.tbl-filter-popup .fp-tilde { color: var(--text-muted); }
-.tbl-filter-popup .fp-text-inp {
-    flex: 1; min-width: 0; padding: 4px 8px;
-    border: 1px solid var(--border-default); border-radius: var(--radius-xs);
-    font-size: 12px; background: var(--bg-input); color: var(--text-primary);
-    font-family: inherit; outline: none;
-}
-.tbl-filter-popup .fp-text-inp:focus { border-color: var(--accent); }
-.tbl-filter-popup .fp-noval { font-size: 12px; color: var(--text-muted); }
-.tbl-filter-popup .fp-add-cond {
-    width: 100%; border: 1px dashed var(--border-default); background: transparent;
-    color: var(--text-secondary); font-size: 12px; padding: 6px;
-    border-radius: var(--radius-xs); cursor: pointer; margin-bottom: 8px;
-}
-.tbl-filter-popup .fp-add-cond:hover { border-color: var(--accent); color: var(--accent); }
-.tbl-filter-popup .fp-val-btn {
-    width: 100%; text-align: left; padding: 4px 8px;
-    border: 1px solid var(--border-default); border-radius: var(--radius-xs);
-    background: var(--bg-input); color: var(--text-primary);
-    font-size: 12px; cursor: pointer;
-}
-.tbl-filter-popup .fp-val-btn:hover { border-color: var(--accent); }
-.tbl-filter-popup .fp-countlist {
-    border: 1px solid var(--border-default); border-radius: var(--radius-xs);
-    margin-top: 6px; background: var(--bg-input); padding: 6px;
-}
-.tbl-filter-popup .fp-cnt {
-    margin-left: auto; font-size: 11px; color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-}
+/* 弹窗整体进入动画：以触发按钮为原点做轻微缩放入场 */
+.tbl-filter-popup { transform-origin: top center; }
+
 @keyframes tbl-menu-in {
     from { opacity: 0; transform: translateY(-6px) scale(.98); }
     to { opacity: 1; transform: translateY(0) scale(1); }
@@ -906,8 +1057,8 @@
     transform: scale(1.05);
 }
 
-/* ===== 分页 ===== */
-.tbl-pagination { margin-top: 12px; }
+/* ===== 分页 / 加载状态条 ===== */
+.tbl-pagination { margin-top: 12px; flex-shrink: 0; }
 .pg-size {
     padding: 6px 8px;
     border: 1px solid var(--border-default);
@@ -1132,11 +1283,18 @@ input[type="checkbox"]:disabled {
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* ===== 响应式 ===== */
+/* 中等宽度：图例先让位给标题与操作按钮 */
+@media (max-width: 1180px) {
+    .tbl-cat-legend { display: none; }
+}
 @media (max-width: 768px) {
     .tbl-search-input { min-width: 140px; }
     .tbl-content-toolbar { flex-direction: column; align-items: stretch; }
     .tbl-action-group { justify-content: flex-end; }
     .tbl-grid { height: calc(100vh - 380px); }
+    /* 条件胶囊收窄，避免一行一条撑高工具栏 */
+    .tbl-fb-chip { max-width: 180px; }
+    .tbl-fb-clear { margin-left: 0; }
 }
 /* 存为方案弹窗：整体容器 */
 .sp-body { display: flex; flex-direction: column; gap: 14px; }
@@ -1695,6 +1853,53 @@ var FIELD_RENDERERS = {
     // 表头排序 + 多选筛选弹窗
     // =========================================================================
     var filterPopupEl = null;
+    var FP_WIDTH = 300;
+    var FP_GAP = 6;
+    var FP_MARGIN = 8;
+
+    // 字段图标：让弹窗头部一眼看出在筛哪一列
+    var FP_FIELD_ICONS = {
+        '等级': 'ph-star', '标签': 'ph-tag', '平台': 'ph-broadcast',
+        '状态': 'ph-circle-half', '解析状态': 'ph-magic-wand', '获取状态': 'ph-download-simple',
+        '启用': 'ph-toggle-left', '采集类型': 'ph-stack', '备注': 'ph-note',
+        '账号名称': 'ph-user', '粉丝数': 'ph-users', '作品数': 'ph-image',
+        'share_code': 'ph-share-network', 'sec_user_id': 'ph-fingerprint',
+        'Cookie': 'ph-cookie', '验证时间': 'ph-clock', '签名': 'ph-quotes',
+        '链接': 'ph-link', '头像': 'ph-user-circle',
+    };
+    function _fieldIcon(field) { return FP_FIELD_ICONS[field] || 'ph-funnel-simple'; }
+    function _fpLabel(field) { return FIELD_DISPLAY_NAMES[field] || field; }
+
+    // 弹窗定位：默认挂在按钮下方，下方空间不足则翻到上方；左右始终夹在视口内。
+    // 值列表高度会随数据变化，所以加载完成后需要再调一次。
+    function _positionPopup(popup, rect) {
+        var left = rect.left + rect.width / 2 - FP_WIDTH / 2;
+        left = Math.max(FP_MARGIN, Math.min(left, window.innerWidth - FP_WIDTH - FP_MARGIN));
+        popup.style.left = left + 'px';
+        popup.style.top = '0px';
+        var h = popup.offsetHeight;
+        var below = window.innerHeight - rect.bottom - FP_GAP;
+        if (h <= below || rect.top < h + FP_GAP) {
+            popup.style.top = (rect.bottom + FP_GAP) + 'px';
+            popup.style.transformOrigin = 'top center';
+        } else {
+            popup.style.top = Math.max(FP_MARGIN, rect.top - h - FP_GAP) + 'px';
+            popup.style.transformOrigin = 'bottom center';
+        }
+        // 视口过矮：整体封顶，值列表自己滚
+        if (h > window.innerHeight - FP_MARGIN * 2) {
+            popup.style.top = FP_MARGIN + 'px';
+            popup.style.maxHeight = (window.innerHeight - FP_MARGIN * 2) + 'px';
+        }
+    }
+
+    function _fpButton(text, cls) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = cls;
+        b.textContent = text;
+        return b;
+    }
 
     async function openFilterPopup(event, field) {
         closeFilterPopup();
@@ -1702,57 +1907,113 @@ var FIELD_RENDERERS = {
         const rect = btn.getBoundingClientRect();
         const popup = document.createElement('div');
         popup.className = 'tbl-filter-popup';
-        popup.style.cssText =
-            'position:fixed;z-index:20000;width:225px;background:var(--surface-overlay);' +
-            'border:1px solid var(--border-default);border-radius:var(--radius-sm);' +
-            'box-shadow:var(--shadow-lg);padding:10px;font-size:13px;color:var(--text-primary);';
-        let left = rect.left - 100;
-        let top = rect.bottom + 6;
-        if (left < 8) left = 8;
-        if (left + 225 > window.innerWidth) left = window.innerWidth - 233;
-        popup.style.left = left + 'px';
-        popup.style.top = top + 'px';
+        const label = _fpLabel(field);
 
-        // 排序按钮行
-        const sortRow = document.createElement('div');
-        sortRow.className = 'fp-sort-row';
+        // --- 头部：字段图标 + 字段名 + 关闭 ---
+        const head = document.createElement('div');
+        head.className = 'fp-head';
+        head.innerHTML =
+            '<span class="fp-type"><i class="ph ' + _fieldIcon(field) + '"></i></span>' +
+            '<span class="fp-title" title="' + htmlEscape(label) + '">' + htmlEscape(label) + '</span>';
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'fp-close';
+        closeBtn.title = '关闭 (Esc)';
+        closeBtn.innerHTML = '<i class="ph ph-x"></i>';
+        closeBtn.addEventListener('click', function(e) { e.stopPropagation(); closeFilterPopup(); });
+        head.appendChild(closeBtn);
+        popup.appendChild(head);
+
+        // --- 排序：三段式（默认 / 升序 / 降序） ---
         const curSort = currentSortField === field ? currentSortOrder : '';
-        [['升序', 'asc', '↑'], ['降序', 'desc', '↓']].forEach(function(pair) {
+        const sortSec = document.createElement('div');
+        sortSec.className = 'fp-sec';
+        sortSec.innerHTML = '<span>排序</span>';
+        popup.appendChild(sortSec);
+        const seg = document.createElement('div');
+        seg.className = 'fp-seg';
+        [['默认', ''], ['升序', 'asc'], ['降序', 'desc']].forEach(function(pair) {
             const sb = document.createElement('button');
-            sb.className = 'fp-sort-btn' + (curSort === pair[1] ? ' active' : '');
-            sb.innerHTML = '<span style="font-weight:700;">' + pair[2] + '</span> ' + pair[0];
+            sb.type = 'button';
+            sb.className = 'fp-seg-btn' + (curSort === pair[1] ? ' active' : '');
+            sb.innerHTML = pair[1] === ''
+                ? pair[0]
+                : '<span class="fp-arrow">' + (pair[1] === 'asc' ? '↑' : '↓') + '</span> ' + pair[0];
             sb.addEventListener('click', function(e) {
                 e.stopPropagation();
-                applyColSort(field, curSort === pair[1] ? '' : pair[1]);
+                applyColSort(field, pair[1]);
             });
-            sortRow.appendChild(sb);
+            seg.appendChild(sb);
         });
-        popup.appendChild(sortRow);
+        popup.appendChild(seg);
 
-        // 搜索框
+        // --- 值检索 ---
+        const searchWrap = document.createElement('div');
+        searchWrap.className = 'fp-search-wrap';
+        searchWrap.innerHTML = '<i class="ph ph-magnifying-glass"></i>';
         const searchInput = document.createElement('input');
         searchInput.className = 'fp-search';
         searchInput.type = 'text';
-        searchInput.placeholder = '搜索…';
-        popup.appendChild(searchInput);
+        searchInput.placeholder = '搜索值…';
+        searchWrap.appendChild(searchInput);
+        const searchClear = document.createElement('button');
+        searchClear.type = 'button';
+        searchClear.className = 'fp-search-clear';
+        searchClear.title = '清空检索词';
+        searchClear.innerHTML = '<i class="ph ph-x"></i>';
+        searchClear.addEventListener('click', function(e) {
+            e.stopPropagation();
+            searchInput.value = '';
+            searchWrap.classList.remove('has-text');
+            renderList('');
+            searchInput.focus();
+        });
+        searchWrap.appendChild(searchClear);
+        popup.appendChild(searchWrap);
 
-        // 值列表容器
+        // --- 值列表区块标题：字段名之下标明"筛选值"，右侧回填去重值总数 ---
+        const valSec = document.createElement('div');
+        valSec.className = 'fp-sec';
+        valSec.innerHTML = '<span>筛选值</span>';
+        const valCountEl = document.createElement('span');
+        valCountEl.className = 'fp-sec-n';
+        valCountEl.textContent = '…';
+        valSec.appendChild(valCountEl);
+        popup.appendChild(valSec);
+
+        // --- meta 行：全选 / 清空 / 已选计数 ---
+        const meta = document.createElement('div');
+        meta.className = 'fp-meta';
+        const allWrap = document.createElement('label');
+        allWrap.className = 'fp-all';
+        const allCb = document.createElement('input');
+        allCb.type = 'checkbox';
+        allCb.style.margin = '0';
+        allWrap.appendChild(allCb);
+        allWrap.appendChild(document.createTextNode('全选'));
+        const noneBtn = _fpButton('清空', 'fp-act');
+        const cntEl = document.createElement('span');
+        cntEl.className = 'fp-selcount';
+        meta.appendChild(allWrap);
+        meta.appendChild(noneBtn);
+        meta.appendChild(cntEl);
+        popup.appendChild(meta);
+
+        // --- 值列表（先骨架，数据到位后替换） ---
         const listBox = document.createElement('div');
         listBox.className = 'fp-list';
+        listBox.innerHTML = '<div class="fp-skeleton">' +
+            '<div class="fp-sk-row"><span class="fp-sk-box"></span><span class="fp-sk-bar"></span></div>'
+                .repeat(5) +
+            '</div>';
         popup.appendChild(listBox);
 
-        // 底部按钮
+        // --- 底部：清除（左）/ 取消 + 应用（右）---
         const footer = document.createElement('div');
         footer.className = 'fp-footer';
-        const confirmBtn = document.createElement('button');
-        confirmBtn.textContent = '确定';
-        confirmBtn.className = 'btn btn-primary btn-sm';
-        const cancelBtn = document.createElement('button');
-        cancelBtn.textContent = '取消';
-        cancelBtn.className = 'btn btn-secondary btn-sm';
-        const clearBtn = document.createElement('button');
-        clearBtn.textContent = '清除';
-        clearBtn.className = 'btn btn-secondary btn-sm';
+        const clearBtn = _fpButton('清除', 'btn btn-secondary btn-sm fp-clear');
+        const cancelBtn = _fpButton('取消', 'btn btn-secondary btn-sm');
+        const confirmBtn = _fpButton('应用', 'btn btn-primary btn-sm');
         footer.appendChild(clearBtn);
         footer.appendChild(cancelBtn);
         footer.appendChild(confirmBtn);
@@ -1760,13 +2021,78 @@ var FIELD_RENDERERS = {
 
         document.body.appendChild(popup);
         filterPopupEl = popup;
+        _positionPopup(popup, rect);
 
-        // 选中状态（临时副本）
+        // 选中状态（临时副本，点"应用"才落库）
         const checked = new Set(currentFilters[field] || []);
+        var allValues = [];
+        var valueCounts = {};
+
+        function syncMeta() {
+            cntEl.textContent = checked.size ? '已选 ' + checked.size : '未筛选';
+            cntEl.classList.toggle('is-on', checked.size > 0);
+            noneBtn.disabled = checked.size === 0;
+        }
+
+        function renderList(filterText) {
+            listBox.innerHTML = '';
+            const lower = (filterText || '').toLowerCase();
+            const filtered = allValues.filter(function(v) { return !lower || String(v).toLowerCase().includes(lower); });
+            if (!filtered.length) {
+                listBox.innerHTML = '<div class="fp-empty-hint"><i class="ph ph-magnifying-glass"></i>' +
+                    (allValues.length ? '无匹配项' : '该列暂无可选值') + '</div>';
+                return;
+            }
+            filtered.forEach(function(v) {
+                const opt = document.createElement('label');
+                opt.className = 'fp-opt';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.checked = checked.has(v);
+                cb.addEventListener('change', function() {
+                    if (cb.checked) checked.add(v);
+                    else checked.delete(v);
+                    syncMeta();
+                });
+                const span = document.createElement('span');
+                span.textContent = v === '' ? '(空值)' : v;
+                span.title = span.textContent;
+                if (v === '') span.style.color = 'var(--text-muted)';
+                opt.appendChild(cb);
+                opt.appendChild(span);
+                if (valueCounts[v] != null) {
+                    const cnt = document.createElement('span');
+                    cnt.className = 'fp-count';
+                    cnt.textContent = String(valueCounts[v]);
+                    cnt.title = String(valueCounts[v]) + ' 条记录';
+                    opt.appendChild(cnt);
+                }
+                listBox.appendChild(opt);
+            });
+            // 全选框只反映"当前可见项"的勾选情况
+            var visChecked = filtered.filter(function(v) { return checked.has(v); }).length;
+            allCb.checked = filtered.length > 0 && visChecked === filtered.length;
+            allCb.indeterminate = visChecked > 0 && visChecked < filtered.length;
+        }
+
+        allCb.addEventListener('change', function() {
+            const lower = (searchInput.value || '').trim().toLowerCase();
+            const visible = allValues.filter(function(v) { return !lower || String(v).toLowerCase().includes(lower); });
+            if (allCb.checked) visible.forEach(function(v) { checked.add(v); });
+            else visible.forEach(function(v) { checked.delete(v); });
+            renderList(searchInput.value.trim());
+            syncMeta();
+        });
+        noneBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            checked.clear();
+            renderList(searchInput.value.trim());
+            syncMeta();
+        });
+
+        syncMeta();
 
         // 异步加载去重值 + 每个值的记录数（value-counts 接口：标签字段已拆项计数）
-        var allValues = [];
-        var valueCounts = {};   // { value: count }
         try {
             // 传入其他字段的筛选条件：计数随其他筛选联动收窄（本字段自身条件由后端排除）
             var otherKeys = Object.keys(currentFilters).filter(function(k) { return k !== field && currentFilters[k] && currentFilters[k].length; });
@@ -1783,39 +2109,13 @@ var FIELD_RENDERERS = {
         }
         if (filterPopupEl !== popup) return;
 
-        function renderList(filterText) {
-            listBox.innerHTML = '';
-            const lower = (filterText || '').toLowerCase();
-            const filtered = allValues.filter(function(v) { return !lower || String(v).toLowerCase().includes(lower); });
-            if (!filtered.length) {
-                listBox.innerHTML = '<div class="fp-empty-hint">无匹配项</div>';
-                return;
-            }
-            filtered.forEach(function(v) {
-                const opt = document.createElement('label');
-                opt.className = 'fp-opt';
-                const cb = document.createElement('input');
-                cb.type = 'checkbox';
-                cb.checked = checked.has(v);
-                cb.addEventListener('change', function() {
-                    if (cb.checked) checked.add(v);
-                    else checked.delete(v);
-                });
-                const span = document.createElement('span');
-                span.textContent = v;
-                opt.appendChild(cb);
-                opt.appendChild(span);
-                if (valueCounts[v] != null) {
-                    const cnt = document.createElement('span');
-                    cnt.className = 'fp-count';
-                    cnt.textContent = String(valueCounts[v]);
-                    opt.appendChild(cnt);
-                }
-                listBox.appendChild(opt);
-            });
-        }
-        renderList('');
-        searchInput.addEventListener('input', function() { renderList(searchInput.value.trim()); });
+        renderList(searchInput.value.trim());
+        valCountEl.textContent = allValues.length + ' 项';
+        _positionPopup(popup, rect);
+        searchInput.addEventListener('input', function() {
+            searchWrap.classList.toggle('has-text', !!searchInput.value);
+            renderList(searchInput.value.trim());
+        });
 
         confirmBtn.addEventListener('click', function(e) {
             e.stopPropagation();
@@ -1828,6 +2128,9 @@ var FIELD_RENDERERS = {
         clearBtn.addEventListener('click', function(e) {
             e.stopPropagation();
             applyFieldFilter(field, []);
+        });
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); confirmBtn.click(); }
         });
         setTimeout(function() { searchInput.focus(); }, 0);
     }
@@ -1874,6 +2177,98 @@ var FIELD_RENDERERS = {
         if (values && values.length) currentFilters[field] = values;
         else delete currentFilters[field];
         showTable(currentTable, 1, currentKeyword);
+    }
+
+    // 条件胶囊右侧的移除按钮
+    function _fbCloseBtn(handler) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'fb-x';
+        b.title = '移除该条件';
+        b.innerHTML = '<i class="ph ph-x"></i>';
+        b.addEventListener('click', handler);
+        return b;
+    }
+
+    /**
+     * 已应用条件条：把 currentFilters / 当前排序可视化成一排可撤销的胶囊。
+     * 纯前端渲染，不新增接口——复用已有的筛选状态。
+     */
+    function renderFilterBar() {
+        const bar = document.getElementById('filter-bar');
+        if (!bar) return;
+
+        const conds = [];
+        // 搜索词也是一条"为什么只剩这些行"的条件，排在筛选之前
+        if (currentKeyword) {
+            conds.push({ type: 'search', keyword: currentKeyword });
+        }
+        Object.keys(currentFilters).forEach(function(k) {
+            if (currentFilters[k] && currentFilters[k].length) {
+                conds.push({ type: 'filter', field: k, values: currentFilters[k] });
+            }
+        });
+        if (currentSortField) {
+            conds.push({ type: 'sort', field: currentSortField, order: currentSortOrder });
+        }
+
+        if (!conds.length) { bar.hidden = true; bar.innerHTML = ''; return; }
+        bar.hidden = false;
+        bar.innerHTML = '';
+
+        const label = document.createElement('span');
+        label.className = 'tbl-fb-label';
+        label.innerHTML = '<i class="ph ph-funnel-simple"></i> 条件';
+        bar.appendChild(label);
+
+        conds.forEach(function(c) {
+            const name = c.field ? _fpLabel(c.field) : '';
+            const chip = document.createElement('span');
+            if (c.type === 'search') {
+                // 默认"文本字段"不占篇幅，只有定向/全字段搜索才标注范围
+                var scopeTxt = '';
+                if (currentSearchField === '__all__') scopeTxt = '全部字段 · ';
+                else if (currentSearchField && currentSearchField !== '__text__') scopeTxt = _fpLabel(currentSearchField) + ' · ';
+                chip.className = 'tbl-fb-chip is-search';
+                chip.innerHTML = '<span class="fb-k">搜索 ' + htmlEscape(scopeTxt) + '</span>' +
+                    '<span class="fb-v">"' + htmlEscape(c.keyword) + '"</span>';
+                chip.appendChild(_fbCloseBtn(function() { clearSearch(); }));
+            } else if (c.type === 'sort') {
+                chip.className = 'tbl-fb-chip is-sort';
+                chip.innerHTML = '<span class="fb-k">排序</span>' +
+                    '<span class="fb-v">' + htmlEscape(name) + ' ' +
+                    (c.order === 'asc' ? '↑ 升序' : '↓ 降序') + '</span>';
+                chip.appendChild(_fbCloseBtn(function() { applyColSort(c.field, ''); }));
+            } else {
+                chip.className = 'tbl-fb-chip';
+                const shown = c.values.slice(0, 3).map(function(v) {
+                    return String(v) === '' ? '(空值)' : String(v);
+                }).join('、');
+                chip.innerHTML = '<span class="fb-k">' + htmlEscape(name) + '</span>' +
+                    '<span class="fb-v" title="' + htmlEscape(c.values.join('、')) + '">' + htmlEscape(shown) + '</span>';
+                if (c.values.length > 3) {
+                    const n = document.createElement('span');
+                    n.className = 'fb-n';
+                    n.textContent = '+' + (c.values.length - 3);
+                    n.title = '另有 ' + (c.values.length - 3) + ' 个值';
+                    chip.appendChild(n);
+                }
+                chip.appendChild(_fbCloseBtn(function() { applyFieldFilter(c.field, []); }));
+            }
+            bar.appendChild(chip);
+        });
+
+        const clearAll = document.createElement('button');
+        clearAll.type = 'button';
+        clearAll.className = 'tbl-fb-clear';
+        clearAll.innerHTML = '<i class="ph ph-broom"></i> 清除全部';
+        clearAll.addEventListener('click', function() {
+            currentSortField = '';
+            currentSortOrder = '';
+            currentFilters = {};
+            showTable(currentTable, 1, currentKeyword);
+        });
+        bar.appendChild(clearAll);
     }
 
     // 点击外部区域 / Esc 关闭菜单（使用命名函数以便 SPA 重入时移除）
@@ -2466,19 +2861,12 @@ var FIELD_RENDERERS = {
         restoreColState();
         _renderSearchFieldSelect(tableName, schemaFields);
 
-        const kwSuffix = keyword ? ' · "' + keyword + '"' : '';
-        document.getElementById('table-title').textContent = TABLE_NAMES[tableName] + kwSuffix;
-        var nFilterConds = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; }).length;
+        document.getElementById('table-title').textContent = TABLE_NAMES[tableName];
         var countBadge = document.getElementById('table-count-badge');
-        countBadge.innerHTML = '';
-        countBadge.appendChild(document.createTextNode('… 条'));
-        if (nFilterConds) {
-            var badge = document.createElement('span');
-            badge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--accent);cursor:pointer;';
-            badge.textContent = '已筛选(' + nFilterConds + ') · 清除';
-            badge.addEventListener('click', function() { currentFilters = {}; showTable(currentTable, 1, currentKeyword); });
-            countBadge.appendChild(badge);
-        }
+        countBadge.innerHTML = '… 条';
+
+        // 条件条在计数徽章之外独立呈现，徽章只负责条数
+        renderFilterBar();
 
         // 挂载新数据源：查询条件已变化，旧块缓存随之作废。
         // infinite rowModel 会自动显示 loading / 空数据 overlay，无需手动干预。
