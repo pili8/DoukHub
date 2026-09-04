@@ -155,7 +155,10 @@
         await loadTagsMapping();
         var text = document.getElementById('import-text').value.trim();
         if (!text) { showToast('请输入数据', 'error'); return; }
-        if (text.includes('{')) parseJsonFormat(text); else parseSimpleFormat(text);
+        parseSimpleFormat(text);
+        var simpleItems = parsedData.slice();
+        parseJsonFormat(text);
+        parsedData = simpleItems.concat(parsedData);
         if (parsedData.length === 0) { showToast('未解析到有效数据', 'error'); return; }
         var seenLinks = {};
         var duplicateCount = 0;
@@ -169,6 +172,7 @@
             var duplicateBadge = item.duplicate ? ' <span class="status-badge status-cancelled">重复</span>' : '';
             return '<tr><td style="font-size:12px;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escapeHtml(item.raw)+'">'+escapeHtml(item.raw || '-')+'</td><td><code style="font-size:12px;">'+escapeHtml(item.link)+'</code>'+duplicateBadge+'</td><td>'+('⭐'.repeat(item.rating))+'</td><td>'+item.tags.map(function(t){var mapped=isMappedTag(t);return '<span class="tag" title="'+(mapped?'':'未匹配映射')+'" style="'+(mapped?'background:rgba(34,197,94,.07);color:var(--success);border-color:rgba(34,197,94,.22);':'background:var(--warning-light);color:var(--warning);border-color:var(--warning);')+'">'+escapeHtml(t)+'</span>';}).join('')+'</td><td>'+escapeHtml(item.name || '-')+'</td></tr>';
         }).join('');
+        if (typeof clipList !== 'undefined') clipList(document.getElementById('preview-body'), { rowSelector: 'tr' });
         document.getElementById('import-preview').style.display = 'block';
         document.getElementById('import-status').innerHTML = '解析完成: <b>'+parsedData.length+'</b> 条' + (duplicateCount ? '，重复 <b>'+duplicateCount+'</b> 条' : '');
     }
@@ -176,6 +180,7 @@
         var lines = text.split('\n').filter(function(l){return l.trim();});
         parsedData = [];
         for (var i=0; i<lines.length; i++) {
+            lines[i] = lines[i].replace(/\\+@/, '@');
             var match = lines[i].match(/^(.+?)@(.+)$/);
             if (match) {
                 var prefix = match[1].trim(), link = match[2].trim();
@@ -192,7 +197,7 @@
         }
     }
     function parseJsonFormat(text) {
-        var items = text.split('|').map(function(s){return s.trim();}).filter(function(s){return s.startsWith('{');});
+        var items = text.split(/\r?\n|\|/).map(function(s){return s.trim();}).filter(function(s){return s.startsWith('{');});
         parsedData = [];
         for (var i=0; i<items.length; i++) {
             try {

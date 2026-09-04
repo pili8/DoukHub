@@ -47,6 +47,17 @@ DoukHub 是一个社交媒体数据采集管理平台，整合 TikTokDownloader�
 
 9. **所有耗时操作需要 SSE 实时进度 + 停止按钮**：避免用户以为卡死
 
+### 采集链路分工（2026-08-31）
+
+**DoukHub = 调度层 + 数据层，TTD = 执行层。** DoukHub 不直接请求抖音接口：
+
+1. **任务编排**：筛选账号、算增量 earliest 日期、写入 TTD 的 settings.json
+2. **进程托管**：子进程启动 TTD 终端模式，单批次串行，管理排队/取消/断点恢复
+3. **过程监控**：解析 TTD 输出的 `__DOUKHUB__` 标记行，逐账号/逐作品实时入库展示
+4. **结果沉淀（闭环）**：下载明细入库、更新 `last_collected_at`（下次增量起点）、失败自动补采一轮、Cookie 失效自动标记
+
+**采集速度瓶颈在 TTD 的防风控节奏，不在 DoukHub**：翻页平均等 6 秒/页；每 10 个账号暂停 5 分钟；下载并发上限 4（`src/custom/static.py` 的 `MAX_WORKERS`）。提速旋钮都在 TTD 侧（`src/custom/function.py` 的 `avg_delay`/`suspend`），但调激进了会赌上 Cookie 被风控的风险。
+
 ### TTD API 端点（无 /api/ 前缀，完整列表）
 
 > 来源：TikTokDownloader 5.7.stable 官方文档（`/docs`、`/openapi.json`）

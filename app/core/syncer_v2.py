@@ -85,6 +85,7 @@ class Syncer:
         s = str(val).strip()
         if not s:
             return 0
+        s = re.sub(r"^(?:粉丝数?|作品数?)\s*", "", s, flags=re.IGNORECASE)
         try:
             if "万" in s:
                 return int(float(s.replace("万", "")) * 10000)
@@ -128,6 +129,68 @@ class Syncer:
     def merge_level(self, existing_level: int, new_level: int) -> int:
         """合并等级（取高的）"""
         return max(existing_level or 0, new_level or 0)
+
+    @staticmethod
+    def parse_grade_tags(text: str) -> tuple[int, list]:
+        """解析等级和标签文本。
+
+        数字同时作为等级和标签分隔符使用：
+        - "2多"   → level=2, tags=["多"]
+        - "酒吧3多" → level=3, tags=["酒吧", "多"]
+        - "3个"   → level=3, tags=["个"]
+        - "COS2"  → level=2, tags=["COS"]
+        - "个3，多" → level=3, tags=["个", "多"]
+        - "个3，多" → level=3, tags=["个", "多"]
+
+        同一段文本出现多个数字时取最高等级。
+        """
+        if not text or not text.strip():
+            return 1, []
+
+        level = 0
+        tags = []
+        # 按中英文逗号拆成多个片段，每个片段再按数字位置切分
+        parts = re.split(r"[,\uff0c]", text.strip())
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # 用正则把数字和文字交替切开
+            segments = re.split(r"(\d+)", part)
+            for seg in segments:
+                seg = seg.strip()
+                if not seg:
+                    continue
+                if seg.isdigit():
+                    level = max(level, min(4, int(seg)))
+                else:
+                    if seg not in tags:
+                        tags.append(seg)
+
+        if level == 0:
+            level = 1
+        return level, tags
+
+    @staticmethod
+    def validate_share_code(code: str) -> tuple[bool, str]:
+        """校验分享码是否合格。
+
+        Returns:
+            (is_valid, reason)：合格返回 (True, "")，不合格返回 (False, 原因)
+        """
+        code = (code or "").strip()
+        if not code:
+            return False, "缺少地址"
+        # 纯数字 → 可能是 UID，不是分享码
+        if code.isdigit():
+            return False, "纯数字疑似 UID，不是分享码"
+        # 分享码包含非法字符（允许字母数字下划线连字符）
+        if re.search(r"[^\w\-]", code):
+            return False, f"分享码含非法字符: {code}"
+        # 分享码过短，可能是截断
+        if len(code) < 6:
+            return False, f"分享码过短({len(code)}字符)，疑似截断"
+        return True, ""
 
     @staticmethod
     def is_ready_for_account(collection: dict) -> bool:
@@ -175,16 +238,17 @@ class Syncer:
                     parts = re.split(r"[,\uff0c]", grade) if grade else []
                     for part in parts:
                         part = part.strip()
-                        num_m = re.search(r"(\d+)$", part)
-                        if num_m:
-                            level = max(1, min(4, int(num_m.group(1))))
-                            tag_p = part[:num_m.start()].strip()
-                            if tag_p:
-                                tags.append(tag_p)
+                        part_level, part_tags = self.parse_grade_tags(part)
+                        if part_level > 1 or part_tags:
+                            level = max(level, part_level)
+                            for tag in part_tags:
+                                if tag not in tags:
+                                    tags.append(tag)
                         elif part:
                             tags.append(part)
                 elif "@" in line:
                     # 简单格式: 标签+等级@分享码，如 "个2@abc123" 或 "个2，图3@abc123"
+                    line = re.sub(r"\\+@", "@", line)
                     at_idx = line.rfind("@")
                     prefix = line[:at_idx].strip()
                     share = line[at_idx + 1:].strip()
@@ -196,14 +260,14 @@ class Syncer:
                         part = part.strip()
                         if not part:
                             continue
-                        num_m = re.search(r"(\d+)$", part)
-                        if num_m:
-                            level = max(1, min(4, int(num_m.group(1))))
-                            tag_p = part[:num_m.start()].strip()
-                            if tag_p:
-                                tags.append(tag_p)
+                        part_level, part_tags = self.parse_grade_tags(part)
+                        if part_level > 1 or part_tags:
+                            level = max(level, part_level)
+                            for tag in part_tags:
+                                if tag not in tags:
+                                    tags.append(tag)
                         elif part.isdigit():
-                            level = max(1, min(4, int(part)))
+                            level = max(level, min(4, int(part)))
                         else:
                             tags.append(part)
                 else:
@@ -227,6 +291,13 @@ class Syncer:
                     share = direct_sec_user_id
                 else:
                     share = self.normalize_share(share)
+
+                # 拦截校验：完整链接已通过，短码需要过校验
+                if not direct_sec_user_id:
+                    is_valid, reason = self.validate_share_code(share)
+                    if not is_valid:
+                        skip(f"拦截: {reason}")
+                        continue
 
                 if share in seen_shares:
                     existing = self.db.get_collection_by_share(share)
@@ -276,27 +347,6 @@ class Syncer:
                     result.success += 1
                     result.updated += 1
                 else:
-                    revived_id = self.db.revive_collection_if_deleted(share)
-                    if revived_id:
-                        revived_data = {
-                            "平台": self.detect_platform(share),
-                            "等级": level,
-                            "标签": json.dumps(self.map_tags(tags), ensure_ascii=False),
-                            "解析状态": "待解析",
-                        }
-                        if import_name:
-                            revived_data["账号名称"] = import_name
-                        if import_fans:
-                            revived_data["粉丝数"] = import_fans
-                        if import_works:
-                            revived_data["作品数"] = import_works
-                        if direct_sec_user_id:
-                            revived_data.update({"sec_user_id": direct_sec_user_id, "解析状态": "已就绪"})
-                        self.db.update_collection(revived_id, revived_data)
-                        result.success += 1
-                        result.revived += 1
-                        continue
-
                     # 新增
                     record_id = f"rec_{datetime.now().strftime('%Y%m%d%H%M%S')}_{result.total}"
                     insert_data = {

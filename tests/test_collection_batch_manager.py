@@ -6,6 +6,7 @@ from datetime import datetime as real_datetime
 import pytest
 
 from app.core.collection_batch_manager import CollectionBatchManager
+from app.core.collection_planner import write_ttd_accounts
 from app.core.database import Database
 from app.core.ttd_batch_runner import marker_line
 
@@ -77,6 +78,38 @@ class LaunchRaceProcess:
         return self.returncode
 
 
+class StalledStream:
+    """模拟零输出的卡死 stdout：只有 terminate 才放行 EOF。"""
+
+    def __init__(self):
+        self._released = asyncio.Event()
+
+    def release(self):
+        self._released.set()
+
+    async def readline(self):
+        await self._released.wait()
+        return b""
+
+
+class StalledProcess:
+    """零输出卡死的引擎进程，被 terminate 后才结束。"""
+
+    def __init__(self):
+        self.stdout = StalledStream()
+        self.returncode = None
+        self.pid = 23456
+        self.terminated = False
+
+    def terminate(self):
+        self.terminated = True
+        self.returncode = -15
+        self.stdout.release()
+
+    async def wait(self):
+        return self.returncode
+
+
 @pytest.fixture
 def db(tmp_path):
     return Database(db_path=tmp_path / "doukhub.db")
@@ -104,11 +137,58 @@ def insert_douyin_account(db):
             "record_id": "a1",
             "sec_user_id": "sec1",
             "账号名称": "一号",
-            "平台": "抖音",
-            "等级": 4,
+            "平台": "douyin",
+        "等级": 4,
             "启用": 1,
+            "获取状态": "已获取",
         }
     )
+
+
+def test_write_ttd_accounts_maps_storage_path_to_root(tmp_path):
+    storage_path = tmp_path / "storage"
+    settings_path = tmp_path / "settings.json"
+
+    write_ttd_accounts(
+        settings_path,
+        "douyin",
+        [],
+        folder_name="Download",
+        root_path=str(storage_path),
+        name_format="create_time type nickname desc",
+    )
+
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert settings["root"] == str(storage_path)
+    assert settings["folder_name"] == "Download"
+
+
+def test_run_batch_maps_legacy_absolute_folder_name_to_root(db, manager, monkeypatch, tmp_path):
+    insert_douyin_account(db)
+    storage_path = tmp_path / "storage"
+    batches = asyncio.run(
+        manager.start(
+            db.get_all_accounts(),
+            platforms=("douyin",),
+            folder_name=str(storage_path),
+        )
+    )
+    batch_id = batches[0]["id"]
+
+    async def fake_launch(command, cwd):
+        return FakeProcess(
+            ['__DOUKHUB__{"type":"account_result","sec_user_id":"sec1","status":"success"}'],
+            returncode=0,
+        )
+
+    monkeypatch.setattr(manager, "_launch_process", fake_launch)
+    result = asyncio.run(manager._run_batch(batch_id))
+
+    settings_path = manager.ttd_path / "Volume" / "settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert result == "completed"
+    assert settings["root"] == str(storage_path)
+    assert settings["folder_name"] == "Download"
 
 
 def create_running_batch(db, batch_id, log_path="", sec_user_id="sec1"):
@@ -241,11 +321,11 @@ def test_run_batch_uses_ttd_process_and_persists_log(db, manager, monkeypatch):
     monkeypatch.setattr(manager, "_launch_process", fake_launch)
     result = asyncio.run(manager._run_batch(batch_id))
     assert result == "completed"
-    assert "TTD raw output" in manager.read_log(batch_id)
+    assert "TTD raw output" in "\n".join(manager.read_log(batch_id))
     assert db.get_collection_batch(batch_id)["process_pid"] == 12345
 
 
-def test_interrupted_batches_are_recovered(db, manager):
+def test_interrupted_batches_are_requeued_for_resume(db, manager):
     db.create_collection_batch(
         batch_id="old",
         filter_json="{}",
@@ -260,17 +340,59 @@ def test_interrupted_batches_are_recovered(db, manager):
                 "mark": "一号",
                 "url": "https://www.douyin.com/user/sec1",
                 "earliest": "",
-            }
+            },
+            {
+                "account_record_id": "a2",
+                "sec_user_id": "sec2",
+                "account_name": "二号",
+                "platform": "douyin",
+                "mark": "二号",
+                "url": "https://www.douyin.com/user/sec2",
+                "earliest": "",
+            },
         ],
     )
     db.update_collection_batch("old", status="running", process_pid=999)
+    # 模拟中断时一个账号已完成、一个正在跑
+    items = db.get_collection_batch_items("old")
+    db.update_collection_batch_item(items[0]["id"], status="success")
+    db.update_collection_batch_item(items[1]["id"], status="running")
     manager.recover_interrupted_batches()
 
-    assert db.get_collection_batch("old")["status"] == "failed"
-    assert db.get_collection_batch_items("old")[0]["status"] == "failed"
+    # 批次不作废，登记续跑；success 保留，running 重置回 pending
+    assert db.get_collection_batch("old")["status"] == "running"
+    assert manager._resume_queue == ["old"]
+    statuses = [item["status"] for item in db.get_collection_batch_items("old")]
+    assert statuses == ["success", "pending"]
 
 
-def test_start_recovers_verified_surviving_runner_before_new_batch(
+def test_interrupted_cancelling_batch_is_finalized_as_cancelled(db, manager):
+    create_running_batch(db, "old")
+    db.update_collection_batch("old", status="cancelling", process_pid=999)
+    manager.recover_interrupted_batches()
+
+    assert db.get_collection_batch("old")["status"] == "cancelled"
+    assert manager._resume_queue == []
+
+
+def test_kick_resume_requeues_registered_batches(db, manager, monkeypatch):
+    create_running_batch(db, "stale")
+    db.update_collection_batch("stale", status="running", process_pid=999)
+    manager.recover_interrupted_batches()
+
+    # kick_resume 应把批次送回执行队列并启动 worker
+    async def fake_run(batch_id):
+        assert batch_id == "stale"
+        return "completed"
+
+    monkeypatch.setattr(manager, "_run_batch", fake_run)
+    asyncio.run(manager.kick_resume())
+
+    assert manager._queue.empty()
+    assert manager._resume_queue == []
+
+
+def test_start_auto_resumes_interrupted_batch_instead_of_new_one(
     db, manager, monkeypatch
 ):
     create_running_batch(db, "stale")
@@ -294,27 +416,28 @@ def test_start_recovers_verified_surviving_runner_before_new_batch(
     monkeypatch.setattr(manager, "_verify_recorded_runner", fake_verify)
     monkeypatch.setattr(manager, "_terminate_recorded_runner", fake_terminate)
     monkeypatch.setattr(manager, "_wait_for_recorded_runner", fake_wait)
-    monkeypatch.setattr(
-        manager,
-        "_launch_process",
-        lambda command, cwd: asyncio.sleep(0, result=FakeProcess([], returncode=0)),
-    )
     insert_douyin_account(db)
 
-    batches = asyncio.run(
-        manager.start(
-            db.get_all_accounts(),
-            rating_min=3,
-            platforms=("douyin",),
-            mode="incremental",
+    # 中断批次已自动续跑，新批次请求被拒绝
+    with pytest.raises(RuntimeError, match="自动续跑"):
+        asyncio.run(
+            manager.start(
+                db.get_all_accounts(),
+                rating_min=3,
+                platforms=("douyin",),
+                mode="incremental",
+            )
         )
-    )
 
     assert verified == [999]
     assert terminated == [999]
     assert waits == [(999, manager._recovery_wait_timeout)]
-    assert db.get_collection_batch("stale")["status"] == "failed"
-    assert db.get_collection_batch(batches[0]["id"])["status"] == "pending"
+    assert db.get_collection_batch("stale")["status"] == "running"
+    # 中断批次占用执行位，新批次未创建（不依赖队列内部状态，
+    # 急切启动的 worker 可能已消费队列项）
+    assert db.get_active_collection_batch()["id"] == "stale"
+    batch_ids = [b["id"] for b in db.list_collection_batches(limit=10)]
+    assert batch_ids == ["stale"]
 
 
 def test_recovery_does_not_terminate_unverified_runner(db, manager, monkeypatch):
@@ -329,7 +452,9 @@ def test_recovery_does_not_terminate_unverified_runner(db, manager, monkeypatch)
     manager.recover_interrupted_batches()
 
     assert terminated == []
-    assert db.get_collection_batch("stale")["status"] == "failed"
+    # 未验证的进程不动，但批次仍登记续跑
+    assert db.get_collection_batch("stale")["status"] == "running"
+    assert manager._resume_queue == ["stale"]
 
 
 @pytest.mark.parametrize(
@@ -381,9 +506,73 @@ def test_recovery_handles_more_than_one_hundred_active_batches(db, manager):
 
     manager.recover_interrupted_batches()
 
+    # 未启动过的 pending 批次全部登记续跑，不作废
     statuses = [batch["status"] for batch in db.list_collection_batches(limit=101)]
-    assert set(statuses) == {"cancelled"}
-    assert db.get_active_collection_batch() is None
+    assert set(statuses) == {"pending"}
+    assert len(manager._resume_queue) == 101
+
+
+def test_run_batch_watchdog_kills_silent_engine_and_retries(
+    db, manager, monkeypatch
+):
+    # 直接建批次，绕开 start() 的账号筛选（存量测试夹具与平台字段不同步）
+    log_path = manager.log_dir / "watchdog-test.log"
+    db.create_collection_batch(
+        batch_id="watchdog",
+        filter_json="{}",
+        platform="douyin",
+        log_path=str(log_path),
+        items=[
+            {
+                "account_record_id": "a1",
+                "sec_user_id": "sec1",
+                "account_name": "一号",
+                "platform": "douyin",
+                "mark": "一号",
+                "url": "https://www.douyin.com/user/sec1",
+                "earliest": "",
+            }
+        ],
+    )
+    batch_id = "watchdog"
+
+    monkeypatch.setattr(manager, "_WATCHDOG_KILL_SECONDS", 0)
+    monkeypatch.setattr(manager, "_WATCHDOG_WARN_SECONDS", 10000)
+    monkeypatch.setattr(manager, "_WATCHDOG_INTERVAL", 0.01)
+    monkeypatch.setattr(manager, "_RETRY_COOLDOWN_SECONDS", 0)
+
+    stalled = StalledProcess()
+
+    async def fake_launch(command, cwd):
+        return stalled
+
+    monkeypatch.setattr(manager, "_launch_process", fake_launch)
+
+    retried = []
+
+    async def fake_run(batch_id_arg):
+        # 首轮被看门狗处决后，自动补采会再次调用 _run_batch
+        retried.append(batch_id_arg)
+        if len(retried) > 1:
+            # 补采轮直接成功，避免无限循环
+            for item in db.get_collection_batch_items(batch_id_arg):
+                db.update_collection_batch_item(item["id"], status="success")
+            return "completed"
+        return await real_run(batch_id_arg)
+
+    real_run = manager._run_batch
+    monkeypatch.setattr(manager, "_run_batch", fake_run)
+
+    # 首轮零输出被看门狗终止 → 未完成账号自动补采 → 补采轮直接成功。
+    # 注意入口必须走 fake_run：重试轮由 real_run 内部经 self._run_batch 回调进来。
+    result = asyncio.run(manager._run_batch(batch_id))
+
+    assert stalled.terminated is True
+    assert result == "completed"
+    assert retried == [batch_id, batch_id]
+    log_text = "\n".join(manager.read_log(batch_id))
+    assert "watchdog" in log_text
+    assert "自动终止" in log_text
 
 
 def test_run_batch_persists_skipped_tiktok_and_numeric_earliest(
@@ -394,10 +583,11 @@ def test_run_batch_persists_skipped_tiktok_and_numeric_earliest(
             "record_id": "tik1",
             "sec_user_id": "tiksec1",
             "账号名称": "一号",
-            "平台": "TikTok",
+            "平台": "tiktok",
             "链接": "",
             "等级": 4,
             "启用": 1,
+            "获取状态": "已获取",
         }
     )
     db.insert_account(
@@ -405,10 +595,11 @@ def test_run_batch_persists_skipped_tiktok_and_numeric_earliest(
             "record_id": "tik2",
             "sec_user_id": "tiksec2",
             "账号名称": "二号",
-            "平台": "TikTok",
+            "平台": "tiktok",
             "链接": "https://www.tiktok.com/@two",
             "等级": 4,
             "启用": 1,
+            "获取状态": "已获取",
             "collect_window_days": 200,
         }
     )

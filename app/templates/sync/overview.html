@@ -70,8 +70,8 @@
                 <i data-lucide="upload"></i> 去导入分享表
             </a>
             {% elif has_sync_work %}
-            <button class="btn btn-primary workflow-primary" onclick="syncAll()" id="sync-all-btn" data-idle-text="{{ '继续处理' if stats.pending_resolve else '生成待处理账号' }}">
-                <i data-lucide="zap"></i> {{ '继续处理' if stats.pending_resolve else '生成待处理账号' }}
+            <button class="btn btn-primary workflow-primary" onclick="syncAll()" id="sync-all-btn" data-idle-text="{{ '继续第 2-3 步' if stats.pending_resolve else '执行第 2-3 步' }}">
+                <i data-lucide="zap"></i> {{ '继续第 2-3 步' if stats.pending_resolve else '执行第 2-3 步' }}
             </button>
             {% else %}
             <button class="btn btn-primary workflow-primary" id="sync-all-btn" data-idle-text="暂无可处理数据" disabled>
@@ -92,7 +92,7 @@
         <span class="workflow-status pending" data-ttd-status="true">TTD 服务检查中</span>
     </div>
     <div class="text-muted" style="font-size:12px;line-height:1.7;margin-top:12px;">
-        最近导入：{{ recent_histories['import_collection'].created_at if recent_histories['import_collection'] else '-' }}。继续处理只处理本地已导入的分享表数据，不会从外部导入新数据。
+        最近导入：{{ recent_histories['import_collection'].created_at if recent_histories['import_collection'] else '-' }}。这里只执行第 2-3 步；第 4 步需单独执行。
     </div>
     <div id="sync-progress" style="display:none;margin-top:12px;">
         {{ workflow_progress('sync-progress-bar', 'sync-progress-text', 'sync-progress-count') }}
@@ -204,7 +204,7 @@
         status.textContent = '处理中';
         document.getElementById('sync-progress').style.display = 'block';
         document.getElementById('sync-progress-bar').style.width = '0%';
-        document.getElementById('sync-progress-text').textContent = '步骤1: 导入分享表';
+        document.getElementById('sync-progress-text').textContent = '检查已导入的分享表';
 
         // 步骤1: 直接调用导入 API（空文本=跳过实际导入，直接进入步骤2）
         try {
@@ -216,7 +216,7 @@
         } catch (e) {
             document.getElementById('sync-progress-text').textContent = '导入失败: ' + e.message;
             btn.disabled = false;
-            btn.innerHTML = '<i data-lucide="zap"></i> ' + (btn.dataset.idleText || '继续处理');
+            btn.innerHTML = '<i data-lucide="zap"></i> ' + (btn.dataset.idleText || '继续第 2-3 步');
             if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
             stopBtn.style.display = 'none';
         }
@@ -274,23 +274,32 @@
             // 最终完成
             var btn = document.getElementById('sync-all-btn');
             var stopBtn = document.getElementById('stop-sync-btn');
+            var status = document.getElementById('sync-console-status');
             btn.disabled = false;
-            btn.innerHTML = '<i data-lucide="zap"></i> ' + (btn.dataset.idleText || '继续处理');
+            btn.innerHTML = '<i data-lucide="zap"></i> ' + (btn.dataset.idleText || '继续第 2-3 步');
             if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
             stopBtn.style.display = 'none';
             status.className = 'workflow-status ' + (t.status === 'done' ? 'done' : (t.status === 'failed' ? 'failed' : 'cancelled'));
-            status.textContent = t.status === 'done' ? '已完成' : (t.status === 'failed' ? '失败' : '已取消');
+            var isSyncChain = t.type === 'sync_account';
+            status.textContent = t.status === 'done'
+                ? (isSyncChain ? '第 2-3 步已完成' : '已完成')
+                : (t.status === 'failed' ? (isSyncChain ? '第 2-3 步失败' : '失败') : '已取消');
             var bar = document.getElementById('sync-progress-bar');
             bar.style.width = '100%';
             if (t.status === 'done') {
                 bar.style.background = 'var(--success)';
-                document.getElementById('sync-progress-text').textContent = '完成: 成功 ' + (t.success||0) + ' 失败 ' + (t.failed||0);
-                showToast('账号处理完成', 'success');
+                if (isSyncChain) {
+                    document.getElementById('sync-progress-text').textContent = '第 2-3 步完成: 成功 ' + (t.success||0) + ' 失败 ' + (t.failed||0) + '；如仍有待补齐账号，请执行第 4 步';
+                    showToast('第 2-3 步完成', 'success');
+                } else {
+                    document.getElementById('sync-progress-text').textContent = '完成: 成功 ' + (t.success||0) + ' 失败 ' + (t.failed||0);
+                    showToast('任务完成', 'success');
+                }
                 setTimeout(function() { loadPage('/sync/overview'); }, 2000);
             } else if (t.status === 'failed') {
                 bar.style.background = 'var(--danger)';
                 document.getElementById('sync-progress-text').textContent = '失败: ' + (t.error || '');
-                showToast('账号处理失败', 'error');
+                showToast(isSyncChain ? '第 2-3 步处理失败' : '任务失败', 'error');
             } else {
                 bar.style.background = 'var(--danger)';
                 document.getElementById('sync-progress-text').textContent = '已取消';

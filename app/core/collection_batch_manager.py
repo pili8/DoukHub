@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+import psutil
 
 
 def _parse_date(value: str) -> date | None:
@@ -50,7 +51,17 @@ class CollectionBatchManager:
         self._active_process: Optional[asyncio.subprocess.Process] = None
         self._cancel_requested = False
         self._closing = False
+        self._paused = False
         self._recovery_wait_timeout = 3.0
+        # 重启后待续跑的中断批次，由 kick_resume() 送回执行队列
+        self._resume_queue: list[str] = []
+        # 看门狗分级阈值：超 WARN 秒无输出写警告，超 KILL 秒自动终止进程。
+        # KILL 必须远大于 TTD suspend 的 5 分钟静默，避免健康批次被误杀。
+        self._WATCHDOG_WARN_SECONDS = 300
+        self._WATCHDOG_KILL_SECONDS = 1800
+        self._WATCHDOG_INTERVAL = 60
+        # 首轮失败自动补采前的降温间隔
+        self._RETRY_COOLDOWN_SECONDS = 20
 
     async def start(
         self,
@@ -63,6 +74,7 @@ class CollectionBatchManager:
         mode: str = "incremental",
         preset_name: str = "",
         folder_name: str = "",
+        root_path: str = "",
         name_format: str = "",
         account_created_after: str = "",
         skip_recent_days: int = 0,
@@ -72,8 +84,11 @@ class CollectionBatchManager:
             if self._worker and not self._worker.done():
                 raise RuntimeError("已有采集批次正在执行或等待执行")
             self.recover_interrupted_batches()
+            await self.kick_resume()
         if self.db.get_active_collection_batch():
-            raise RuntimeError("已有采集批次正在执行或等待执行")
+            raise RuntimeError(
+                "已有采集批次正在执行或等待执行（上次中断的批次已自动续跑）"
+            )
 
         created: list[dict] = []
         stamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -102,6 +117,7 @@ class CollectionBatchManager:
                 "platform": platform,
                 "mode": mode,
                 "folder_name": folder_name,
+                "root_path": root_path,
                 "name_format": name_format,
                 "account_created_after": account_created_after,
                 "skip_recent_days": skip_recent_days,
@@ -132,13 +148,40 @@ class CollectionBatchManager:
 
     def cancel(self, batch_id: str) -> bool:
         batch = self.db.get_collection_batch(batch_id)
-        if not batch or batch["status"] not in ("pending", "running"):
+        if not batch or batch["status"] not in ("pending", "running", "paused"):
             return False
+        if batch["status"] == "paused":
+            self._set_paused(False)
         self.db.update_collection_batch(batch_id, status="cancelling")
         if batch_id == self._active_batch_id:
             self._cancel_requested = True
             if self._active_process and self._active_process.returncode is None:
                 self._active_process.terminate()
+        return True
+
+    def _set_paused(self, value: bool) -> None:
+        if self._active_process and self._active_process.returncode is None:
+            proc = psutil.Process(self._active_process.pid)
+            if value:
+                proc.suspend()
+            else:
+                proc.resume()
+        self._paused = value
+
+    def pause(self, batch_id: str) -> bool:
+        batch = self.db.get_collection_batch(batch_id)
+        if not batch or batch["status"] != "running" or batch_id != self._active_batch_id:
+            return False
+        self._set_paused(True)
+        self.db.update_collection_batch(batch_id, status="paused")
+        return True
+
+    def resume(self, batch_id: str) -> bool:
+        batch = self.db.get_collection_batch(batch_id)
+        if not batch or batch["status"] != "paused" or batch_id != self._active_batch_id:
+            return False
+        self._set_paused(False)
+        self.db.update_collection_batch(batch_id, status="running")
         return True
 
     def read_log(self, batch_id: str, max_lines: int | None = None) -> list[str]:
@@ -383,7 +426,16 @@ class CollectionBatchManager:
             pass
 
     def recover_interrupted_batches(self) -> None:
+        """重启恢复：杀掉孤儿 runner，未完成账号重置回 pending 并登记续跑。
+
+        与旧版「整批作废」不同：已 success 的账号保留成果
+        （last_collected_at 已更新，不会重采），批次进入 _resume_queue
+        由 kick_resume() 重新入队续跑；cancelling 是用户主动取消，仍按取消结算。
+        """
         for batch in self.db.list_active_collection_batches():
+            if batch["status"] == "cancelling":
+                self._finalize(batch["id"], "cancelled", -1, "DoukHub 重启，批次已取消")
+                continue
             process_pid = batch.get("process_pid")
             if process_pid and self._verify_recorded_runner(process_pid):
                 if not self._terminate_recorded_runner(process_pid):
@@ -397,12 +449,48 @@ class CollectionBatchManager:
                         f"recorded runner {process_pid} did not exit "
                         f"within {self._recovery_wait_timeout} seconds"
                     )
-            self._finalize(
-                batch["id"],
-                "failed" if batch["status"] == "running" else "cancelled",
-                -1,
-                "DoukHub 重启，批次中断",
+            if process_pid:
+                self.db.update_collection_batch(batch["id"], process_pid=None)
+            # 中断瞬间 running 的账号重置回 pending，保留 success 等终态
+            with self.db._connect() as conn:
+                conn.execute(
+                    """
+                    UPDATE collection_batch_items
+                    SET status = 'pending', message = 'DoukHub 重启，从中断处续跑'
+                    WHERE batch_id = ? AND status = 'running'
+                    """,
+                    (batch["id"],),
+                )
+                conn.commit()
+            self.db.refresh_collection_batch_counts(batch["id"])
+            self._append_batch_log(
+                batch, "[DoukHub] DoukHub 重启，批次将从中断处续跑（已完成账号不重复采集）\n"
             )
+            if batch["id"] not in self._resume_queue:
+                self._resume_queue.append(batch["id"])
+
+    async def kick_resume(self) -> None:
+        """把恢复队列中的中断批次送回执行队列并启动 worker（需在事件循环内调用）。"""
+        while self._resume_queue:
+            batch_id = self._resume_queue.pop(0)
+            batch = self.db.get_collection_batch(batch_id)
+            if not batch or batch["status"] not in ("pending", "running"):
+                continue
+            self._queue.put_nowait(batch_id)
+        if not self._queue.empty():
+            self._ensure_worker()
+
+    def _append_batch_log(self, batch: dict, text: str) -> None:
+        log_path = (batch or {}).get("log_path")
+        if not log_path:
+            return
+        try:
+            path = Path(log_path)
+            if path.parent.exists():
+                with path.open("a", encoding="utf-8", errors="replace") as file:
+                    file.write(text)
+        except Exception:
+            pass
 
     async def shutdown(self) -> None:
         self._closing = True
@@ -538,8 +626,13 @@ class CollectionBatchManager:
         except (json.JSONDecodeError, TypeError):
             filter_data = {}
         folder_name = filter_data.get("folder_name", "")
+        root_path = filter_data.get("root_path", "")
         name_format = filter_data.get("name_format", "")
         engine_params = filter_data.get("engine_params", {})
+        # 旧快照把主存储绝对路径写在 folder_name；新快照使用独立的 TTD root。
+        if not root_path and folder_name and Path(folder_name).is_absolute():
+            root_path = folder_name
+            folder_name = ""
         # 防御性回退：正常情况下 main.py 已注入全局默认值
         if not folder_name:
             folder_name = "Download"
@@ -580,6 +673,7 @@ class CollectionBatchManager:
                 folder_name=folder_name,
                 name_format=name_format,
                 cookie=cookie_str,
+                root_path=root_path,
                 engine_params=engine_params,
             )
         except Exception as error:
@@ -630,18 +724,42 @@ class CollectionBatchManager:
 
             with log_path.open("w", encoding="utf-8", errors="replace") as log_file:
                 last_output = time.monotonic()
+                watchdog_killed = False
 
                 async def _watchdog() -> None:
-                    """引擎心跳看门狗：长时间无输出时写入警告日志（不杀进程）。"""
+                    """引擎心跳看门狗：无输出超 WARN 秒写警告，超 KILL 秒自动终止。
+
+                    被处决的批次按失败结算，未完成账号走既有的自动补采兜底。
+                    阈值远大于 TTD suspend 的 5 分钟静默，不会误杀健康批次。
+                    """
+                    nonlocal watchdog_killed
+                    warned = False
                     while process.returncode is None:
-                        await asyncio.sleep(60)
+                        await asyncio.sleep(self._WATCHDOG_INTERVAL)
+                        if self._paused:
+                            last_output = time.monotonic()
+                            continue
                         silent = time.monotonic() - last_output
-                        if silent > 300:
+                        if silent > self._WATCHDOG_KILL_SECONDS:
+                            watchdog_killed = True
                             log_file.write(
                                 f"[DoukHub watchdog] 引擎已 {int(silent)} 秒无输出，"
-                                "请检查 TTD 进程是否卡住\n"
+                                f"超过 {self._WATCHDOG_KILL_SECONDS // 60} 分钟阈值，"
+                                "自动终止进程，未完成账号将自动补采\n"
                             )
                             log_file.flush()
+                            process.terminate()
+                            return
+                        if silent > self._WATCHDOG_WARN_SECONDS:
+                            if not warned:
+                                log_file.write(
+                                    f"[DoukHub watchdog] 引擎已 {int(silent)} 秒无输出，"
+                                    "请检查 TTD 进程是否卡住\n"
+                                )
+                                log_file.flush()
+                                warned = True
+                        else:
+                            warned = False
 
                 watchdog_task = asyncio.create_task(_watchdog())
                 try:
@@ -672,21 +790,27 @@ class CollectionBatchManager:
         if self._cancel_requested or current_status == "cancelling":
             final_status = "cancelled"
             message = "批次已取消"
+        elif watchdog_killed:
+            final_status = "failed"
+            message = "引擎长时间无输出，已被看门狗自动终止"
         else:
             final_status = "completed" if return_code == 0 else "failed"
             message = "" if return_code == 0 else f"TTD 进程退出码: {return_code}"
 
         self._close_cookie_loop(batch_id, self._batch_cookie_rid)
 
-        # 失败账号自动重试一轮（仅一次）：网络抖动/瞬时风控当场补上，不留给下一轮
+        # 失败账号自动重试一轮（仅一次）：网络抖动/瞬时风控/看门狗处决当场补上，
+        # 不留给下一轮
         if (
-            final_status == "completed"
+            (final_status == "completed" or watchdog_killed)
             and not filter_data.get("retried")
             and not self._cancel_requested
         ):
+            # 看门狗处决/进程异常退出时，未完成账号还停在 pending/running，
+            # 也一并纳入补采（_finalize 要到补采判定之后才结算）
             failed_items = [
                 it for it in self.db.get_collection_batch_items(batch_id)
-                if it["status"] == "failed"
+                if it["status"] in ("failed", "pending", "running")
             ]
             if failed_items:
                 filter_data["retried"] = True
@@ -696,10 +820,10 @@ class CollectionBatchManager:
                 )
                 for it in failed_items:
                     self.db.update_collection_batch_item(
-                        it["id"], status="pending", message="首轮失败，自动重试中"
+                        it["id"], status="pending", message="首轮未完成，自动重试中"
                     )
                 self._clear_active_batch()
-                await asyncio.sleep(20)  # 降温间隔，降低连续请求触发风控的概率
+                await asyncio.sleep(self._RETRY_COOLDOWN_SECONDS)  # 降温间隔，降低连续请求触发风控的概率
                 return await self._run_batch(batch_id)
 
         self._clear_active_batch()

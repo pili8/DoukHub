@@ -16,6 +16,7 @@
     <div class="tbl-toolbar-row">
         <div id="table-tabs" class="tbl-tabs"></div>
 <div class="tbl-search-group">
+                <select id="search-field" class="tbl-search-field" onchange="onSearchFieldChange(this.value)" title="搜索范围：默认只搜文本字段，全字段搜索较慢"></select>
                 <div class="tbl-search-wrapper">
                     <i class="ph ph-magnifying-glass tbl-search-icon"></i>
                     <input type="text" id="search-keyword" class="tbl-search-input" placeholder="输入以搜索当前表…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')doSearch()">
@@ -354,6 +355,60 @@
     --ag-item-active-color: var(--menu-hover);
 }
 
+/* ===== 搜索范围选择器 ===== */
+.tbl-search-field {
+    padding: 7px 8px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 12.5px;
+    font-family: inherit;
+    cursor: pointer;
+    max-width: 150px;
+    transition: border-color var(--transition-fast);
+}
+.tbl-search-field:focus { outline: none; border-color: var(--accent); }
+
+/* ===== 加载状态条（替代分页条） ===== */
+.tbl-load-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono, monospace);
+}
+.tbl-load-status .ls-total { color: var(--text-secondary); font-weight: 600; }
+.tbl-load-status .ls-spinner {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    color: var(--accent);
+}
+.tbl-load-status.loading .ls-spinner,
+#pagination.loading .ls-spinner { display: inline-flex; }
+.tbl-load-status .ls-top {
+    margin-left: auto;
+    border: 1px solid var(--border-default);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: inherit;
+    transition: all var(--transition-fast);
+}
+.tbl-load-status .ls-top:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
 /* AG Grid 头部样式 */
 .ag-theme-quartz .ag-header-cell-label {
     font-weight: 600;
@@ -362,21 +417,75 @@
     text-transform: uppercase;
 }
 
-/* 表头菜单按钮（竖点）：默认隐藏，悬停列头才显示——标题文字优先占满 */
+/* 表头筛选按钮（漏斗图标）：默认隐藏，悬停列头才显示；有筛选/排序时常驻 */
 .tbl-header-menu-btn {
-    display: none !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    border: none; background: transparent;
+    color: var(--text-muted); cursor: pointer;
+    border-radius: 4px; flex-shrink: 0;
 }
 .ag-header-cell:hover .tbl-header-menu-btn {
-    display: inline-flex !important;
+    opacity: 1;
 }
 .tbl-header-menu-btn:hover {
     background: var(--bg-hover);
     color: var(--accent) !important;
 }
-/* 自写列菜单 */
-.tbl-col-menu {
+.tbl-header-menu-btn.is-active { opacity: 1; color: var(--accent) !important; }
+/* 筛选弹窗 */
+.tbl-filter-popup {
     animation: tbl-menu-in 120ms ease-out;
+    user-select: none;
 }
+.tbl-filter-popup .fp-search {
+    width: 100%; box-sizing: border-box;
+    padding: 6px 8px; margin-bottom: 6px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xs);
+    font-size: 12px; background: var(--bg-input); color: var(--text-primary);
+    font-family: inherit; outline: none;
+}
+.tbl-filter-popup .fp-search:focus { border-color: var(--accent); }
+.tbl-filter-popup .fp-list {
+    max-height: 200px; overflow-y: auto; margin-bottom: 6px;
+}
+.tbl-filter-popup .fp-opt {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px; cursor: pointer;
+    border-radius: var(--radius-xs); font-size: 12px;
+    transition: background .08s;
+}
+.tbl-filter-popup .fp-opt:hover { background: var(--menu-hover); }
+.tbl-filter-popup .fp-opt input[type="checkbox"] {
+    width: 14px; height: 14px; accent-color: var(--accent);
+    flex-shrink: 0; margin: 0;
+}
+.tbl-filter-popup .fp-opt span {
+    flex: 1; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+.tbl-filter-popup .fp-sort-row {
+    display: flex; gap: 4px; padding: 4px 4px 6px;
+    border-bottom: 1px solid var(--border-default); margin-bottom: 6px;
+}
+.tbl-filter-popup .fp-sort-btn {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 3px;
+    padding: 4px 6px; border: 1px solid var(--border-default);
+    border-radius: var(--radius-xs); background: transparent;
+    color: var(--text-secondary); cursor: pointer; font-size: 11px;
+    font-family: inherit; transition: border-color .1s, color .1s;
+}
+.tbl-filter-popup .fp-sort-btn:hover { border-color: var(--accent); color: var(--accent); }
+.tbl-filter-popup .fp-sort-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(45,212,191,.08); }
+.tbl-filter-popup .fp-footer {
+    display: flex; gap: 6px; justify-content: flex-end;
+    padding-top: 6px; border-top: 1px solid var(--border-default);
+}
+.tbl-filter-popup .fp-footer .btn { padding: 4px 12px; font-size: 12px; }
+.fp-empty-hint { font-size: 12px; color: var(--text-muted); padding: 8px; text-align: center; }
 @keyframes tbl-menu-in {
     from { opacity: 0; transform: translateY(-4px); }
     to { opacity: 1; transform: translateY(0); }
@@ -753,8 +862,8 @@ input[type="checkbox"]:disabled {
     .tbl-action-group { justify-content: flex-end; }
     .tbl-grid { height: calc(100vh - 380px); }
 }
-/* 列头菜单按钮：默认隐藏，悬停列头显示；有排序/筛选时常驻 */
-.tbl-header-menu-btn { opacity: 0; transition: opacity .12s, color .12s; }
+/* 列头筛选按钮：悬停显示；有排序/筛选时常驻 */
+.tbl-header-menu-btn { opacity: 0; transition: opacity .12s, color .12s; display: inline-flex; }
 .ag-header-cell:hover .tbl-header-menu-btn,
 .ag-header-cell:focus-within .tbl-header-menu-btn { opacity: 1; }
 .tbl-header-menu-btn.is-active { opacity: 1; }
@@ -786,6 +895,12 @@ input[type="checkbox"]:disabled {
   padding: 10px 12px;
 }
 .sp-hint i { color: var(--accent); font-size: 14px; margin-top: 1px; flex-shrink: 0; }
+/* 账号表 UID + 作品入口：UID 可截断，按钮始终保留 */
+.account-works-cell { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; box-sizing: border-box; }
+.account-works-uid { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-tertiary); font-weight: 400; }
+.account-works-btn { flex-shrink: 0; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; border-radius: var(--radius-xs); color: var(--text-tertiary); cursor: pointer; font-size: 15px; line-height: 1; text-decoration: none; transition: color .12s, background-color .12s; }
+.account-works-btn i { line-height: 1; }
+.account-works-btn:hover { color: var(--accent); background: var(--bg-hover); }
 </style>
 
 {% endblock %}
@@ -808,8 +923,8 @@ input[type="checkbox"]:disabled {
         if (typeof searchDebounceTimer !== 'undefined' && searchDebounceTimer) {
             clearTimeout(searchDebounceTimer);
         }
-        if (typeof colMenuEl !== 'undefined' && colMenuEl) {
-            try { colMenuEl.remove(); } catch(e) {}
+        if (typeof filterPopupEl !== 'undefined' && filterPopupEl) {
+            try { filterPopupEl.remove(); } catch(e) {}
         }
     };
 
@@ -831,7 +946,18 @@ input[type="checkbox"]:disabled {
         'account_cache': 'acc',
         'cookie_cache': 'ck'
     };
-    var PAGE_SIZE = parseInt(localStorage.getItem('doukhub-table-page-size')) || 50;
+    // infinite rowModel：按块(100行)从服务端拉取，滚到附近自动加载 + 预取下一块
+    var BLOCK_SIZE = 100;
+    // 搜索范围：'__text__' = 默认文本字段（多列 OR，快）；'__all__' = 全字段（慢）；其余为具体字段名
+    var currentSearchField = '__text__';
+    // 各表"文本字段"默认搜索列（避开 sec_user_id / 数字 / 时间列，用户明确说 sec_user_id 不需要搜索）
+    var TEXT_SEARCH_FIELDS = {
+        'share_cache': ['share_code', '账号名称', '备注'],
+        'account_cache': ['账号名称', '备注', '签名'],
+        'cookie_cache': ['备注'],
+    };
+    // schema 缓存：表结构几乎不变，切表不再重复请求
+    var _schemaCache = {};
 
     var HIDDEN_COLS = [];
 
@@ -1002,9 +1128,7 @@ var FIELD_EDITORS = {
     var searchDebounceTimer = null;
     var currentSortField = '';
     var currentSortOrder = '';
-    var currentFilterField = '';
-    var currentFilterOp = '';
-    var currentFilterValue = '';
+    var currentFilters = {}; // { fieldName: [value1, value2, ...] }
 
     // =========================================================================
     // 自定义单元格渲染器
@@ -1192,20 +1316,24 @@ async function copyCookieValue(recordId) {
 function accountWorksRenderer(params) {
     var val = params.value;
     if (!val) return '<span style="color: var(--text-muted);">-</span>';
-    var display = val.length > 20 ? val.substring(0, 20) + '…' : val;
-    var safe = val.replace(/'/g, "\\'");
-    return '<span style="display:inline-flex;align-items:center;gap:6px;">'
-        + '<span style="color: var(--text-secondary);font-weight:500;">' + display + '</span>'
-        + '<a href="javascript:void(0)" onclick="openAccountWorks({sec_user_id:\'' + safe + '\'})" title="查看该账号采集的作品" style="font-size:11px;padding:2px 8px;border:1px solid var(--border-default);border-radius:20px;color:var(--text-secondary);text-decoration:none;white-space:nowrap;">作品</a>'
-        + '</span>';
+    var text = String(val);
+    var display = text.length > 13 ? '…' + text.slice(-12) : text;
+    var html = text.replace(/[&<>"']/g, function(ch) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]; });
+    var arg = encodeURIComponent(text).replace(/'/g, '%27');
+    return '<div class="account-works-cell">'
+        + '<span class="account-works-uid" title="' + html + '">' + display + '</span>'
+        + '<a class="account-works-btn" href="javascript:void(0)" onclick="openAccountWorks({sec_user_id:decodeURIComponent(\'' + arg + '\')})" title="查看该账号采集的作品" aria-label="查看该账号采集的作品"><i class="ph ph-film-strip"></i></a>'
+        + '</div>';
 }
 
 // sec_user_id 链接渲染器：仅在分享表中使用，点击跳转到账号表并高亮对应行
 function secUserIdLinkRenderer(params) {
     var val = params.value;
     if (!val) return '<span style="color: var(--text-muted);">-</span>';
-    var display = val.length > 20 ? val.substring(0, 20) + '…' : val;
-    return '<a href="javascript:void(0)" onclick="jumpToAccount(\'' + val.replace(/'/g, "\\'") + '\')" style="color: var(--accent); text-decoration: none; font-weight: 500; cursor: pointer;">' + display + '</a>';
+    var text = String(val);
+    var display = text.length > 13 ? '…' + text.slice(-12) : text;
+    var html = text.replace(/[&<>"']/g, function(ch) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]; });
+    return '<a href="javascript:void(0)" title="' + html + '" onclick="jumpToAccount(\'' + val.replace(/'/g, "\\'") + '\')" style="color: var(--accent); text-decoration: none; font-weight: 500; cursor: pointer;">' + display + '</a>';
 }
 
 var FIELD_RENDERERS = {
@@ -1239,23 +1367,23 @@ var FIELD_RENDERERS = {
         }
         _render() {
             const isSorted = currentSortField === this.field;
-            const hasFilter = currentFilterField === this.field;
+            const hasFilter = !!(currentFilters[this.field] && currentFilters[this.field].length);
             const btnActive = isSorted || hasFilter;
             const order = isSorted ? currentSortOrder : '';
             const arrow = order === 'asc' ? '↑' : (order === 'desc' ? '↓' : '');
             const safeName = htmlEscape(this.displayName);
             const safeField = htmlEscape(this.field);
+            const funnelSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5z"/></svg>';
             this.gui.innerHTML =
                 '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' +
                 safeName + '">' + safeName +
                 (isSorted ? '<span style="color:var(--accent);margin-left:4px;font-weight:700;">' + arrow + '</span>' : '') +
                 '</span>' +
-                '<button class="tbl-header-menu-btn' + (btnActive ? ' is-active' : '') + '" data-field="' + safeField + '" title="菜单：排序/筛选" style="' +
-                'flex-shrink:0;border:none;background:transparent;color:' + (btnActive ? 'var(--accent)' : 'var(--text-muted)') + ';cursor:pointer;padding:2px 4px;border-radius:4px;font-size:13px;line-height:1;' +
-                '">⋮</button>';
+                '<button class="tbl-header-menu-btn' + (btnActive ? ' is-active' : '') + '" data-field="' + safeField + '" title="排序 / 筛选">' +
+                funnelSvg + '</button>';
             this.gui.querySelector('.tbl-header-menu-btn').addEventListener('click', (e) => {
                 e.stopPropagation();
-                openColMenu(e, this.field);
+                openFilterPopup(e, this.field);
             });
         }
         refresh(params) {
@@ -1267,11 +1395,134 @@ var FIELD_RENDERERS = {
     };
 
     // =========================================================================
-    // 自写列菜单（排序 + 筛选）
+    // 表头排序 + 多选筛选弹窗
     // =========================================================================
-    var colMenuEl = null;
+    var filterPopupEl = null;
 
-    // 收集当前表某字段的去重值（用于筛选下拉选项）
+    async function openFilterPopup(event, field) {
+        closeFilterPopup();
+        const btn = event.target.closest('button') || event.target;
+        const rect = btn.getBoundingClientRect();
+        const popup = document.createElement('div');
+        popup.className = 'tbl-filter-popup';
+        popup.style.cssText =
+            'position:fixed;z-index:20000;width:225px;background:var(--surface-overlay);' +
+            'border:1px solid var(--border-default);border-radius:var(--radius-sm);' +
+            'box-shadow:var(--shadow-lg);padding:10px;font-size:13px;color:var(--text-primary);';
+        let left = rect.left - 100;
+        let top = rect.bottom + 6;
+        if (left < 8) left = 8;
+        if (left + 225 > window.innerWidth) left = window.innerWidth - 233;
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+
+        // 排序按钮行
+        const sortRow = document.createElement('div');
+        sortRow.className = 'fp-sort-row';
+        const curSort = currentSortField === field ? currentSortOrder : '';
+        [['升序', 'asc', '↑'], ['降序', 'desc', '↓']].forEach(function(pair) {
+            const sb = document.createElement('button');
+            sb.className = 'fp-sort-btn' + (curSort === pair[1] ? ' active' : '');
+            sb.innerHTML = '<span style="font-weight:700;">' + pair[2] + '</span> ' + pair[0];
+            sb.addEventListener('click', function(e) {
+                e.stopPropagation();
+                applyColSort(field, curSort === pair[1] ? '' : pair[1]);
+            });
+            sortRow.appendChild(sb);
+        });
+        popup.appendChild(sortRow);
+
+        // 搜索框
+        const searchInput = document.createElement('input');
+        searchInput.className = 'fp-search';
+        searchInput.type = 'text';
+        searchInput.placeholder = '搜索…';
+        popup.appendChild(searchInput);
+
+        // 值列表容器
+        const listBox = document.createElement('div');
+        listBox.className = 'fp-list';
+        popup.appendChild(listBox);
+
+        // 底部按钮
+        const footer = document.createElement('div');
+        footer.className = 'fp-footer';
+        const confirmBtn = document.createElement('button');
+        confirmBtn.textContent = '确定';
+        confirmBtn.className = 'btn btn-primary btn-sm';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = '取消';
+        cancelBtn.className = 'btn btn-secondary btn-sm';
+        const clearBtn = document.createElement('button');
+        clearBtn.textContent = '清除';
+        clearBtn.className = 'btn btn-secondary btn-sm';
+        footer.appendChild(clearBtn);
+        footer.appendChild(cancelBtn);
+        footer.appendChild(confirmBtn);
+        popup.appendChild(footer);
+
+        document.body.appendChild(popup);
+        filterPopupEl = popup;
+
+        // 选中状态（临时副本）
+        const checked = new Set(currentFilters[field] || []);
+
+        // 异步加载去重值
+        var allValues = [];
+        try {
+            const resp = await apiCall('/api/database/table/' + currentTable + '/distinct/' + encodeURIComponent(field), 'GET');
+            allValues = resp.values || [];
+        } catch (e) { allValues = collectDistinctValues(field); }
+        if (filterPopupEl !== popup) return;
+
+        function renderList(filterText) {
+            listBox.innerHTML = '';
+            const lower = (filterText || '').toLowerCase();
+            const filtered = allValues.filter(function(v) { return !lower || String(v).toLowerCase().includes(lower); });
+            if (!filtered.length) {
+                listBox.innerHTML = '<div class="fp-empty-hint">无匹配项</div>';
+                return;
+            }
+            filtered.forEach(function(v) {
+                const opt = document.createElement('label');
+                opt.className = 'fp-opt';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.checked = checked.has(v);
+                cb.addEventListener('change', function() {
+                    if (cb.checked) checked.add(v);
+                    else checked.delete(v);
+                });
+                const span = document.createElement('span');
+                span.textContent = v;
+                opt.appendChild(cb);
+                opt.appendChild(span);
+                listBox.appendChild(opt);
+            });
+        }
+        renderList('');
+        searchInput.addEventListener('input', function() { renderList(searchInput.value.trim()); });
+
+        confirmBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            applyFieldFilter(field, Array.from(checked));
+        });
+        cancelBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeFilterPopup();
+        });
+        clearBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            applyFieldFilter(field, []);
+        });
+        setTimeout(function() { searchInput.focus(); }, 0);
+    }
+
+    function closeFilterPopup() {
+        if (filterPopupEl) { filterPopupEl.remove(); filterPopupEl = null; }
+    }
+
+    // 收集当前表某字段的去重值（兜底用：仅当前页数据）
     function collectDistinctValues(field) {
         const vals = new Set();
         if (gridApi) {
@@ -1292,132 +1543,8 @@ var FIELD_RENDERERS = {
         return Array.from(vals).sort();
     }
 
-    function openColMenu(event, field) {
-        closeColMenu();
-        const btn = event.target;
-        const rect = btn.getBoundingClientRect();
-        const menu = document.createElement('div');
-        menu.className = 'tbl-col-menu';
-        menu.style.cssText =
-            'position:fixed;z-index:20000;min-width:200px;background:var(--surface-overlay);' +
-            'border:1px solid var(--border-default);border-radius:var(--radius-sm);' +
-            'box-shadow:var(--shadow-lg);padding:6px;font-size:13px;color:var(--text-primary);';
-        let left = rect.left;
-        let top = rect.bottom + 6;
-        if (left + 220 > window.innerWidth) left = window.innerWidth - 220;
-        if (top + 260 > window.innerHeight) top = rect.top - 260;
-        menu.style.left = left + 'px';
-        menu.style.top = top + 'px';
-
-        const isSorted = currentSortField === field;
-        const curOrder = isSorted ? currentSortOrder : '';
-
-        function item(icon, label, active, onClick) {
-            const el = document.createElement('div');
-            el.style.cssText =
-                'display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--radius-xs);' +
-                'cursor:pointer;color:' + (active ? 'var(--accent)' : 'var(--text-primary)') + ';font-weight:' + (active ? '600' : '400');
-            el.innerHTML = '<i class="ph ' + icon + '" style="font-size:15px;"></i><span>' + label + '</span>';
-            el.addEventListener('mouseenter', () => { el.style.background = 'var(--menu-hover)'; });
-            el.addEventListener('mouseleave', () => { el.style.background = 'transparent'; });
-            el.addEventListener('click', onClick);
-            return el;
-        }
-
-        menu.appendChild(item('ph-sort-ascending', '升序', curOrder === 'asc', (e) => {
-            e.stopPropagation();
-            applyColSort(field, 'asc');
-        }));
-        menu.appendChild(item('ph-sort-descending', '降序', curOrder === 'desc', (e) => {
-            e.stopPropagation();
-            applyColSort(field, 'desc');
-        }));
-        menu.appendChild(item('ph-x', '清除排序', false, (e) => {
-            e.stopPropagation();
-            applyColSort(field, '');
-        }));
-
-        // 分隔线
-        const sep = document.createElement('div');
-        sep.style.cssText = 'height:1px;background:var(--border-default);margin:6px 4px;';
-        menu.appendChild(sep);
-
-        // 筛选区
-        const filterRow = document.createElement('div');
-        filterRow.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:2px 2px;';
-        const filterHead = document.createElement('div');
-        filterHead.textContent = '筛选';
-        filterHead.style.cssText = 'font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;padding:2px 6px;';
-        filterRow.appendChild(filterHead);
-
-        const ctrlStyle = 'padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-xs);font-size:12px;background:var(--bg-input);color:var(--text-primary);font-family:inherit;';
-        const opSelect = document.createElement('select');
-        opSelect.style.cssText = ctrlStyle;
-
-        const isRating = field === '等级' || field === '等级筛选';
-        const isTag = field === '标签';
-        let valInput;
-        if (isRating) {
-            opSelect.innerHTML = '<option value="equals">等于</option>';
-            valInput = document.createElement('select');
-            valInput.style.cssText = ctrlStyle;
-            valInput.innerHTML = '<option value="">选择等级…</option>' + [1, 2, 3, 4, 5].map(function(n) { return '<option value="' + n + '">' + n + ' 星</option>'; }).join('');
-        } else if (isTag) {
-            opSelect.innerHTML = '<option value="contains">包含</option>';
-            valInput = document.createElement('select');
-            valInput.style.cssText = ctrlStyle;
-            const tags = collectDistinctValues('标签');
-            if (currentFilterField === field && currentFilterValue && tags.indexOf(currentFilterValue) < 0) {
-                tags.push(currentFilterValue);
-            }
-            valInput.innerHTML = '<option value="">选择标签…</option>' + tags.map(function(tg) { return '<option value="' + htmlEscape(tg) + '">' + htmlEscape(tg) + '</option>'; }).join('');
-        } else {
-            opSelect.innerHTML = '<option value="contains">包含</option><option value="equals">等于</option>';
-            valInput = document.createElement('input');
-            valInput.type = 'text';
-            valInput.placeholder = '筛选值…';
-            valInput.style.cssText = ctrlStyle;
-        }
-        if (currentFilterField === field && currentFilterOp) opSelect.value = currentFilterOp;
-        if (currentFilterField === field) valInput.value = currentFilterValue || '';
-
-        const btnRow = document.createElement('div');
-        btnRow.style.cssText = 'display:flex;gap:6px;justify-content:flex-end;';
-
-        const applyBtn = document.createElement('button');
-        applyBtn.textContent = '应用';
-        applyBtn.className = 'btn btn-primary btn-sm';
-        applyBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            applyColFilter(field, opSelect.value, valInput.value.trim());
-        });
-        btnRow.appendChild(applyBtn);
-
-        const clearBtn = document.createElement('button');
-        clearBtn.textContent = '清除';
-        clearBtn.className = 'btn btn-secondary btn-sm';
-        clearBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            applyColFilter(field, '', '');
-        });
-        btnRow.appendChild(clearBtn);
-
-        filterRow.appendChild(opSelect);
-        filterRow.appendChild(valInput);
-        filterRow.appendChild(btnRow);
-        menu.appendChild(filterRow);
-
-        document.body.appendChild(menu);
-        colMenuEl = menu;
-        if (valInput.tagName === 'INPUT' && valInput.value) valInput.focus();
-    }
-
-    function closeColMenu() {
-        if (colMenuEl) { colMenuEl.remove(); colMenuEl = null; }
-    }
-
     function applyColSort(field, order) {
-        closeColMenu();
+        closeFilterPopup();
         if (order) {
             currentSortField = field;
             currentSortOrder = order;
@@ -1428,28 +1555,21 @@ var FIELD_RENDERERS = {
         showTable(currentTable, 1, currentKeyword);
     }
 
-    function applyColFilter(field, op, value) {
-        closeColMenu();
-        if (op && value) {
-            currentFilterField = field;
-            currentFilterOp = op;
-            currentFilterValue = value;
-        } else {
-            currentFilterField = '';
-            currentFilterOp = '';
-            currentFilterValue = '';
-        }
+    function applyFieldFilter(field, values) {
+        closeFilterPopup();
+        if (values && values.length) currentFilters[field] = values;
+        else delete currentFilters[field];
         showTable(currentTable, 1, currentKeyword);
     }
 
     // 点击外部区域 / Esc 关闭菜单（使用命名函数以便 SPA 重入时移除）
     window._tblDocClick = function(e) {
-        if (colMenuEl && !colMenuEl.contains(e.target) && !e.target.classList.contains('tbl-header-menu-btn')) {
-            closeColMenu();
+        if (filterPopupEl && !filterPopupEl.contains(e.target) && !e.target.closest('.tbl-header-menu-btn')) {
+            closeFilterPopup();
         }
     };
     window._tblDocKeydown = function(e) {
-        if (e.key === 'Escape') closeColMenu();
+        if (e.key === 'Escape') closeFilterPopup();
     };
     document.addEventListener('click', window._tblDocClick);
     document.addEventListener('keydown', window._tblDocKeydown);
@@ -1695,6 +1815,118 @@ var FIELD_RENDERERS = {
     // =========================================================================
     // AG Grid 初始化
     // =========================================================================
+    // infinite datasource：自带块缓存 + 空闲预取下一块。
+    // 查询条件（表/关键词/排序/筛选/搜索范围）变化时 _dsSeq 自增并创建新数据源，
+    // 旧请求回调因 seq 不匹配被丢弃，天然规避竞态。
+    var _dsSeq = 0;
+
+    function _buildQueryUrl(tableName, limit, offset) {
+        var url = '/api/database/table/' + tableName + '?limit=' + limit + '&offset=' + offset;
+        if (currentKeyword) url += '&search=' + encodeURIComponent(currentKeyword);
+        if (currentSearchField && currentSearchField !== '__all__') {
+            var f = currentSearchField === '__text__'
+                ? (TEXT_SEARCH_FIELDS[tableName] || []).join(',')
+                : currentSearchField;
+            if (f) url += '&search_field=' + encodeURIComponent(f);
+        }
+        if (currentSortField) url += '&sort_field=' + encodeURIComponent(currentSortField) + '&sort_order=' + encodeURIComponent(currentSortOrder || 'asc');
+        var filterKeys = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; });
+        if (filterKeys.length) {
+            var filterArr = filterKeys.map(function(k) { return { field: k, values: currentFilters[k] }; });
+            url += '&filters=' + encodeURIComponent(JSON.stringify(filterArr));
+        }
+        return url;
+    }
+
+    function makeDatasource() {
+        var seq = ++_dsSeq;
+        var cache = { blocks: new Map(), total: null, loaded: 0, prefetching: new Set() };
+
+        function fetchBlock(startRow, endRow) {
+            // 精确总数只在第一批要一次；后续块复用，省掉重复 COUNT
+            var needTotal = cache.total === null;
+            var url = _buildQueryUrl(currentTable, endRow - startRow, startRow) + '&need_total=' + needTotal;
+            return apiCall(url, 'GET').then(function(data) {
+                if (needTotal) cache.total = (data.total != null && data.total >= 0) ? data.total : 0;
+                return { rows: data.records || [], total: cache.total };
+            });
+        }
+
+        return {
+            getRows: function(params) {
+                if (seq !== _dsSeq) { params.successCallback([], 0); return; }
+                var startRow = params.startRow, endRow = params.endRow;
+                var blk = cache.blocks.get(startRow);
+                if (blk) {
+                    params.successCallback(blk.rows, blk.total);
+                    return;
+                }
+                _setStatusLoading(true);
+                fetchBlock(startRow, endRow).then(function(res) {
+                    if (seq !== _dsSeq) return;
+                    cache.blocks.set(startRow, res);
+                    cache.loaded = Math.max(cache.loaded, endRow);
+                    params.successCallback(res.rows, res.total);
+                    _renderLoadStatus(cache);
+                    _setStatusLoading(false);
+                    // 预取下一块：滚过去时数据已在本地
+                    var nextStart = endRow;
+                    var more = res.total < 0 || nextStart < res.total;
+                    if (more && !cache.blocks.has(nextStart) && !cache.prefetching.has(nextStart)) {
+                        cache.prefetching.add(nextStart);
+                        fetchBlock(nextStart, nextStart + BLOCK_SIZE).then(function(r2) {
+                            if (seq !== _dsSeq) return;
+                            cache.blocks.set(nextStart, r2);
+                            cache.prefetching.delete(nextStart);
+                        }).catch(function() { cache.prefetching.delete(nextStart); });
+                    }
+                }).catch(function() {
+                    if (seq === _dsSeq) { _setStatusLoading(false); params.failCallback(); }
+                });
+            },
+            destroy: function() { /* 缓存随闭包释放 */ }
+        };
+    }
+
+    function _renderLoadStatus(cache) {
+        var el = document.getElementById('pagination');
+        if (!el) return;
+        var total = cache.total;
+        var hasTotal = total !== null && total !== undefined && total >= 0;
+        var totalTxt = hasTotal ? Number(total).toLocaleString('zh-CN') : '…';
+        var loaded = Number(cache.loaded || 0);
+        if (hasTotal) loaded = Math.min(loaded, total);
+        if (hasTotal) currentTotal = total;
+
+        // 顶部计数徽章同步（保留"已筛选 · 清除"等附加元素）
+        var countBadge = document.getElementById('table-count-badge');
+        if (countBadge) {
+            var extras = Array.prototype.slice.call(countBadge.querySelectorAll('span'));
+            countBadge.innerHTML = '';
+            countBadge.appendChild(document.createTextNode((hasTotal ? totalTxt : '…') + ' 条'));
+            extras.forEach(function(x) { countBadge.appendChild(x); });
+        }
+
+        el.innerHTML =
+            '<div class="tbl-load-status">' +
+            '<span>已加载 <span class="ls-total">' + loaded.toLocaleString('zh-CN') + '</span> / 共 <span class="ls-total">' + totalTxt + '</span> 条</span>' +
+            '<span class="ls-spinner"><i class="ph ph-circle-notch" style="animation:spin 0.8s linear infinite;"></i> 加载中…</span>' +
+            '<span style="color:var(--text-muted);">下滑自动加载</span>' +
+            '<button class="ls-top" onclick="backToTop()"><i class="ph ph-arrow-up"></i> 回到顶部</button>' +
+            '</div>';
+    }
+
+    function _setStatusLoading(on) {
+        var el = document.getElementById('pagination');
+        if (el) el.classList.toggle('loading', !!on);
+    }
+
+    function backToTop() {
+        if (gridApi) gridApi.ensureIndexVisible(0, 'top');
+        var main = document.querySelector('.main') || document.documentElement;
+        main.scrollTop = 0;
+    }
+
     function ensureGrid(colDefs) {
         if (!gridInitialized) {
             const gridDiv = document.getElementById('ag-grid-container');
@@ -1704,12 +1936,15 @@ var FIELD_RENDERERS = {
             }
             gridApi = agGrid.createGrid(gridDiv, {
                 columnDefs: colDefs,
-                rowData: [],
+                rowModelType: 'infinite',
+                datasource: makeDatasource(),
+                cacheBlockSize: BLOCK_SIZE,
+                maxBlocksInCache: 10,
+                blockLoadDebounce: 150,
                 rowSelection: 'multiple',
                 suppressRowClickSelection: true,
-                animateRows: true,
+                animateRows: false,
                 stopEditingWhenCellsLoseFocus: true,
-                undoRedoCellEditing: true,
             defaultColDef: {
                 sortable: true,
                 resizable: true,
@@ -1795,8 +2030,9 @@ var FIELD_RENDERERS = {
         var sec = qp.get('sec');
         if (tab && TABLE_NAMES[tab]) {
             if (tab === 'account_cache' && sec) {
-                // 目标账号可能不在当前分页,直接带 sec_user_id 搜索定位(唯一值)
-                // 注意:不走 jumpToAccount(它会重新加载全量覆盖搜索),改为搜索后直接高亮结果行
+                // 目标账号可能不在已加载的块里,直接带 sec_user_id 搜索定位(唯一值)。
+                // 注意:默认搜索范围是"文本字段"不含 sec_user_id,这里必须显式切到该字段。
+                currentSearchField = 'sec_user_id';
                 var kw = document.getElementById('search-keyword');
                 if (kw) kw.value = sec;
                 var clearBtn = document.getElementById('search-clear-btn');
@@ -1843,9 +2079,11 @@ var FIELD_RENDERERS = {
         if (activeBtn) activeBtn.classList.add('active');
     }
 
-    // 从分享表跳转到账号表，高亮对应 sec_user_id 的行
+    // 从分享表跳转到账号表，搜索定位对应 sec_user_id 的行并高亮
     async function jumpToAccount(secUserId) {
-        await showTable('account_cache');
+        // 默认搜索范围"文本字段"不含 sec_user_id，跳转定位必须显式切到该字段
+        currentSearchField = 'sec_user_id';
+        await showTable('account_cache', 1, secUserId);
         // 等数据加载完后查找并高亮
         setTimeout(function() {
             if (!gridApi) return;
@@ -1870,14 +2108,13 @@ var FIELD_RENDERERS = {
         currentTable = tableName;
         currentPage = page;
         currentKeyword = keyword;
-        // 切换表时重置排序/筛选
+        // 切换表时重置排序/筛选/搜索范围
         if (typeof currentSortField !== 'undefined' && document.getElementById('table-tabs') &&
             document.getElementById('table-tabs').dataset.lastTable !== tableName) {
             currentSortField = '';
             currentSortOrder = '';
-            currentFilterField = '';
-            currentFilterOp = '';
-            currentFilterValue = '';
+            currentFilters = {};
+            currentSearchField = '__text__';
         }
         if (document.getElementById('table-tabs')) {
             document.getElementById('table-tabs').dataset.lastTable = tableName;
@@ -1892,72 +2129,65 @@ var FIELD_RENDERERS = {
         document.getElementById('pagination').innerHTML = '';
         updateBatchToolbar();
 
-        try {
-            const sd = await apiCall('/api/database/table/' + tableName + '/schema', 'GET');
-            schemaFields = sd.fields || [];
-        } catch (e) { schemaFields = []; }
+        // schema 缓存：表结构几乎不变，切表不再重复请求
+        if (_schemaCache[tableName]) {
+            schemaFields = _schemaCache[tableName];
+        } else {
+            try {
+                const sd = await apiCall('/api/database/table/' + tableName + '/schema', 'GET');
+                schemaFields = sd.fields || [];
+            } catch (e) { schemaFields = []; }
+            _schemaCache[tableName] = schemaFields;
+        }
 
         const colDefs = buildColumnDefs(tableName, schemaFields);
         ensureGrid(colDefs);
         restoreColState();
+        _renderSearchFieldSelect(tableName, schemaFields);
 
-        if (gridApi) gridApi.showLoadingOverlay();
-
-        const offset = (page - 1) * PAGE_SIZE;
-        let url = '/api/database/table/' + tableName + '?limit=' + PAGE_SIZE + '&offset=' + offset;
-        if (keyword) url += '&search=' + encodeURIComponent(keyword);
-        if (currentSortField) url += '&sort_field=' + encodeURIComponent(currentSortField) + '&sort_order=' + encodeURIComponent(currentSortOrder || 'asc');
-        if (currentFilterField && currentFilterValue) url += '&filter_field=' + encodeURIComponent(currentFilterField) + '&filter_value=' + encodeURIComponent(currentFilterValue) + '&filter_op=' + encodeURIComponent(currentFilterOp || 'contains');
-        try {
-            const data = await apiCall(url, 'GET');
-            const records = data.records || [];
-            const total = data.total || 0;
-            currentTotal = total;
-            const kwSuffix = keyword ? ' · "' + keyword + '"' : '';
-            document.getElementById('table-title').textContent = TABLE_NAMES[tableName] + kwSuffix;
-            document.getElementById('table-count-badge').textContent = total + ' 条';
-            gridApi.setGridOption('rowData', records);
-            if (records.length === 0) gridApi.showNoRowsOverlay();
-            else gridApi.hideOverlay();
-            renderPagination(total, data.limit || PAGE_SIZE, data.offset || 0);
-        } catch (e) {
-            showToast('获取数据失败: ' + e.message, 'error');
-            gridApi.setGridOption('rowData', []);
-            gridApi.showNoRowsOverlay();
+        const kwSuffix = keyword ? ' · "' + keyword + '"' : '';
+        document.getElementById('table-title').textContent = TABLE_NAMES[tableName] + kwSuffix;
+        var filterKeys = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; });
+        var countBadge = document.getElementById('table-count-badge');
+        countBadge.innerHTML = '';
+        countBadge.appendChild(document.createTextNode('… 条'));
+        if (filterKeys.length) {
+            var badge = document.createElement('span');
+            badge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--accent);cursor:pointer;';
+            badge.textContent = '已筛选 · 清除';
+            badge.addEventListener('click', function() { currentFilters = {}; showTable(currentTable, 1, currentKeyword); });
+            countBadge.appendChild(badge);
         }
+
+        // 挂载新数据源：查询条件已变化，旧块缓存随之作废。
+        // infinite rowModel 会自动显示 loading / 空数据 overlay，无需手动干预。
+        if (gridApi) gridApi.setGridOption('datasource', makeDatasource());
+        _renderLoadStatus({ total: null, loaded: 0 });
         updateBatchToolbar();
     }
 
-    // =========================================================================
-    // 分页
-    // =========================================================================
-    function renderPagination(total, limit, offset) {
-        const totalPages = Math.max(1, Math.ceil(total / limit));
-        const curPage = Math.floor(offset / limit) + 1;
-        const pgDiv = document.getElementById('pagination');
-        const sizeSel = '<select class="pg-size" onchange="changePageSize(this.value)" title="每页显示条数">' + [50, 100, 200].map(n => '<option value="' + n + '"' + (n === PAGE_SIZE ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>';
-        if (totalPages <= 1) { pgDiv.innerHTML = '<div class="pg-wrap">' + sizeSel + '<span class="pg-info" style="text-align:center;">共 ' + total + ' 条</span></div>'; return; }
-        let html = '<div class="pg-wrap">' + sizeSel;
-        html += '<button class="pg-btn" ' + (curPage <= 1 ? 'disabled' : '') + ' onclick="gotoPage(' + (curPage - 1) + ')"><i class="ph ph-caret-left"></i></button>';
-        let start = Math.max(1, curPage - 2), end = Math.min(totalPages, start + 4);
-        start = Math.max(1, end - 4);
-        if (start > 1) { html += '<button class="pg-btn" onclick="gotoPage(1)">1</button>'; if (start > 2) html += '<span class="pg-info">…</span>'; }
-        for (let i = start; i <= end; i++) {
-            html += '<button class="pg-btn ' + (i === curPage ? 'active' : '') + '" onclick="gotoPage(' + i + ')">' + i + '</button>';
+    // 搜索范围选择器：默认文本字段，按需切到具体字段或全字段
+    function _renderSearchFieldSelect(tableName, fields) {
+        var sel = document.getElementById('search-field');
+        if (!sel) return;
+        if (sel.dataset.table !== tableName) {
+            var html = '<option value="__text__">文本字段</option>';
+            fields.forEach(function(f) {
+                if (SYSTEM_FIELDS.includes(f.name)) return;
+                var label = FIELD_DISPLAY_NAMES[f.name] || f.name;
+                html += '<option value="' + htmlEscape(f.name) + '">' + htmlEscape(label) + '</option>';
+            });
+            html += '<option value="__all__">全部字段（慢）</option>';
+            sel.innerHTML = html;
+            sel.dataset.table = tableName;
         }
-        if (end < totalPages) { if (end < totalPages - 1) html += '<span class="pg-info">…</span>'; html += '<button class="pg-btn" onclick="gotoPage(' + totalPages + ')">' + totalPages + '</button>'; }
-        html += '<button class="pg-btn" ' + (curPage >= totalPages ? 'disabled' : '') + ' onclick="gotoPage(' + (curPage + 1) + ')"><i class="ph ph-caret-right"></i></button>';
-        html += '<span class="pg-info">第 ' + curPage + '/' + totalPages + ' 页</span>';
-        html += '</div>';
-        pgDiv.innerHTML = html;
+        sel.value = currentSearchField;
     }
 
-    function gotoPage(page) { showTable(currentTable, page, currentKeyword); }
-
-    function changePageSize(size) {
-        PAGE_SIZE = parseInt(size) || 50;
-        localStorage.setItem('doukhub-table-page-size', PAGE_SIZE);
-        showTable(currentTable, 1, currentKeyword);
+    function onSearchFieldChange(value) {
+        currentSearchField = value || '__text__';
+        var kw = document.getElementById('search-keyword').value.trim();
+        if (kw) showTable(currentTable, 1, kw);
     }
 
     // =========================================================================
@@ -2028,9 +2258,10 @@ var FIELD_RENDERERS = {
 
     // 当前表浏览筛选条件 → 采集方案条件的映射（等级/标签/平台）
     function _presetCondition() {
-        if (!currentFilterField || !currentFilterValue) return null;
-        const field = currentFilterField;
-        const value = String(currentFilterValue).trim();
+        const fields = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; });
+        if (!fields.length) return null;
+        const field = fields[0];
+        const value = String(currentFilters[field][0]).trim();
         if (!value) return null;
         if (field === '等级') {
             const n = parseInt(value);
@@ -2403,7 +2634,22 @@ container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><o
         const ok = await confirmDialog('导出 ' + TABLE_NAMES[currentTable] + ' ' + scope + '？' + countInfo + '，下载为 CSV。', { title: '导出确认', confirmText: '导出', danger: false });
         if (!ok) return;
         let url = '/api/database/table/' + currentTable + '/export';
-        if (currentKeyword) url += '?search=' + encodeURIComponent(currentKeyword);
+        var exportParams = [];
+        if (currentKeyword) {
+            exportParams.push('search=' + encodeURIComponent(currentKeyword));
+            if (currentSearchField && currentSearchField !== '__all__') {
+                var f = currentSearchField === '__text__'
+                    ? (TEXT_SEARCH_FIELDS[currentTable] || []).join(',')
+                    : currentSearchField;
+                if (f) exportParams.push('search_field=' + encodeURIComponent(f));
+            }
+        }
+        var exportFilterKeys = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; });
+        if (exportFilterKeys.length) {
+            var exportFilterArr = exportFilterKeys.map(function(k) { return { field: k, values: currentFilters[k] }; });
+            exportParams.push('filters=' + encodeURIComponent(JSON.stringify(exportFilterArr)));
+        }
+        if (exportParams.length) url += '?' + exportParams.join('&');
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ph ph-circle-notch" style="animation:spin 0.8s linear infinite;"></i>'; }
         try {
             const resp = await fetch(url);

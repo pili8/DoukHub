@@ -38,6 +38,8 @@ from .core import dedup
 from .core import maintenance
 from .core import presets
 from .services.downloader import ServiceManager
+from .core.data_migration import DataMigration
+from .core.data_root import app_data_root, validate_target
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 logger = logging.getLogger("doukhub")
@@ -56,6 +58,7 @@ services: ServiceManager | None = None
 collection_batch_manager: CollectionBatchManager | None = None
 download_worker: DownloadWorker | None = None
 single_work_client: httpx.AsyncClient | None = None
+data_migration = DataMigration()
 
 
 def get_feishu() -> FeishuClient | None:
@@ -87,6 +90,18 @@ def get_database() -> Database:
     return database
 
 
+
+def _migration_busy_reason() -> str:
+    """迁移开始前的活动检查：有未完成的后台任务/采集批次/单作品下载时拒绝。"""
+    if any(t.status in ("pending", "running") for t in get_task_manager().list()):
+        return "后台任务未完成"
+    if get_database().get_active_collection_batch():
+        return "增量采集批次未完成"
+    if get_database().has_pending_or_running_single_work():
+        return "单作品下载未完成"
+    return ""
+
+
 def _parse_preset_date(value: str) -> date | None:
     """将 'YYYY-MM-DD' 字符串转为 date，空或无效返回 None。"""
     if not value:
@@ -103,7 +118,7 @@ def get_collection_batch_manager() -> CollectionBatchManager:
         collection_batch_manager = CollectionBatchManager(
             database=get_database(),
             ttd_path=Path(config.ttd_path),
-            log_dir=config.data_dir / "collection_logs",
+            log_dir=config.app_data_dir / "collection_logs",
             ttd_url=f"http://127.0.0.1:{config.ttd_port}",
         )
     return collection_batch_manager
@@ -174,7 +189,7 @@ def get_syncer_v2() -> SyncerV2:
 def get_history() -> HistoryDB:
     global history
     if history is None:
-        history = HistoryDB(config.data_dir)
+        history = HistoryDB(config.app_data_dir)
     return history
 
 
@@ -227,7 +242,9 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"启动时自动增量账号处理失败（不影响使用）: {e}")
         threading.Thread(target=_bg_sync, daemon=True).start()
 
-    get_collection_batch_manager().recover_interrupted_batches()
+    _batch_manager = get_collection_batch_manager()
+    _batch_manager.recover_interrupted_batches()
+    await _batch_manager.kick_resume()
     get_download_worker().recover()
 
     # 启动时检查每日备份（距离上次超过 24 小时则自动备份）
@@ -259,6 +276,23 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="DoukHub", version="2.2.5", lifespan=lifespan)
+
+
+
+@app.middleware("http")
+async def migration_lock_middleware(request: Request, call_next):
+    path = request.url.path
+    if data_migration.snapshot()["locked"] and not (
+        path.startswith("/api/data-migration")
+        or path == "/api/system/restart"
+        or path.startswith("/static/")
+        or not path.startswith("/api/")
+    ):
+        return JSONResponse(
+            {"success": False, "message": "应用数据正在迁移，请等待完成"},
+            status_code=503,
+        )
+    return await call_next(request)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -695,33 +729,6 @@ async def api_dedup_scope():
     return {"success": True, "profiles": profiles}
 
 
-@app.post("/api/dedup/browse")
-def api_dedup_browse():
-    """弹出系统文件夹选择器，返回选中路径。"""
-    import subprocess
-    import sys
-    if sys.platform != "win32":
-        return {"success": False, "error": "仅 Windows 支持系统文件夹选择器"}
-    ps = (
-        "Add-Type -AssemblyName System.Windows.Forms; "
-        "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
-        "$f.Description = '选择要扫描的文件夹'; "
-        "$f.ShowNewFolderButton = $false; "
-        "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $f.SelectedPath }"
-    )
-    try:
-        r = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps],
-            capture_output=True, text=True, timeout=180,
-        )
-        path = (r.stdout or "").strip()
-        if path:
-            return {"success": True, "path": path}
-        return {"success": False, "error": "未选择文件夹"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
 @app.post("/api/dedup/scan")
 async def api_dedup_scan(payload: dict):
     """启动后台扫描。"""
@@ -850,6 +857,7 @@ async def page_settings(request: Request):
         "request": request,
         "config": config._data,
         "config_path": str(config._path),
+        "app_data_dir": str(config.app_data_dir),
         "page": "settings",
     })
 
@@ -1320,6 +1328,20 @@ async def api_sync_fetch_info():
 
 
 # ========== 新同步器 API（使用数据库） ==========
+MAX_INLINE_SYNC_ITEMS = 100
+MAX_CONSECUTIVE_TTD_FAILURES = 20
+
+
+def _stop_after_ttd_failures(tm, task_id, failures, remaining):
+    error = f"TTD 连续失败 {failures} 次，已中止"
+    tm.add_log(
+        task_id,
+        f"X 连续失败 {failures} 次，剩余 {remaining} 条暂缓；请检查 TTD 后重试",
+        "error",
+    )
+    tm.update(task_id, status="failed", error=error)
+    return True
+
 
 @app.post("/api/sync/v2/import")
 async def api_sync_v2_import(request: Request):
@@ -1341,7 +1363,7 @@ async def api_sync_v2_import(request: Request):
         import_logs.extend({"level": "warning", "message": warning} for warning in result.warnings)
         detail = (
             f"写入 {result.success} 条"
-            f"（新增 {result.created}，更新 {result.updated}，恢复 {result.revived}），"
+            f"（新增 {result.created}，更新 {result.updated}），"
             f"重复 {result.duplicates} 条，失败 {result.failed} 条，跳过 {result.skipped} 条"
         )
         summary = f"完成: {detail}"
@@ -1419,6 +1441,7 @@ async def _run_update_collection(task):
     tm.add_log(task.task_id, f"需要处理 {len(to_process)} 条记录", "info")
     success = 0
     failed = 0
+    consecutive_ttd_failures = 0
     for i, collection in enumerate(to_process):
         if tm.is_cancelled(task.task_id):
             tm.update(task.task_id, status="cancelled")
@@ -1438,6 +1461,17 @@ async def _run_update_collection(task):
                 s.db.update_collection(collection["record_id"], {"解析状态": "解析失败"})
                 tm.add_log(task.task_id, f"X {share}: {reason}", "error")
                 tm.update(task.task_id, success=success, failed=failed)
+                consecutive_ttd_failures += 1
+                if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES:
+                    remaining = len(to_process) - i - 1
+                    error = f"TTD 连续失败 {consecutive_ttd_failures} 次，已中止"
+                    tm.add_log(
+                        task.task_id,
+                        f"X 连续失败 {consecutive_ttd_failures} 次，剩余 {remaining} 条暂缓；请检查 TTD 后重试",
+                        "error",
+                    )
+                    tm.update(task.task_id, status="failed", error=error)
+                    return
                 continue
             existing = s.db.get_collection_by_sec_user_id(sec_user_id)
             if existing and existing["record_id"] != collection["record_id"]:
@@ -1448,10 +1482,12 @@ async def _run_update_collection(task):
                 s.db.update_collection(existing["record_id"], {"等级": new_level, "标签": json.dumps(merged_tags, ensure_ascii=False)})
                 s.db.delete_collection(collection["record_id"])
                 success += 1
+                consecutive_ttd_failures = 0
                 tm.add_log(task.task_id, "OK 合并重复记录", "ok")
             else:
                 s.db.update_collection(collection["record_id"], {"sec_user_id": sec_user_id, "解析状态": "已就绪"})
                 success += 1
+                consecutive_ttd_failures = 0
                 tm.add_log(task.task_id, f"OK {share}: {sec_user_id}", "ok")
             tm.update(task.task_id, success=success, failed=failed)
             await asyncio.sleep(0.3)
@@ -1460,6 +1496,17 @@ async def _run_update_collection(task):
             s.db.update_collection(collection["record_id"], {"解析状态": "解析失败"})
             tm.add_log(task.task_id, f"X {share}: {e}", "error")
             tm.update(task.task_id, success=success, failed=failed)
+            consecutive_ttd_failures += 1
+            if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES:
+                remaining = len(to_process) - i - 1
+                error = f"TTD 连续失败 {consecutive_ttd_failures} 次，已中止"
+                tm.add_log(
+                    task.task_id,
+                    f"X 连续失败 {consecutive_ttd_failures} 次，剩余 {remaining} 条暂缓；请检查 TTD 后重试",
+                    "error",
+                )
+                tm.update(task.task_id, status="failed", error=error)
+                return
     tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed}", "info")
 
 
@@ -1518,6 +1565,7 @@ async def _run_sync_account(task):
     success = 0
     failed = 0
     skipped = 0
+    consecutive_ttd_failures = 0
     for i, collection in enumerate(to_process):
         if tm.is_cancelled(task.task_id):
             tm.update(task.task_id, status="cancelled")
@@ -1582,20 +1630,27 @@ async def _run_sync_account(task):
                 s.db.update_account(account_id, {"获取状态": "获取失败"})
                 tm.add_log(task.task_id, f"X {sec_user_id}: {reason}", "error")
                 tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
+                consecutive_ttd_failures += 1
+                remaining = len(to_process) - i - 1
+                if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES and _stop_after_ttd_failures(
+                    tm, task.task_id, consecutive_ttd_failures, remaining
+                ):
+                    return
                 continue
-                s.db.update_account(account_id, {
-                    "账号名称": info.get("nickname", ""),
-                    "粉丝数": info.get("follower_count", 0),
-                    "作品数": info.get("aweme_count", 0),
-                    "签名": info.get("signature", ""),
-                    "头像": info.get("avatar", ""),
-                    "获取状态": "已获取",
-                })
-                # 更新内存缓存
-                existing_accounts_map[sec_user_id] = {
-                    **(existing_account or {}),
-                    "账号名称": info.get("nickname", ""),
-                    "获取状态": "已获取",
+            s.db.update_account(account_id, {
+                "账号名称": info.get("nickname", ""),
+                "粉丝数": info.get("follower_count", 0),
+                "作品数": info.get("aweme_count", 0),
+                "签名": info.get("signature", ""),
+                "头像": info.get("avatar", ""),
+                "获取状态": "已获取",
+            })
+            consecutive_ttd_failures = 0
+            # 更新内存缓存
+            existing_accounts_map[sec_user_id] = {
+                **(existing_account or {}),
+                "账号名称": info.get("nickname", ""),
+                "获取状态": "已获取",
             }
             success += 1
             tm.add_log(task.task_id, f"OK 新增/更新账号: {info.get('nickname')}", "ok")
@@ -1605,6 +1660,12 @@ async def _run_sync_account(task):
             failed += 1
             tm.add_log(task.task_id, f"X {sec_user_id}: {e}", "error")
             tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
+            consecutive_ttd_failures += 1
+            remaining = len(to_process) - i - 1
+            if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES and _stop_after_ttd_failures(
+                tm, task.task_id, consecutive_ttd_failures, remaining
+            ):
+                return
     tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed} 跳过 {skipped}", "info")
 
 
@@ -1715,6 +1776,7 @@ async def _run_refresh_accounts(task):
     col = get_collector()
     success = 0
     failed = 0
+    consecutive_ttd_failures = 0
     for i, account in enumerate(to_fetch):
         if tm.is_cancelled(task.task_id):
             tm.update(task.task_id, status="cancelled")
@@ -1737,34 +1799,57 @@ async def _run_refresh_accounts(task):
                     "获取状态": "已获取",
                 })
                 success += 1
+                consecutive_ttd_failures = 0
                 tm.add_log(task.task_id, f"OK {nickname} | 粉丝 {info.get('follower_count', 0)} | 作品 {info.get('aweme_count', 0)}", "ok")
             else:
                 failed += 1
                 reason = info.get("_error", "无法获取资料") if info else "TTD 返回空"
                 db.update_account(account.get("record_id", ""), {"获取状态": "获取失败"})
                 tm.add_log(task.task_id, f"X {old_name}: {reason}", "error")
+                consecutive_ttd_failures += 1
+                remaining = len(to_fetch) - i - 1
+                tm.update(task.task_id, success=success, failed=failed)
+                if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES and _stop_after_ttd_failures(
+                    tm, task.task_id, consecutive_ttd_failures, remaining
+                ):
+                    return
             tm.update(task.task_id, success=success, failed=failed)
             await asyncio.sleep(0.5)
         except Exception as e:
             failed += 1
             tm.add_log(task.task_id, f"X {old_name}: {e}", "error")
             tm.update(task.task_id, success=success, failed=failed)
+            consecutive_ttd_failures += 1
+            remaining = len(to_fetch) - i - 1
+            if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES and _stop_after_ttd_failures(
+                tm, task.task_id, consecutive_ttd_failures, remaining
+            ):
+                return
     tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed}", "info")
 
 
 @app.post("/api/sync/v2/all")
 async def api_sync_v2_all(request: Request):
     """处理账号数据（使用新同步器）"""
-    s = get_syncer_v2()
-    if not s:
-        return JSONResponse(
-            {"success": False, "message": "飞书未配置"},
-            status_code=400,
-        )
-    
     try:
         data = await request.json()
         text = data.get("text", "")
+        inline_count = sum(1 for line in text.splitlines() if line.strip())
+        if inline_count > MAX_INLINE_SYNC_ITEMS:
+            return JSONResponse(
+                {
+                    "success": False,
+                    "message": f"单次同步接口最多 {MAX_INLINE_SYNC_ITEMS} 条，请分批导入或使用后台任务",
+                },
+                status_code=413,
+            )
+
+        s = get_syncer_v2()
+        if not s:
+            return JSONResponse(
+                {"success": False, "message": "飞书未配置"},
+                status_code=400,
+            )
         
         results = await s.sync_all(text)
         return {
@@ -1955,13 +2040,17 @@ async def api_database_table(
     limit: int = 100,
     offset: int = 0,
     search: str = "",
+    search_field: str = "",
     sort_field: str = "",
     sort_order: str = "desc",
-    filter_field: str = "",
-    filter_value: str = "",
-    filter_op: str = "",
+    filters: str = "",
+    need_total: bool = True,
 ):
-    """获取表数据，支持分页、搜索、排序、列级筛选。返回 {records, total, limit, offset}"""
+    """获取表数据，支持分页、搜索、排序、多条件筛选。返回 {records, total, limit, offset}
+
+    search_field: 定向搜索字段，为空时退化为全列 LIKE（慢）。
+    need_total: 滚动加载后续批次可传 false 复用首批计数，避免重复 COUNT。
+    """
     db = get_database()
 
     # 验证表名
@@ -1973,13 +2062,23 @@ async def api_database_table(
         limit=limit,
         offset=offset,
         search=search,
+        search_field=search_field or None,
         sort_field=sort_field or None,
         sort_order=sort_order,
-        filter_field=filter_field or None,
-        filter_value=filter_value or None,
-        filter_op=filter_op or None,
+        filters=filters or None,
+        need_total=need_total,
     )
     return result
+
+
+@app.get("/api/database/table/{table_name}/distinct/{field_name}")
+async def api_database_distinct_values(table_name: str, field_name: str):
+    """获取某字段的去重值列表（用于筛选下拉选项）"""
+    db = get_database()
+    if table_name not in db.VALID_TABLES:
+        return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
+    values = db.get_distinct_values(table_name, field_name)
+    return {"values": values}
 
 
 @app.get("/api/database/table/{table_name}/schema")
@@ -2033,7 +2132,7 @@ async def api_database_update_field(
 
 
 @app.get("/api/database/table/{table_name}/export")
-async def api_database_export_csv(table_name: str, search: str = ""):
+async def api_database_export_csv(table_name: str, search: str = "", search_field: str = "", filters: str = ""):
     """全量导出表为 CSV（含 BOM 头，Excel 可直接打开）"""
     import csv
     import io
@@ -2045,7 +2144,8 @@ async def api_database_export_csv(table_name: str, search: str = ""):
 
     schema = db.get_table_schema(table_name)
     col_names = [s["name"] for s in schema]
-    result = db.query_table(table_name, limit=10**9, offset=0, search=search)
+    result = db.query_table(table_name, limit=10**9, offset=0, search=search,
+                            search_field=search_field or None, filters=filters or None)
     records = result["records"]
 
     # 写 CSV
@@ -2230,7 +2330,7 @@ def _parse_csv_value(raw: str, schema: list[dict], field: str) -> Any:
 async def api_database_delete_record(table_name: str, record_id: str):
     """删除记录"""
     db = get_database()
-    
+
     # 验证表名
     valid_tables = ["share_cache", "account_cache", "cookie_cache"]
     if table_name not in valid_tables:
@@ -2240,10 +2340,11 @@ async def api_database_delete_record(table_name: str, record_id: str):
         if table_name == "share_cache":
             success = db.delete_collection(record_id)
         elif table_name == "account_cache":
+            # 先查再删：硬删除后按 ID 查不到了
+            acc = db.get_account_by_id(record_id)
             success = db.delete_account(record_id)
             # 联动：把分享表中对应对 sec_user_id 的记录标记为「已删除」
             if success:
-                acc = db.get_account_by_id(record_id)
                 if acc and acc.get("sec_user_id"):
                     share_row = db.get_collection_by_sec_user_id(acc["sec_user_id"])
                     if share_row:
@@ -2262,6 +2363,9 @@ async def api_database_delete_record(table_name: str, record_id: str):
 async def api_database_clear_table(table_name: str):
     """清空表"""
     db = get_database()
+    
+    # 清空前自动备份
+    backup.create_backup(reason="清空表前自动备份")
     
     # 验证表名
     valid_tables = ["share_cache", "account_cache", "cookie_cache"]
@@ -2311,6 +2415,10 @@ async def api_database_batch_delete(request: Request):
     if not table or not record_ids:
         return JSONResponse({"success": False, "message": "缺少参数: table, record_ids"}, status_code=400)
     db = get_database()
+    
+    # 批量删除前自动备份
+    backup.create_backup(reason="批量删除前自动备份")
+    
     result = db.batch_delete(table, record_ids)
     return {"success": result["failed"] == 0, "data": result}
 
@@ -3379,6 +3487,32 @@ async def api_get_storage_profiles():
 async def api_save_storage_profiles(request: Request):
     """保存两套存储方案（设置页整体提交）。"""
     data = await request.json()
+    existing = sp.ensure_migrated(config)
+    allowed_empty = set(data.get("allow_empty_scopes") or [])
+    empty_scopes = []
+    scope_names = {"single": "单作品", "batch": "增量采集"}
+    for scope in ("single", "batch"):
+        incoming = data.get(scope)
+        old_profiles = (existing.get(scope) or {}).get("profiles") or []
+        if (
+            old_profiles
+            and isinstance(incoming, dict)
+            and incoming.get("profiles") == []
+            and scope not in allowed_empty
+        ):
+            empty_scopes.append(scope)
+
+    if empty_scopes:
+        names = "、".join(scope_names[scope] for scope in empty_scopes)
+        return JSONResponse(
+            {
+                "success": False,
+                "message": f"检测到{names}的存储方案将被清空，请确认这是有意操作",
+                "empty_scopes": empty_scopes,
+            },
+            status_code=409,
+        )
+
     try:
         state = sp.save_state(config, data)
     except ValueError as error:
@@ -3395,8 +3529,8 @@ async def api_check_storage_paths(request: Request):
     results = {}
     for item in items:
         path = str(item.get("path") or "").strip()
-        ok, reason = sp.check_path(path, timeout)
-        results[item.get("id", path)] = {"ok": ok, "reason": reason}
+        ok, reason, exists = sp.check_path(path, timeout, create=False)
+        results[item.get("id", path)] = {"ok": ok, "reason": reason, "exists": exists}
     return {"success": True, "results": results}
 
 
@@ -3616,12 +3750,13 @@ async def api_start_collection_batch(request: CollectionBatchRequest):
     # 存储方案接入：主/次双下拉（空=设置页默认主/次；主失败自动切次，整套设置随之切换）
     defaults = config.collection_defaults
     active_profile = None
+    root_path = ""
     if not folder_name:
         active_profile, storage_diags = sp.resolve_pair(
             config, "batch", storage_primary_id, storage_secondary_id
         )
         if active_profile is not None:
-            folder_name = active_profile["path"] or ""
+            root_path = active_profile["path"] or ""
         elif storage_diags:
             reasons = "；".join(
                 f"{d.get('name', '?')}: {d.get('reason', '不可用')}" for d in storage_diags
@@ -3630,6 +3765,10 @@ async def api_start_collection_batch(request: CollectionBatchRequest):
                 {"success": False, "message": f"主/次存储方案均不可用（{reasons}）"},
                 status_code=400,
             )
+    if not root_path and folder_name and Path(folder_name).is_absolute():
+        # 兼容旧预设/旧批次：历史上主存储路径被写入 folder_name。
+        root_path = folder_name
+        folder_name = ""
     if not folder_name:
         folder_name = defaults.get("folder_name", "Download")
     # 磁盘空间检查：剩余不足 5GB 时不直接拒绝，返回 needs_confirm 交由前端确认
@@ -3637,7 +3776,7 @@ async def api_start_collection_batch(request: CollectionBatchRequest):
 
     free_gb = None
     try:
-        free_gb = _shutil.disk_usage(folder_name).free / 1024**3
+        free_gb = _shutil.disk_usage(root_path or folder_name).free / 1024**3
     except OSError:
         pass  # 网络盘不可达等场景由存储方案探测负责报错
     if not name_format:
@@ -3678,6 +3817,7 @@ async def api_start_collection_batch(request: CollectionBatchRequest):
             mode=mode,
             preset_name=preset_name,
             folder_name=folder_name,
+            root_path=root_path,
             name_format=name_format,
             account_created_after=account_created_after,
             skip_recent_days=skip_recent_days,
@@ -3864,6 +4004,23 @@ async def api_cancel_collection_batch(batch_id: str):
         "message": "已请求取消" if ok else "批次不存在或已结束",
     }
 
+
+@app.post("/api/collection/batches/{batch_id}/pause")
+async def api_pause_collection_batch(batch_id: str):
+    ok = get_collection_batch_manager().pause(batch_id)
+    return {
+        "success": ok,
+        "message": "已暂停" if ok else "批次不存在或不在运行中",
+    }
+
+
+@app.post("/api/collection/batches/{batch_id}/resume")
+async def api_resume_collection_batch(batch_id: str):
+    ok = get_collection_batch_manager().resume(batch_id)
+    return {
+        "success": ok,
+        "message": "已继续" if ok else "批次不存在或未暂停",
+    }
 
 @app.post("/api/collection/batches/{batch_id}/retry")
 async def api_retry_collection_batch(batch_id: str, request: CollectionRetryRequest):
@@ -4081,6 +4238,166 @@ async def api_browse_dir(path: str = ""):
         "dirs": dirs,
         "home": str(Path.home()),
     }
+
+
+# --- 应用数据目录迁移 ---
+
+@app.get("/api/data-migration/status")
+async def api_data_migration_status():
+    state = data_migration.snapshot()
+    state["current_root"] = str(app_data_root())
+    return state
+
+
+@app.post("/api/data-migration/validate")
+async def api_data_migration_validate(payload: dict):
+    return validate_target(payload.get("target", ""))
+
+
+@app.get("/api/data-migration/directories")
+async def api_data_migration_directories(path: str = "", computer: int = 0):
+    """返回页面内置目录选择器需要的目录列表。"""
+    import os
+
+    p = Path(path).expanduser() if path.strip() else app_data_root()
+    if not p.exists() or not p.is_dir():
+        p = Path.home()
+
+    if computer:
+        if os.name == "nt":
+            return {
+                "success": True,
+                "path": "",
+                "parent": None,
+                "directories": _windows_drives(),
+            }
+        p = Path("/")
+
+    directories = []
+    if p.parent == p and os.name == "nt":
+        directories.extend(_windows_drives())
+        try:
+            for item in sorted(p.iterdir(), key=lambda x: x.name.lower()):
+                if item.is_dir() and not item.name.startswith("."):
+                    directories.append({"name": item.name, "path": str(item)})
+        except PermissionError:
+            pass
+        return {"success": True, "path": str(p), "parent": None, "directories": directories}
+
+    try:
+        for item in sorted(p.iterdir(), key=lambda x: x.name.lower()):
+            if item.is_dir() and not item.name.startswith("."):
+                directories.append({"name": item.name, "path": str(item)})
+    except PermissionError:
+        pass
+
+    return {
+        "success": True,
+        "path": str(p),
+        "parent": str(p.parent) if p.parent != p else None,
+        "directories": directories,
+    }
+
+
+def _windows_drives():
+    return [
+        {"name": f"驱动器 {letter}:", "path": f"{letter}:\\"}
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        if Path(f"{letter}:\\").exists()
+    ]
+
+
+@app.post("/api/data-migration/directories/create")
+async def api_data_migration_create_directory(payload: dict):
+    """在内置目录选择器中新建一个文件夹。"""
+    parent = Path(str(payload.get("parent", ""))).expanduser()
+    name = str(payload.get("name", "")).strip()
+    invalid = not name or name in {".", ".."} or any(sep in name for sep in ("/", "\\", "\0"))
+    if invalid or not parent.is_dir():
+        return JSONResponse({"success": False, "message": "目录或名称无效"}, status_code=400)
+
+    try:
+        target = parent / name
+        target.mkdir(exist_ok=False)
+    except FileExistsError:
+        return JSONResponse({"success": False, "message": "同名文件夹已存在"}, status_code=400)
+    except OSError as exc:
+        return JSONResponse({"success": False, "message": str(exc)}, status_code=400)
+
+    return {"success": True, "path": str(target), "parent": str(parent), "name": name}
+
+
+@app.post("/api/data-migration/start")
+async def api_data_migration_start(payload: dict):
+    import asyncio
+
+    state = data_migration.snapshot()
+    if state["status"] in ("preparing", "copying", "verifying", "ready"):
+        return JSONResponse({"success": False, "message": "迁移已在进行"}, status_code=409)
+
+    busy = _migration_busy_reason()
+    if busy:
+        return JSONResponse({"success": False, "message": busy}, status_code=409)
+
+    check = data_migration.prepare(payload.get("target", ""), app_data_root())
+    if not check.get("valid"):
+        return JSONResponse({"success": False, "message": check["message"]}, status_code=400)
+
+    busy = _migration_busy_reason()
+    if busy:
+        data_migration.fail(busy)
+        return JSONResponse({"success": False, "message": busy}, status_code=409)
+
+    source_root = app_data_root()
+    source_db = source_root / "doukhub.db"
+    asyncio.create_task(asyncio.to_thread(data_migration.run, source_root, source_db))
+    return {"success": True, "message": "迁移已开始"}
+
+
+@app.get("/api/data-migration/old-cleanup")
+async def api_data_migration_old_cleanup():
+    marker_path = app_data_root() / ".doukhub-migration.json"
+    if not marker_path.exists():
+        return {"available": False, "source_root": ""}
+    try:
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        return {"available": True, "source_root": marker.get("source_root", "")}
+    except Exception:
+        return {"available": False, "source_root": ""}
+
+
+@app.post("/api/data-migration/cleanup-old")
+async def api_data_migration_cleanup_old(payload: dict):
+    import shutil
+
+    if payload.get("confirmed") is not True:
+        return {"success": False, "message": "需要用户确认"}
+    marker_path = app_data_root() / ".doukhub-migration.json"
+    if not marker_path.exists():
+        return {"success": False, "message": "没有迁移记录"}
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    old_root = Path(str(marker.get("source_root", "")))
+    new_root = app_data_root()
+    if not old_root.is_dir() or old_root == new_root:
+        return {"success": False, "message": "旧目录不可清理"}
+    if new_root in old_root.parents or old_root in new_root.parents:
+        return {"success": False, "message": "新旧目录存在嵌套关系"}
+
+    removed = []
+    for name in marker.get("items", []):
+        target = old_root / name
+        resolved = target.resolve()
+        if resolved == old_root.resolve() or not resolved.is_relative_to(old_root.resolve()):
+            continue
+        try:
+            if target.is_dir():
+                shutil.rmtree(target)
+            elif target.exists():
+                target.unlink()
+            removed.append(name)
+        except OSError as exc:
+            return {"success": False, "message": f"清理失败：{exc}", "removed": removed}
+    return {"success": True, "removed": removed}
 
 
 # --- 系统控制 ---

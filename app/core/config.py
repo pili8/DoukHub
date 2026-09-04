@@ -5,12 +5,12 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from .data_root import app_data_root
+
 # 用户目录下的配置（不会被项目更新覆盖）
 USER_CONFIG_DIR = Path.home() / ".doukhub"
 USER_CONFIG_FILE = USER_CONFIG_DIR / "config.json"
 
-# 主数据库文件（与 database.py 保持一致；数据库路径固定，作为唯一引导锚点）
-DB_PATH = Path.home() / ".doukhub" / "doukhub.db"
 
 # 项目目录下的配置（旧位置，用于迁移）
 PROJECT_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
@@ -126,7 +126,7 @@ def _ensure_settings_table(conn: sqlite3.Connection) -> None:
 def _try_load_db_config() -> dict | None:
     """从数据库 settings 表读配置；库里没有返回 None。任何异常静默回退。"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(app_data_root() / "doukhub.db")
         try:
             _ensure_settings_table(conn)
             row = conn.execute(
@@ -142,7 +142,7 @@ def _try_load_db_config() -> dict | None:
 def _try_save_db_config(data: dict) -> bool:
     """把配置整包写入 settings 表（key='config'）。成功返回 True。"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(app_data_root() / "doukhub.db")
         try:
             _ensure_settings_table(conn)
             conn.execute(
@@ -321,6 +321,11 @@ class Config:
             path = Path(__file__).resolve().parent.parent / path.name
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    @property
+    def app_data_dir(self) -> Path:
+        """Unified application data root; media folders do not live here."""
+        return app_data_root()
 
     @property
     def download_path(self) -> Path:

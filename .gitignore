@@ -52,3 +52,10 @@ _tmp_*.js
 _preview_*.html
 .rundata/
 backup/
+
+# 本地测试/运行残留
+.tmp/
+.pytest_tmp/
+.pytest_cache/
+.pytest_tmp*/
+.pytest_home_user/

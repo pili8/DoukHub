@@ -25,7 +25,7 @@ def _file_count(path: Path) -> int:
 
 def list_items(config, root: Path) -> list[dict]:
     """返回所有可清理项。root 为项目根目录。"""
-    log_dir = config.data_dir / "collection_logs"
+    log_dir = config.app_data_dir / "collection_logs"
     batch = sorted(log_dir.glob("*.log"))
     batch_size = sum(f.stat().st_size for f in batch)
 
@@ -58,7 +58,7 @@ def list_items(config, root: Path) -> list[dict]:
 
 def clean_item(item_id: str, config, root: Path) -> dict:
     """执行单项清理，返回 {cleaned, freed_bytes}。未知项返回 0。"""
-    log_dir = config.data_dir / "collection_logs"
+    log_dir = config.app_data_dir / "collection_logs"
     user_dir = Path.home() / ".doukhub"
     freed = 0
     cleaned = 0

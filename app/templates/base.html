@@ -104,6 +104,10 @@
                 <i data-lucide="list-checks"></i>
                 <span id="task-badge-count" class="footer-badge">0</span>
               </button>
+              <div id="global-collect-progress" style="display:none;position:fixed;left:68px;bottom:16px;z-index:9999;background:var(--dh-surface,#fff);border:1px solid var(--dh-border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--dh-text);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.15);" onclick="openTaskPanel()">
+                <span id="global-collect-label">采集 0%</span>
+                <div style="width:90px;height:4px;background:var(--bg-hover);border-radius:2px;margin-top:4px;overflow:hidden;"><div id="global-collect-bar" style="width:0%;height:100%;background:var(--accent);transition:width .5s;"></div></div>
+              </div>
             </div>
             <button id="sidebar-collapse-btn" class="sidebar-collapse-edge" onclick="toggleSidebar()" title="折叠侧边栏">
                 <i data-lucide="chevrons-left"></i>
@@ -121,6 +125,28 @@
     <div class="sidebar-mask" id="sidebar-mask"></div>
 
     <div id="toast" class="toast"></div>
+
+
+<div id="migration-overlay" class="dh-modal-overlay">
+    <div class="dh-modal-box" style="max-width:440px;">
+        <div class="dh-modal-header">
+            <h3><i data-lucide="hard-drive"></i> <span id="migration-title">应用数据迁移</span></h3>
+        </div>
+        <div class="dh-modal-body">
+            <p id="migration-message">准备中...</p>
+            <div style="height:6px;background:var(--bg-hover);border-radius:3px;overflow:hidden;margin:14px 0;">
+                <div id="migration-bar" style="height:100%;width:0%;background:var(--accent);transition:width .4s;"></div>
+            </div>
+            <p id="migration-detail" style="font-size:12px;color:var(--text-muted);word-break:break-all;"></p>
+        </div>
+        <div class="dh-modal-actions">
+            <button id="migration-close" class="dh-btn" style="display:none;" onclick="closeMigrationOverlay()">关闭</button>
+            <button id="migration-restart" class="dh-btn dh-btn-danger" style="display:none;" onclick="restartAfterMigration()">
+                立即重启
+            </button>
+        </div>
+    </div>
+</div>
 
     <!-- 通用确认弹窗(禁用浏览器原生 confirm/alert/prompt) -->
     <div id="dh-confirm-overlay" class="dh-modal-overlay">
@@ -161,6 +187,9 @@
         backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     }
     .dh-modal-overlay.dh-show { display: flex !important; }
+    .list-clip-bar { list-style:none; text-align:center; padding:10px 0; }
+    .list-clip-bar .list-clip-btn { font-size:12px; }
+
     .dh-modal-box {
         background: var(--bg-muted);
         border-radius: var(--radius-xl);
@@ -588,6 +617,68 @@
             const resp = await fetch(url, opts);
             return resp.json();
         }
+        // ===== 长列表折叠：默认只显示前 limit 行，超过时追加「展开全部 / 收起」 =====
+        function clipList(container, opts) {
+            opts = opts || {};
+            var limit = opts.limit || 20;
+            var rows = [];
+            for (var i = 0; i < container.children.length; i++) {
+                var el = container.children[i];
+                if (!el.classList || el.classList.contains('list-clip-bar')) continue;
+                if (opts.rows && opts.rows.indexOf(el) < 0) continue;
+                if (opts.rowSelector && !el.matches(opts.rowSelector)) continue;
+                rows.push(el);
+            }
+            var total = rows.length;
+            var state = { expanded: false };
+            var handle = {
+                total: total,
+                isExpanded: function() { return state.expanded; },
+                toggle: function() {
+                    if (total <= limit) return state.expanded;
+                    state.expanded = !state.expanded;
+                    apply();
+                    if (opts.onToggle) opts.onToggle(state.expanded);
+                    return state.expanded;
+                }
+            };
+            if (total <= limit) return handle;
+
+            var bar = makeClipBar(container);
+            function apply() {
+                rows.forEach(function(row, idx) {
+                    row.style.display = (state.expanded || idx < limit) ? '' : 'none';
+                });
+                var btn = bar.querySelector('.list-clip-btn');
+                if (btn) btn.textContent = state.expanded ? '收起' : '展开全部（共 ' + total + ' 条）';
+            }
+            bar.querySelector('.list-clip-btn').addEventListener('click', function() {
+                state.expanded = !state.expanded;
+                apply();
+                if (opts.onToggle) opts.onToggle(state.expanded);
+            });
+            apply();
+            return handle;
+        }
+
+        function makeClipBar(container) {
+            var inner = '<button type="button" class="btn btn-secondary btn-sm list-clip-btn"></button>';
+            if (container.tagName === 'TBODY') {
+                var firstRow = container.querySelector('tr');
+                var cols = (firstRow && firstRow.cells) ? firstRow.cells.length : 4;
+                var tr = document.createElement('tr');
+                tr.className = 'list-clip-bar';
+                tr.innerHTML = '<td colspan="' + cols + '" style="text-align:center;padding:10px 0;border:none;">' + inner + '</td>';
+                container.appendChild(tr);
+                return tr;
+            }
+            var item = document.createElement(container.tagName === 'UL' || container.tagName === 'OL' ? 'li' : 'div');
+            item.className = 'list-clip-bar';
+            item.innerHTML = inner;
+            container.appendChild(item);
+            return item;
+        }
+
         // ===== 主题:仅 Material 单主题(多主题已废弃) =====
         // 明暗模式切换:独立于系统设置,存 localStorage
         function toggleMode() {
@@ -810,7 +901,7 @@
         var _taskPollTimer = null;
         var _lastTasks = [];
         var TASK_TYPE_LABEL = {update_collection: '解析账号标识', sync_account: '生成账号表', refresh_accounts: '刷新账号资料', cloud_sync: '云端同步', cloud_sync_full: '全盘同步', collection_batch: '增量采集', dedup: '文件查重'};
-        var TASK_STATUS_LABEL = {pending: '排队', running: '运行', cancelling: '取消中', done: '完成', failed: '失败', cancelled: '已取消'};
+        var TASK_STATUS_LABEL = {pending: '排队', running: '运行', paused: '已暂停', cancelling: '取消中', done: '完成', failed: '失败', cancelled: '已取消'};
 
         async function pollTasks() {
             try {
@@ -823,11 +914,23 @@
             } catch (e) { /* 静默,下次重试 */ }
         }
         function updateTaskBadge(tasks) {
-            const active = tasks.filter(t => t.status === 'pending' || t.status === 'running');
+            const active = tasks.filter(t => t.status === 'pending' || t.status === 'running' || t.status === 'paused');
             const count = document.getElementById('task-badge-count');
             if (!count) return;
             count.textContent = active.length;
             count.style.display = active.length > 0 ? 'flex' : 'none';
+            updateGlobalCollectProgress(tasks);
+        }
+        function updateGlobalCollectProgress(tasks) {
+            const widget = document.getElementById('global-collect-progress');
+            if (!widget) return;
+            const batch = tasks.find(function (t) { return t.type === 'collection_batch' && (t.status === 'running' || t.status === 'paused'); });
+            if (!batch) { widget.style.display = 'none'; return; }
+            const done = batch.success + batch.failed + batch.skipped;
+            const pct = batch.total > 0 ? Math.round(done / batch.total * 100) : 0;
+            document.getElementById('global-collect-label').textContent = (batch.status === 'paused' ? '已暂停 ' : '采集 ') + pct + '%';
+            document.getElementById('global-collect-bar').style.width = pct + '%';
+            widget.style.display = 'block';
         }
         function openTaskPanel() {
             _taskPanelOpen = true;
@@ -858,7 +961,7 @@
         function _taskCardHtml(t) {
             const done = t.success + t.failed + t.skipped;
             const pct = t.total > 0 ? Math.round(done / t.total * 100) : 0;
-            const statusColors = { pending: '#d97706', running: '#3b82f6', cancelling: '#9ca3af', done: '#16a34a', failed: '#dc2626', cancelled: '#9ca3af' };
+            const statusColors = { pending: '#d97706', running: '#3b82f6', paused: '#f59e0b', cancelling: '#9ca3af', done: '#16a34a', failed: '#dc2626', cancelled: '#9ca3af' };
             const statusColor = statusColors[t.status] || 'var(--text-muted)';
             const statusLabel = TASK_STATUS_LABEL[t.status] || t.status;
             const typeLabel = TASK_TYPE_LABEL[t.type] || t.type;
@@ -866,12 +969,18 @@
                 const cls = l.level === 'ok' ? 'log-ok' : (l.level === 'error' ? 'log-err' : 'log-info');
                 return '<div class="' + cls + '">' + l.message + '</div>';
             }).join('');
-            const canCancel = t.status === 'pending' || t.status === 'running';
+            const canCancel = t.status === 'pending' || t.status === 'running' || t.status === 'paused';
             const cancelBtn = canCancel ? ' · <a onclick="cancelTask(\'' + t.task_id + '\')" style="color:var(--danger);cursor:pointer;text-decoration:underline;font-size:11px;">取消</a>' : '';
+            const isBatch = t.type === 'collection_batch';
+            let batchOps = '';
+            if (isBatch) {
+                if (t.status === 'running') batchOps = ' · <a onclick="pauseTask(\'' + t.task_id + '\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;font-size:11px;">暂停</a>';
+                else if (t.status === 'paused') batchOps = ' · <a onclick="resumeTask(\'' + t.task_id + '\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;font-size:11px;">继续</a>';
+            }
             return '<div style="border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;">' +
                 '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
                 '<b style="font-size:13px;">' + typeLabel + '</b>' +
-                '<span style="font-size:11px;font-weight:600;color:' + statusColor + ';">' + statusLabel + '</span>' + cancelBtn +
+                '<span style="font-size:11px;font-weight:600;color:' + statusColor + ';">' + statusLabel + '</span>' + batchOps + cancelBtn +
                 '</div>' +
                 '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">总 ' + t.total + ' · 成功 ' + t.success + ' · 失败 ' + t.failed + (t.skipped ? ' · 跳过 ' + t.skipped : '') + '</div>' +
                 '<div style="height:4px;background:var(--bg-hover);border-radius:2px;overflow:hidden;margin-bottom:6px;"><div style="width:' + pct + '%;height:100%;background:var(--accent);transition:width .3s;"></div></div>' +
@@ -952,7 +1061,20 @@
             btn.textContent = open ? '展开日志' : '收起日志';
         }
         async function cancelTask(taskId) {
-            await apiCall('/api/tasks/' + taskId + '/cancel', 'POST');
+            if (taskId.startsWith('batch_')) {
+                await apiCall('/api/collection/batches/' + batchId(taskId) + '/cancel', 'POST');
+            } else {
+                await apiCall('/api/tasks/' + taskId + '/cancel', 'POST');
+            }
+            pollTasks();
+        }
+        function batchId(taskId) { return taskId.replace(/^batch_/, ''); }
+        async function pauseTask(taskId) {
+            await apiCall('/api/collection/batches/' + batchId(taskId) + '/pause', 'POST');
+            pollTasks();
+        }
+        async function resumeTask(taskId) {
+            await apiCall('/api/collection/batches/' + batchId(taskId) + '/resume', 'POST');
             pollTasks();
         }
 
@@ -1010,5 +1132,67 @@
         document.addEventListener('DOMContentLoaded', () => refreshIcons());
         window._doukhubRefreshIcons = refreshIcons;
     </script>
+<script>
+let migrationPoller = null;
+
+function showMigrationOverlay(state) {
+    const overlay = document.getElementById('migration-overlay');
+    overlay.classList.add('dh-show');
+    const title = document.getElementById('migration-title');
+    const message = document.getElementById('migration-message');
+    const bar = document.getElementById('migration-bar');
+    const detail = document.getElementById('migration-detail');
+    const restart = document.getElementById('migration-restart');
+    const close = document.getElementById('migration-close');
+    title.textContent = state.status === 'ready' ? '迁移完成'
+        : (state.status === 'failed' ? '迁移失败' : '应用数据迁移中');
+    message.textContent = state.status === 'ready'
+        ? '数据已复制并通过校验。请立即重启 DoukHub。'
+        : (state.current || '正在复制...');
+    bar.style.width = `${state.progress || 0}%`;
+    detail.textContent = state.error
+        ? `失败：${state.error}`
+        : `目标目录：${state.target || ''}`;
+    restart.style.display = state.status === 'ready' ? 'inline-flex' : 'none';
+    close.style.display = state.status === 'failed' ? 'inline-flex' : 'none';
+}
+
+function closeMigrationOverlay() {
+    if (migrationPoller) { clearInterval(migrationPoller); migrationPoller = null; }
+    document.getElementById('migration-overlay').classList.remove('dh-show');
+}
+
+async function refreshMigrationOverlay() {
+    try {
+        const response = await fetch('/api/data-migration/status');
+        const state = await response.json();
+        if (['preparing', 'copying', 'verifying', 'ready', 'failed'].includes(state.status)) {
+            showMigrationOverlay(state);
+            if ((state.status === 'ready' || state.status === 'failed') && migrationPoller) {
+                clearInterval(migrationPoller);
+                migrationPoller = null;
+            }
+        } else {
+            document.getElementById('migration-overlay').classList.remove('dh-show');
+        }
+    } catch (error) {
+        if (migrationPoller) {
+            clearInterval(migrationPoller);
+            migrationPoller = null;
+        }
+    }
+}
+
+async function restartAfterMigration() {
+    const button = document.getElementById('migration-restart');
+    button.disabled = true;
+    button.textContent = '正在重启...';
+    await fetch('/api/system/restart', { method: 'POST' });
+}
+
+refreshMigrationOverlay();
+migrationPoller = setInterval(refreshMigrationOverlay, 1000);
+</script>
+
 </body>
 </html>

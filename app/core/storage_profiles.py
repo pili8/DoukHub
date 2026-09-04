@@ -154,58 +154,101 @@ def ensure_migrated(config) -> dict:
 
 # ---------- 探测 ----------
 
-def check_path(path_str: str, timeout: float = 3.0) -> tuple[bool, str]:
-    """探测路径可用性：本地=目录存在且可写；远程 UNC/SMB=带超时可达性检测。
-    返回 (ok, reason)。"""
-    path_str = (path_str or "").strip()
-    if not path_str:
-        return False, "路径为空"
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 
-    def _probe(raw: str) -> tuple[bool, str]:
+def _is_remote(raw: str) -> bool:
+    r = (raw or "").strip()
+    return r.startswith("\\") or r.startswith("//") or r.startswith("smb") or ":" in r.split("/")[0]
+
+
+def check_path(raw: str, timeout: float = 3.0, create: bool = True) -> tuple[bool, str, bool]:
+    """探测存储路径可用性。
+
+    create=True（采集启动前）：目录不存在时实际创建，返回 exists=True。
+    create=False（设置页探测）：只读检查，不创建目录；目录不存在时检测
+    最近已存在的祖先目录可写性，判断未来能否创建，返回 exists=False。
+    """
+
+    def _probe(raw: str, create: bool) -> tuple[bool, str, bool]:
         try:
             p = Path(raw).expanduser()
         except Exception as exc:  # 非法路径
-            return False, f"路径格式无效: {exc}"
-        created = False
+            return False, f"路径格式无效: {exc}", False
         try:
-            if not p.exists():
-                created = True
-            p.mkdir(parents=True, exist_ok=True)
+            exists = p.exists()
+            if create:
+                p.mkdir(parents=True, exist_ok=True)
+                target = p
+            elif exists:
+                target = p
+            else:
+                # 不存在的路径：找最近已存在的祖先目录测可写性（不创建）
+                target = p
+                while not target.exists():
+                    parent = target.parent
+                    if str(parent) == str(target):
+                        return False, "无法定位可写的父目录", False
+                    target = parent
+            # 网络盘等慢介质加超时保护
+            result: tuple[bool, str, bool] | None = None
+
+            def _write_probe() -> tuple[bool, str, bool]:
+                probe = target / ".doukhub_probe"
+                try:
+                    probe.write_text("ok", encoding="utf-8")
+                    probe.unlink(missing_ok=True)
+                    if exists:
+                        return True, "可用", True
+                    if create:
+                        return True, "该路径原先不存在，已自动创建", True
+                    return (
+                        True,
+                        "路径不存在，将在采集启动时自动创建（父目录可写）",
+                        False,
+                    )
+                except OSError as exc:
+                    return False, f"目录不可写: {exc.strerror or exc}", exists
+
+            if _is_remote(raw):
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(_write_probe)
+                    try:
+                        result = future.result(timeout=timeout)
+                    except FuturesTimeoutError:
+                        future.cancel()
+                        return False, f"连接超时（超过 {int(timeout)} 秒，目标可能离线）", exists
+                    except OSError as exc:
+                        return False, f"网络路径不可写: {exc}", exists
+                return result
+            return _write_probe()
+        except PermissionError as exc:
+            return False, f"没有访问权限: {exc}", False
         except OSError as exc:
-            return False, f"目录不可创建: {exc.strerror or exc}"
-        try:
-            if not p.is_dir():
-                return False, "不是有效目录"
-        except OSError as exc:
-            return False, f"目录不可访问: {exc.strerror or exc}"
-        probe = p / f".doukhub_probe_{os.getpid()}"
-        try:
-            probe.write_text("ok", encoding="utf-8")
-            probe.unlink(missing_ok=True)
-            if created:
-                return True, "可用（该路径原先不存在，已自动创建）"
-            return True, "可用"
-        except OSError as exc:
-            return False, f"目录不可写: {exc.strerror or exc}"
+            return False, f"路径不可访问: {exc}", False
         except Exception as exc:
-            return False, str(exc)
+            return False, str(exc), False
 
+    if not raw or not raw.strip():
+        return False, "路径为空", False
     try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_probe, path_str)
-            return future.result(timeout=timeout)
-    except TimeoutError:
-        return False, "连接超时（目标可能离线）"
+        if _is_remote(raw):
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(_probe, raw.strip(), create)
+                try:
+                    return future.result(timeout=timeout + 1.0)
+                except FuturesTimeoutError:
+                    future.cancel()
+                    return False, "连接超时（目标可能离线）", False
+        return _probe(raw.strip(), create)
     except Exception as exc:
-        return False, str(exc)
-
+        return False, str(exc), False
 
 def check_profiles(profiles: list[dict], timeout: float = 3.0) -> dict[str, dict]:
     """批量探测，返回 {id: {ok, reason}}"""
     return {
-        p["id"]: {"ok": ok, "reason": reason}
+        p["id"]: {"ok": ok, "reason": reason, "exists": exists}
         for p in profiles
-        for ok, reason in [check_path(p.get("path", ""), timeout)]
+        for ok, reason, exists in [check_path(p.get("path", ""), timeout)]
     }
 
 
@@ -226,13 +269,14 @@ def get_profiles(state_item: dict) -> list[dict]:
 
 
 def _probe_item(p: dict) -> dict:
-    ok, reason = check_path(p.get("path", ""))
+    ok, reason, exists = check_path(p.get("path", ""))
     return {
         "id": p.get("id", ""),
         "name": p.get("name", ""),
         "path": p.get("path", ""),
         "role": p.get("role", ""),
         "ok": ok,
+        "exists": exists,
         "reason": reason,
     }
 

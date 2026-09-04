@@ -181,18 +181,36 @@
     <div class="settings-group active" id="group-doukhub">
     <div class="settings-group-label"><i data-lucide="sliders-horizontal"></i> DoukHub配置</div>
 
-    <!-- 卡片:配置路径 -->
     <div class="card settings-card open">
         <button type="button" class="settings-card-head" onclick="toggleCard(this)">
-            <i data-lucide="file-text"></i><span class="card-title">配置路径</span>
+            <i data-lucide="hard-drive"></i><span class="card-title">应用数据目录</span>
             <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
         </button>
         <div class="settings-card-body">
-            <div style="padding:10px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:13px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border-default);">
-                <span>{{ config_path }}</span>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText('{{ config_path }}');showToast('已复制')"><i data-lucide="copy"></i></button>
+            <label style="display:block;margin-bottom:6px;">当前应用数据目录</label>
+            <div style="padding:10px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:13px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border-default);margin-bottom:12px;">
+                <span>{{ app_data_dir }}</span>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText('{{ app_data_dir }}');showToast('已复制')"><i data-lucide="copy"></i></button>
             </div>
-            <small style="color:var(--text-muted);margin-top:6px;display:block;">配置存储在用户目录, 更新 DoukHub 不会被覆盖</small>
+            <div style="margin-bottom:16px;">
+                <small style="color:var(--text-muted);display:block;margin-bottom:4px;">兜底配置路径（仅导入旧配置或数据库异常时兜底；日常设置保存在应用数据目录的数据库中）</small>
+                <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);word-break:break-all;">{{ config_path }}</div>
+            </div>
+            <div class="settings-grid" style="grid-template-columns:minmax(240px,1fr) auto;">
+                <div>
+                    <label style="display:block;margin-bottom:6px;">新应用数据目录</label>
+                    <input id="migration-target" class="input" style="width:100%;" placeholder="例如 D:\DoukHubData">
+                    <small id="migration-check" style="color:var(--text-muted);display:block;margin-top:6px;">
+                        只迁移主库、历史库、备份和采集日志；媒体文件不会移动。
+                    </small>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:8px;justify-content:end;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="browseDataRoot(this)"><i data-lucide="folder-open"></i> 选择</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="validateDataRoot()"><i data-lucide="check"></i> 检查</button>
+                    <button type="button" id="migration-start" class="btn btn-primary btn-sm" onclick="startDataMigration()"><i data-lucide="move"></i> 开始迁移</button>
+                </div>
+            </div>
+            <small style="color:var(--text-muted);margin-top:6px;display:block;">存放主数据库、历史记录、备份和采集日志；媒体文件不在这里。迁移不移动兜底配置文件和媒体文件。</small>
         </div>
     </div>
 
@@ -667,6 +685,8 @@
     </div><!-- /group-feature -->
 </form>
 
+{% include "partials/directory_picker.html" %}
+
 {# ═══ 命名模板编辑器弹窗（共享组件：设置页 / 单作品 / 增量 三页共用） ═══ #}
 {% include "partials/name_editor_modal.html" %}
 {% endblock %}
@@ -745,6 +765,9 @@
         single: { default_name_format: '{create_time} {author} {title}', profiles: [] },
         batch:  { default_name_format: 'create_time type nickname desc', profiles: [] },
     };
+    var storageLoaded = false;
+    var initialStorageCounts = { single: 0, batch: 0 };
+    var emptySaveConfirmed = false;
 
 // ========== 存储方案 v2：主/次方案 ==========
 
@@ -816,8 +839,13 @@
     }
 
     async function loadStorageState() {
+        storageLoaded = false;
+        _setSaveChip('saving', '加载中…');
         try {
             var data = await apiCall('/api/collection/storage', 'GET');
+            if (!data || data.success === false) {
+                throw new Error(data && data.message || '接口返回异常');
+            }
             if (data && data.single) {
                 data.single._scope = 'single';
                 storageState.single = _normScope(data.single, '{create_time} {author} {title}');
@@ -826,7 +854,20 @@
                 data.batch._scope = 'batch';
                 storageState.batch = _normScope(data.batch, 'create_time type nickname desc');
             }
-        } catch(e) { /* 使用默认值 */ }
+            initialStorageCounts = {
+                single: storageState.single.profiles.length,
+                batch: storageState.batch.profiles.length,
+            };
+            storageLoaded = true;
+            emptySaveConfirmed = false;
+            _setSaveChip('ok', '已同步');
+        } catch(e) {
+            _setSaveChip('err', '加载失败');
+            showToast('存储方案加载失败，已阻止保存，避免覆盖已有配置', 'error');
+            renderStorageList('single');
+            renderStorageList('batch');
+            return;
+        }
         // 命名编辑器为共享组件（name_editor.js），按需打开时按方案解析 name_format，无需预载
         renderStorageList('single');
         renderStorageList('batch');
@@ -853,15 +894,18 @@
                 var r = results[scope + ':' + p.id];
                 if (!r) return;
                 p._status = r.ok ? 'ok' : 'fail';
+                p._statusExists = r.exists;
                 p._statusReason = r.reason || '';
                 p._probedAt = hhmm;
-                if (r.ok && r.reason && r.reason.indexOf('已自动创建') >= 0) {
+                if (r.ok && r.exists === false) {
                     showToast('方案「' + (p.name || '未命名') + '」的路径不存在，已自动创建，请确认是否填错', 'info');
                 }
                 var stEl = document.getElementById('slot-status-' + scope + '-' + list.indexOf(p));
                 if (stEl) {
-                    stEl.className = 's-badge ' + (r.ok ? 'ok' : 'fail');
-                    stEl.textContent = r.ok ? '可用' : '不可用';
+                    var cls = r.ok ? (r.exists === false ? 'warn' : 'ok') : 'fail';
+                    var txt = r.ok ? (r.exists === false ? '路径不存在' : '路径可用') : '路径不可用';
+                    stEl.className = 's-badge ' + cls;
+                    stEl.textContent = txt;
                     stEl.title = (r.reason || '') + '（探测于 ' + hhmm + '）';
                 }
             });
@@ -978,9 +1022,10 @@
 
     function _profileCard(scope, p, idx, total) {
         var draft = !(p.path || '').trim();
-        var statusText = p._status === 'ok' ? '可用' : (p._status === 'fail' ? '不可用' : '');
+        var statusText = p._status === 'ok' ? (p._statusExists === false ? '路径不存在' : '路径可用') : (p._status === 'fail' ? '路径不可用' : '未探测');
+        var statusCls = p._status === 'ok' ? (p._statusExists === false ? 'warn' : 'ok') : (p._status === 'fail' ? 'fail' : 'none');
         var statusTitle = (p._statusReason || '') + (p._probedAt ? '（探测于 ' + p._probedAt + '）' : '');
-        var statusBadge = '<span class="s-badge ' + (p._status === 'ok' ? 'ok' : p._status === 'fail' ? 'fail' : 'none') + '" id="slot-status-' + scope + '-' + idx + '"' + (statusTitle ? ' title="' + statusTitle + '"' : '') + '>' + statusText + '</span>';
+        var statusBadge = '<span class="s-badge ' + statusCls + '" id="slot-status-' + scope + '-' + idx + '"' + (statusTitle ? ' title="' + statusTitle + '"' : '') + '>' + statusText + '</span>';
         var badges =
             (p.role === 'primary' ? '<span class="s-badge lead">默认主</span>' : '') +
             (p.role === 'secondary' ? '<span class="s-badge warn">默认次</span>' : '') +
@@ -1232,6 +1277,11 @@
         chip.textContent = text;
     }
     function scheduleStorageSave() {
+        if (!storageLoaded) {
+            _setSaveChip('err', '未加载，已阻止保存');
+            showToast('存储方案尚未加载成功，已阻止保存', 'error');
+            return;
+        }
         clearTimeout(_storageSaveTimer);
         _setSaveChip('saving', '保存中…');
         _storageSaveTimer = setTimeout(function() { saveStorageState(); }, 500);
@@ -1248,6 +1298,11 @@
     }
 
     async function saveStorageState() {
+        if (!storageLoaded) {
+            _setSaveChip('err', '未加载，已阻止保存');
+            showToast('存储方案尚未加载成功，已阻止保存', 'error');
+            return false;
+        }
         try {
             var payload = { single: {}, batch: {} };
             ['single', 'batch'].forEach(function(scope) {
@@ -1257,15 +1312,42 @@
                     profiles: st.profiles.map(function(p){ return _profilePayload(p, scope); }),
                 };
             });
+            var scopeNames = { single: '单作品', batch: '增量采集' };
+            var emptyScopes = ['single', 'batch'].filter(function(scope) {
+                return !storageState[scope].profiles.length && initialStorageCounts[scope] > 0;
+            });
+            if (emptyScopes.length && !emptySaveConfirmed) {
+                var names = emptyScopes.map(function(scope) { return scopeNames[scope]; }).join('、');
+                var ok = await confirmDialog(
+                    '将清空「' + names + '」的全部存储方案。若只是页面显示异常，请取消并刷新。确定继续吗？',
+                    { title: '清空确认', confirmText: '清空方案', danger: true }
+                );
+                if (!ok) {
+                    _setSaveChip('err', '已取消保存');
+                    return false;
+                }
+                emptySaveConfirmed = true;
+            }
+            payload.allow_empty_scopes = emptyScopes;
             var data = await apiCall('/api/collection/storage', 'PUT', payload);
+            if (!data || data.success === false) {
+                throw new Error(data && data.message || '接口返回异常');
+            }
             if (data && data.single) storageState.single = _normScope(data.single, '{create_time} {author} {title}');
             if (data && data.batch) storageState.batch = _normScope(data.batch, 'create_time type nickname desc');
+            initialStorageCounts = {
+                single: storageState.single.profiles.length,
+                batch: storageState.batch.profiles.length,
+            };
+            emptySaveConfirmed = false;
             _setSaveChip('ok', '已保存');
             _notifyAutoPromotions(data);
             // 保存后不重置展开状态（防抖保存频繁触发，重置会打断编辑）
+            return true;
         } catch(e) {
             _setSaveChip('err', '保存失败');
             showToast('存储方案保存失败: ' + (e.message || ''), 'error');
+            return false;
         }
     }
 
@@ -1304,15 +1386,39 @@
         });
 
         // 存储方案（主/次 + 引擎参数）已由防抖自动保存，此处显式再保存一次兜底
-        try {
-            await saveStorageState();
-        } catch(e) { /* 存储方案已由防抖保存，此处兜底 */ }
+        if (!await saveStorageState()) return;
 
         const resp = await apiCall('/api/settings', 'POST', data);
         showToast(resp.message || '保存成功');
     }
 
-    // ===== 原有功能 =====
+    function browseDataRoot() {
+        openDirectoryPicker('migration-target', () => validateDataRoot());
+    }
+
+    async function validateDataRoot() {
+        const target = document.getElementById('migration-target').value.trim();
+        const el = document.getElementById('migration-check');
+        if (!target) { el.textContent = '请填写目标目录'; el.style.color = 'var(--danger)'; return false; }
+        const result = await apiCall('/api/data-migration/validate', 'POST', { target });
+        el.textContent = result.message;
+        el.style.color = result.valid ? 'var(--success)' : 'var(--danger)';
+        return Boolean(result.valid);
+    }
+
+    async function startDataMigration() {
+        const target = document.getElementById('migration-target').value.trim();
+        if (!await validateDataRoot()) return;
+        const ok = await confirmDialog(
+            '复制开始后不能取消，完成后需要立即重启 DoukHub。是否继续？',
+            { title: '迁移应用数据', confirmText: '开始迁移' }
+        );
+        if (!ok) return;
+        const result = await apiCall('/api/data-migration/start', 'POST', { target });
+        if (!result.success) { showToast(result.message || '开始迁移失败', 'error'); return; }
+        refreshMigrationOverlay();
+    }
+
     async function testFeishu() {
         const status = document.getElementById('feishu-status');
         status.textContent = '测试中...';

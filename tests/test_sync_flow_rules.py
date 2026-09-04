@@ -63,6 +63,43 @@ def test_sync_account_without_cookie_still_creates_account_shell(tmp_path, monke
     assert account["获取状态"] == "待获取"
 
 
+def test_sync_account_persists_valid_account_info(tmp_path, monkeypatch):
+    db = Database(tmp_path / "test.db")
+    db.insert_collection({"record_id": "c1", "share_code": "short", "sec_user_id": "sec1", "解析状态": "已就绪"})
+    db.insert_cookie({"record_id": "ck1", "Cookie": "cookie", "启用": 1})
+
+    async def get_account_info(sec_user_id, platform, cookie):
+        return {
+            "nickname": "测试账号",
+            "follower_count": 123,
+            "aweme_count": 45,
+            "signature": "测试签名",
+            "avatar": "avatar.png",
+        }
+
+    syncer = SimpleNamespace(
+        db=db,
+        collector=SimpleNamespace(ttd_url="http://ttd", get_account_info=get_account_info),
+        is_ready_for_account=Syncer.is_ready_for_account,
+        merge_level=Syncer.merge_level,
+        merge_tags=Syncer.merge_tags,
+    )
+    tm = FakeTaskManager()
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeHttpClient)
+    monkeypatch.setattr(main_module, "get_syncer_v2", lambda: syncer)
+    monkeypatch.setattr(main_module, "get_database", lambda: db)
+
+    asyncio.run(main_module._run_sync_account(tm.task))
+
+    account = db.get_account_by_sec_user_id("sec1")
+    assert account["账号名称"] == "测试账号"
+    assert account["粉丝数"] == 123
+    assert account["作品数"] == 45
+    assert account["签名"] == "测试签名"
+    assert account["头像"] == "avatar.png"
+    assert account["获取状态"] == "已获取"
+
+
 def test_refresh_accounts_uses_account_platform(tmp_path, monkeypatch):
     db = Database(tmp_path / "test.db")
     db.insert_account({"record_id": "a1", "sec_user_id": "sec1", "平台": "小红书", "获取状态": "待获取"})

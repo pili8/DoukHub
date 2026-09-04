@@ -8,12 +8,13 @@ def account(**overrides):
     data = {
         "record_id": "a1",
         "账号名称": "一号",
-        "平台": "抖音",
+        "平台": "douyin",
         "链接": "",
         "sec_user_id": "sec1",
         "等级": 4,
         "标签": "多, 个人",
         "启用": 1,
+        "获取状态": "已获取",
         "last_collected_at": None,
         "collect_window_days": None,
     }
@@ -41,6 +42,18 @@ def test_filters_enabled_douyin_accounts_and_sorts_by_rating():
     assert all(item.status == "pending" for item in planned)
 
 
+def test_skips_accounts_not_yet_fetched():
+    planned = plan_collection(
+        [
+            account(record_id="a1", sec_user_id="sec1", 获取状态="已获取"),
+            account(record_id="a2", sec_user_id="sec2", 获取状态="待获取"),
+            account(record_id="a3", sec_user_id="sec3", 获取状态="获取失败"),
+        ],
+        rating_min=3,
+    )
+    assert [item.sec_user_id for item in planned] == ["sec1"]
+
+
 def test_tag_and_name_filters():
     planned = plan_collection(
         [
@@ -56,7 +69,7 @@ def test_tag_and_name_filters():
             account(sec_user_id="sec1", 账号名称="一号"),
             account(record_id="a2", 账号名称="二号", sec_user_id="sec2"),
         ],
-        account_names="二号",
+        account_names="sec2",
     )
     assert [item.sec_user_id for item in planned] == ["sec2"]
 
@@ -91,12 +104,12 @@ def test_fixed_window_takes_precedence_and_full_mode_can_force_full():
 def test_tiktok_requires_profile_link_and_douyin_url_is_generated():
     planned = plan_collection(
         [
-            account(平台="TikTok", sec_user_id="tiksec", 链接=""),
+            account(平台="tiktok", sec_user_id="tiksec", 链接=""),
             account(
                 record_id="a2",
                 账号名称="二号",
                 sec_user_id="tiksec2",
-                平台="TikTok",
+                    平台="tiktok",
                 链接="https://www.tiktok.com/@two",
             ),
         ],
@@ -114,19 +127,19 @@ def test_tiktok_accepts_only_profile_urls_on_tiktok_hosts():
             account(
                 record_id="a1",
                 sec_user_id="profile",
-                平台="TikTok",
+                    平台="tiktok",
                 链接="https://www.tiktok.com/@valid",
             ),
             account(
                 record_id="a2",
                 sec_user_id="video",
-                平台="TikTok",
+                    平台="tiktok",
                 链接="https://www.tiktok.com/@user/video/123",
             ),
             account(
                 record_id="a3",
                 sec_user_id="offsite",
-                平台="TikTok",
+                    平台="tiktok",
                 链接="https://example.com/tiktok.com/@user",
             ),
         ],

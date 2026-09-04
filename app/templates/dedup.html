@@ -214,6 +214,7 @@
 .recycle-tip { font-size:13px; color:var(--text-muted); margin:6px 0 12px; line-height:1.6; }
 .recycle-actions { display:flex; gap:8px; margin-bottom:12px; }
 </style>
+{% include "partials/directory_picker.html" %}
 {% endblock %}
 
 {% block scripts %}
@@ -330,16 +331,7 @@
         if (target) { dirItems = dirItems.filter(d => d !== target); renderScopeGroups(); }
     }
     async function browseFolder() {
-        showToast('正在打开文件夹选择器...', 'info');
-        const data = await apiCall('/api/dedup/browse', 'POST');
-        if (data.success && data.path) {
-            if (!dirItems.some(d => d.path === data.path)) {
-                dirItems.push({ path: data.path, name: '自定义', role: '', scope: 'custom', custom: true, checked: true });
-            }
-            renderScopeGroups();
-        } else if (!data.success) {
-            showToast(data.error || '未选择', 'error');
-        }
+        openDirectoryPicker('custom-path', addCustomPath);
     }
     function updateDirCount() {
         document.getElementById('sel-dir-count').textContent = dirItems.filter(d => d.checked).length;

@@ -193,6 +193,12 @@
             <span class="tag" id="running-preset-tag" style="margin-left:4px;display:none;"></span>
         </div>
         <div class="workflow-actions">
+            <button class="btn btn-sm" id="running-pause-btn" onclick="pauseRunningBatch()" style="display:none;">
+                <i data-lucide="pause"></i> 暂停
+            </button>
+            <button class="btn btn-sm" id="running-resume-btn" onclick="resumeRunningBatch()" style="display:none;">
+                <i data-lucide="play"></i> 继续
+            </button>
             <button class="btn btn-danger btn-sm" id="running-cancel-btn" onclick="cancelRunningBatch()">
                 <i data-lucide="square"></i> 取消批次
             </button>
@@ -464,7 +470,7 @@ function formatPlatform(value) {
 }
 function formatBatchStatus(value) {
     return {
-        pending: '等待中', running: '运行中', cancelling: '取消中',
+        pending: '等待中', running: '运行中', paused: '已暂停', cancelling: '取消中',
         completed: '已完成', failed: '失败', cancelled: '已取消',
         success: '成功', skipped: '跳过',
     }[value] || value || '-';
@@ -581,7 +587,7 @@ async function startCollection() {
 
 // ===== 批次轮询 =====
 function selectActiveBatch(batches) {
-    return batches.find(b => ['pending', 'running', 'cancelling'].includes(b.status));
+    return batches.find(b => ['pending', 'running', 'paused', 'cancelling'].includes(b.status));
 }
 
 async function refreshCollectionBatches() {
@@ -621,6 +627,19 @@ function updateCollectionStatus(batches) {
 // ===== 运行中批次详情 =====
 var runDetailOpen = false;   // 记录"账号明细与日志"是否展开
 var runLogCount = 0;         // 上次已渲染的日志行数（流式增量追加）
+
+var _accountTableExpanded = false;   // 账号明细表是否处于「展开全部」状态（轮询重渲染后保持）
+
+function applyAccountTableClip() {
+    var tbody = document.getElementById('run-account-table');
+    if (!tbody) return;
+    // 只统计账号行：排除作品明细行（run-works-row）与工具条（list-clip-bar）
+    var handle = clipList(tbody, {
+        rowSelector: 'tr:not(.run-works-row)',
+        onToggle: function(expanded) { _accountTableExpanded = expanded; }
+    });
+    if (_accountTableExpanded && handle.total > 20) handle.toggle();
+}
 async function showRunningDetail(batchId) {
     try {
         var data = await apiCall('/api/collection/batches/' + batchId, 'GET');
@@ -633,11 +652,15 @@ async function showRunningDetail(batchId) {
         if (batchId !== (showRunningDetail._currentBatchId || null)) {
             showRunningDetail._currentBatchId = batchId;
             runLogCount = 0;
+            _accountTableExpanded = false;   // 切换批次时重置展开状态
             if (logViewEl) logViewEl.innerHTML = '';
         }
 
         document.getElementById('running-panel').style.display = 'block';
         document.getElementById('running-platform-tag').textContent = formatPlatform(batch.platform);
+        var isPaused = batch.status === 'paused';
+        document.getElementById('running-pause-btn').style.display = isPaused ? 'none' : '';
+        document.getElementById('running-resume-btn').style.display = isPaused ? '' : 'none';
         // 面板首次显示时重置展开状态
         var toggleEl = document.getElementById('run-detail-toggle');
         if (toggleEl && !toggleEl.dataset.batchId) {
@@ -729,6 +752,8 @@ async function showRunningDetail(batchId) {
         // 账号明细表（首次渲染时输出到 body）
         document.getElementById('run-account-table').innerHTML = rows;
 
+        applyAccountTableClip();
+
         // 流式日志：增量追加 + 动态保留最近 500 行（防 DOM 膨胀，完整记录在后端日志文件）
         var LOG_KEEP_MAX = 500;
         if (log.length > runLogCount) {
@@ -788,12 +813,24 @@ function toggleRunDetail() {
 }
 
 // ===== 账号行展开作品明细 =====
+// 折叠一个区域内的所有作品标题列表（每个列表限 20 条）
+function clipAllWorksLists(root) {
+    if (!root) return;
+    var lists = root.querySelectorAll('.run-works-list');
+    for (var i = 0; i < lists.length; i++) {
+        // 已有工具条的列表不再重复添加（同一作品行反复开合时避免按钮堆积）
+        if (lists[i].querySelector('.list-clip-bar')) continue;
+        clipList(lists[i], { limit: 20 });
+    }
+}
+
 function toggleRunWorks(btn) {
     var idx = btn.dataset.idx;
     var row = document.querySelector('.run-works-row[data-idx="' + idx + '"]');
     if (!row) return;
     var opened = row.style.display !== 'none';
     row.style.display = opened ? 'none' : '';
+    if (!opened) clipAllWorksLists(row);   // 展开时才折叠内部作品列表
     btn.classList.toggle('open', !opened);
     // 文件夹图标展开态: 置为已打开(半透明/旋转), 收起态恢复
     btn.style.opacity = opened ? '1' : '0.6';
@@ -807,6 +844,20 @@ async function cancelRunningBatch() {
     if (!ok) return;
     await apiCall('/api/collection/batches/' + activeBatchId + '/cancel', 'POST');
     showToast('已请求取消');
+    await refreshCollectionBatches();
+}
+
+async function pauseRunningBatch() {
+    if (!activeBatchId) return;
+    await apiCall('/api/collection/batches/' + activeBatchId + '/pause', 'POST');
+    showToast('已暂停，可稍后继续');
+    await refreshCollectionBatches();
+}
+
+async function resumeRunningBatch() {
+    if (!activeBatchId) return;
+    await apiCall('/api/collection/batches/' + activeBatchId + '/resume', 'POST');
+    showToast('已继续采集');
     await refreshCollectionBatches();
 }
 
@@ -842,7 +893,7 @@ function renderBatchHistory() {
         }
         body.innerHTML = shown.map(function(batch) {
             var elapsed = batchElapsedSeconds(batch);
-            var isActive = ['pending', 'running', 'cancelling'].includes(batch.status);
+            var isActive = ['pending', 'running', 'paused', 'cancelling'].includes(batch.status);
             var hasFailed = (batch.failed_accounts || 0) > 0;
             var ops = '<div class="batch-card-ops">' +
                 '<button class="btn btn-secondary btn-sm" onclick="showBatchDetail(\'' + batch.id + '\')">详情</button>';
@@ -880,7 +931,7 @@ function renderBatchHistory() {
     }
     body.innerHTML = shown.map(function(batch) {
         var elapsed = batchElapsedSeconds(batch);
-        var isActive = ['pending', 'running', 'cancelling'].includes(batch.status);
+        var isActive = ['pending', 'running', 'paused', 'cancelling'].includes(batch.status);
         var hasFailed = (batch.failed_accounts || 0) > 0;
         var ops = '<button class="btn btn-secondary btn-sm" onclick="showBatchDetail(\'' + batch.id + '\')">详情</button>';
         if (isActive) ops += ' <button class="btn btn-danger btn-sm" onclick="cancelBatch(\'' + batch.id + '\')">取消</button>';
@@ -906,7 +957,7 @@ function renderBatchHistory() {
 async function showBatchDetail(batchId) {
     // 运行中批次：显示在运行面板
     var batch = allBatches.find(b => b.id === batchId);
-    if (batch && ['pending', 'running', 'cancelling'].includes(batch.status)) {
+    if (batch && ['pending', 'running', 'paused', 'cancelling'].includes(batch.status)) {
         activeBatchId = batchId;
         await showRunningDetail(batchId);
         document.getElementById('running-panel').style.display = 'block';
@@ -1010,7 +1061,10 @@ function renderBdItems() {
     var works = _bdData.works || {};
     var items = _bdFilterItems();
     var total = (_bdData.items || []).length;
-    if (countEl) countEl.textContent = !logExists ? '作品记录已随日志清理' : ('显示 ' + items.length + ' / ' + total + ' 条');
+    if (!_bdVisible) _bdVisible = _BD_CHUNK;
+    var shownItems = items.slice(0, _bdVisible);
+    var canUseWorks = _bdData.works_source === 'db' || logExists;
+    if (countEl) countEl.textContent = '显示 ' + shownItems.length + ' / ' + total + ' 条';
     if (!items.length) {
         listEl.innerHTML = '<div class="bd-row" style="justify-content:center;text-align:center;color:var(--dh-text-muted);">无匹配的账号明细</div>';
         return;
@@ -1020,11 +1074,11 @@ function renderBdItems() {
         var accName = item.account_name || item.sec_user_id || '';
         if (accName) matched[accName] = true;
     });
-    var rows = items.map(function(item, idx) {
+    var rows = shownItems.map(function(item, idx) {
         var g = _bdStatusGroup(item.status);
         var stCls = g === 'success' ? 'success' : (g === 'failed' ? 'failed' : 'warning');
         var accName = item.account_name || item.sec_user_id || '';
-        var w = logExists ? works[accName] : null;
+        var w = canUseWorks ? (works[accName] || null) : null;
         var worksPanel = '';
         var canExpand = !!(w && w.total > 0);
         if (canExpand) {
@@ -1045,7 +1099,7 @@ function renderBdItems() {
         }
         var expandCell = canExpand
             ? '<span class="run-expand-btn" data-bd-idx="' + idx + '" onclick="toggleBdWorks(this)" title="展开作品明细"><i data-lucide="folder-open"></i></span><span class="run-expand-tag">' + w.total + '</span>'
-            : (logExists ? '<span class="run-expand-btn is-empty"></span>' : '');
+            : '<span class="run-expand-btn is-empty"></span>';
         var msg = item.message || '';
         return '<div class="bd-row">'
             + '<div class="bd-row-main">'
@@ -1058,7 +1112,7 @@ function renderBdItems() {
             + '</div>';
     }).join('');
     // 未匹配到账号的作品兜底归集，避免静默丢失
-    if (logExists) {
+    if (canUseWorks) {
         var orphanWorks = {};
         Object.keys(works).forEach(function(accName) {
             var w = works[accName];
@@ -1106,6 +1160,7 @@ function toggleBdWorks(btn) {
     var panel = container.querySelector('.bd-works-row[data-bd-works="' + idx + '"]');
     if (!panel) return;
     var opened = panel.classList.toggle('open');
+    if (opened) clipAllWorksLists(panel);
     btn.classList.toggle('open', opened);
     btn.style.opacity = opened ? '1' : '0.6';
     if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
@@ -1147,7 +1202,7 @@ function renderBatchDetailBody() {
         + '<div class="bd-metric m-succ"><span class="bd-metric-val">' + (batch.success_accounts || 0) + '</span><span class="bd-metric-label">成功账号</span></div>'
         + '<div class="bd-metric m-fail"><span class="bd-metric-val">' + (batch.failed_accounts || 0) + '</span><span class="bd-metric-label">失败账号</span></div>'
         + '<div class="bd-metric m-skip"><span class="bd-metric-val">' + (batch.skipped_accounts || 0) + '</span><span class="bd-metric-label">跳过账号</span></div>'
-        + '<div class="bd-metric m-works"><span class="bd-metric-val">' + (logExists ? workTotal : '-') + '</span><span class="bd-metric-label">作品下载</span></div>'
+        + '<div class="bd-metric m-works"><span class="bd-metric-val">' + ((_bdData.works_source || 'log') === 'db' || logExists ? workTotal : '-') + '</span><span class="bd-metric-label">作品下载</span></div>'
         + '</div>';
 
     // —— 失败原因卡 ——

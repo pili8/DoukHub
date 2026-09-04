@@ -112,6 +112,7 @@ def plan_collection(
         if row.get("平台") == expected_platform
         and row.get("启用")
         and str(row.get("sec_user_id") or "").strip()
+        and str(row.get("获取状态") or "") == "已获取"
     ]
     if sec_user_ids:
         candidates = [row for row in candidates if row.get("sec_user_id") in sec_user_ids]
@@ -176,6 +177,7 @@ def write_ttd_accounts(
     folder_name: str = "",
     name_format: str = "",
     cookie: str = "",
+    root_path: str = "",
     engine_params: dict | None = None,
 ) -> list[dict]:
     key = "accounts_urls" if platform == "douyin" else "accounts_urls_tiktok"
@@ -202,6 +204,8 @@ def write_ttd_accounts(
     settings["split"] = "-"
     settings["date_format"] = "%Y%m%d_%H%M%S"
     # 覆写采集设置（空值不覆写，保留 TTD 原始默认）
+    if root_path:
+        settings["root"] = root_path
     if folder_name:
         settings["folder_name"] = folder_name
     if name_format:

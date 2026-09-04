@@ -9,11 +9,14 @@ import time
 import webbrowser
 from pathlib import Path
 
+# 确保项目根目录可导入 app 包（从任意目录启动托盘都能找到）
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from app.core.data_root import DataRootError, app_data_root
+
 import httpx
 import pystray
 from PIL import Image, ImageDraw
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("doukhub.tray")
 
 PORT = 2999
@@ -21,6 +24,16 @@ URL = f"http://127.0.0.1:{PORT}"
 
 ROOT = Path(__file__).resolve().parent
 APP_DIR = ROOT / "app"
+LOG_DIR = ROOT / ".tmp"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_DIR / "tray.log", encoding="utf-8"),
+    ],
+)
 
 # 锁定 cwd 到项目根目录,避免 pythonw/pystray spawn 子进程时 cwd 漂移导致
 # 配置里的相对路径(./TikTokDownloader, ./data 等)解析到错误位置。
@@ -68,13 +81,15 @@ def start_server() -> bool:
         "--host", "0.0.0.0", "--port", str(PORT),
     ]
     try:
+        server_log = (LOG_DIR / "server.log").open("a", encoding="utf-8")
         SERVER_PROC = subprocess.Popen(
             cmd,
             cwd=str(ROOT),
             creationflags=subprocess.CREATE_NO_WINDOW,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=server_log,
+            stderr=subprocess.STDOUT,
         )
+        logger.info(f"服务进程已启动: PID {SERVER_PROC.pid}")
         return True
     except Exception as e:
         logger.error(f"启动服务失败: {e}")
@@ -87,17 +102,13 @@ def stop_server() -> None:
     if not (SERVER_PROC and SERVER_PROC.poll() is None):
         SERVER_PROC = None
         return
+    subprocess.run(["taskkill", "/F", "/T", "/PID", str(SERVER_PROC.pid)],
+                   capture_output=True, timeout=10)
     try:
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(SERVER_PROC.pid)],
-                       capture_output=True, timeout=10)
-    except Exception:
-        pass
-    if SERVER_PROC.poll() is None:  # taskkill 失败兜底
-        SERVER_PROC.terminate()
-        try:
-            SERVER_PROC.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            SERVER_PROC.kill()
+        SERVER_PROC.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        SERVER_PROC.kill()
+        SERVER_PROC.wait(timeout=5)
     SERVER_PROC = None
 
 
@@ -184,16 +195,19 @@ def open_ui(icon, item):
 
 def _reopen_ui_after_ready():
     """后台等待端口就绪后重开浏览器,不阻塞菜单"""
-    threading.Thread(
-        target=lambda: (wait_ready() and webbrowser.open(URL)),
-        daemon=True,
-    ).start()
+    def reopen():
+        if wait_ready():
+            webbrowser.open(URL)
+        else:
+            logger.error("服务重启后 20 秒内未就绪，请查看 .tmp/server.log")
+    threading.Thread(target=reopen, daemon=True).start()
 
 
 def restart_doukhub_only(icon, item):
     logger.info("只重启 DoukHub")
     stop_server()
-    start_server()
+    if start_server():
+        _reopen_ui_after_ready()
 
 
 def restart_all(icon, item):
@@ -255,10 +269,30 @@ def _notify_already_running() -> None:
     )
 
 
+
+def data_root_ready() -> bool:
+    """Fail visibly before starting uvicorn; never fall back to another root."""
+    try:
+        app_data_root()
+        return True
+    except DataRootError as exc:
+        logger.error(str(exc))
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            f"{exc}\n\n请修复目录或恢复引导文件后重新启动。",
+            "DoukHub 应用数据目录不可用",
+            0x10 | 0x40000,
+        )
+        return False
+
+
 def main():
     if not acquire_single_instance():
         _notify_already_running()
         return
+    if not data_root_ready():
+        return
+    logger.info("DoukHub 托盘已启动")
     menu = pystray.Menu(
         pystray.MenuItem("打开界面", open_ui, default=True),
         pystray.MenuItem("重启服务", pystray.Menu(

@@ -24,13 +24,14 @@ class Task:
     success: int = 0
     failed: int = 0
     skipped: int = 0
-    log: deque = field(default_factory=lambda: deque(maxlen=200))
+    log: deque = field(default_factory=deque)
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
     error: Optional[str] = None
     _cancel: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
     def to_dict(self) -> dict:
+        recent_log = list(self.log)[-TaskManager.MAX_LOG_ENTRIES:]
         return {
             "task_id": self.task_id,
             "type": self.type,
@@ -39,7 +40,9 @@ class Task:
             "success": self.success,
             "failed": self.failed,
             "skipped": self.skipped,
-            "log": list(self.log),
+            "log": recent_log,
+            "log_total": len(self.log),
+            "log_truncated": len(self.log) > len(recent_log),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "error": self.error,
@@ -74,6 +77,7 @@ class TaskManager:
     """进程内单例。串行队列:同时只一个任务 running。"""
 
     MAX_HISTORY = 20  # 完成的任务最多保留多少条
+    MAX_LOG_ENTRIES = 200  # API/面板只返回最近日志；持久化保留全量
 
     def __init__(self):
         self._tasks: dict[str, Task] = {}
@@ -156,7 +160,13 @@ class TaskManager:
             self.update(task.task_id, status="running")
             try:
                 await coro(task)
-                if task.status == "running":
+                if task.failed > 0 and task.status in ("running", "done"):
+                    self.update(
+                        task.task_id,
+                        status="failed",
+                        error=task.error or f"部分失败: {task.failed} 条",
+                    )
+                elif task.status == "running":
                     self.update(task.task_id, status="done")
             except Exception as e:
                 self.update(task.task_id, status="failed", error=str(e))

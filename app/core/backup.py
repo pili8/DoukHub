@@ -1,6 +1,6 @@
 """DoukHub 数据库备份模块
 
-参照 EntHub 的备份思路，针对 DoukHub 主库（~/.doukhub/doukhub.db）实现：
+参照 EntHub 的备份思路，针对 DoukHub 主库（跟随应用数据根目录的 doukhub.db）实现：
 - VACUUM INTO 一致性备份（不锁库、不丢 WAL 数据）
 - 恢复前自动备份（保险，防止误操作丢失数据）
 - 恢复后完整性校验
@@ -15,7 +15,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .database import DB_PATH
+from .data_root import app_data_root
+
+def db_path() -> Path:
+    """主数据库路径：跟随应用数据根目录。"""
+    return app_data_root() / "doukhub.db"
+
 
 # 保留的备份份数
 BACKUP_KEEP_COUNT = 7
@@ -23,7 +28,7 @@ BACKUP_KEEP_COUNT = 7
 
 def get_backup_dir() -> Path:
     """备份目录：与主库同目录下的 backups/ 子目录。"""
-    return DB_PATH.parent / "backups"
+    return db_path().parent / "backups"
 
 
 def create_backup(reason: str = "手动备份") -> dict:
@@ -32,7 +37,7 @@ def create_backup(reason: str = "手动备份") -> dict:
     使用 VACUUM INTO 让 SQLite 自己导出一份干净一致的副本，
     避免直接拷贝文件时遇到正在写入导致的损坏，也不会锁库。
     """
-    if not DB_PATH.exists():
+    if not db_path().exists():
         return {"success": False, "error": "数据库文件不存在", "filename": None}
 
     backup_dir = get_backup_dir()
@@ -43,7 +48,7 @@ def create_backup(reason: str = "手动备份") -> dict:
     backup_path = backup_dir / backup_filename
 
     try:
-        conn = sqlite3.connect(str(DB_PATH), timeout=30.0)
+        conn = sqlite3.connect(str(db_path()), timeout=30.0)
         conn.execute(f"VACUUM INTO '{backup_path}'")
         conn.close()
 
@@ -175,14 +180,14 @@ def restore_backup(filename: str) -> dict:
 
     # 3. 替换数据库文件
     try:
-        shutil.copy2(str(backup_path), str(DB_PATH))
-        _clear_wal_shm(DB_PATH)
+        shutil.copy2(str(backup_path), str(db_path()))
+        _clear_wal_shm(db_path())
     except Exception as e:
         return {"success": False, "error": f"替换数据库失败：{e}"}
 
     # 4. 校验恢复后的数据库
     try:
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = sqlite3.connect(str(db_path()))
         integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
         accounts = conn.execute("SELECT COUNT(*) FROM account_cache").fetchone()[0]
         shares = conn.execute("SELECT COUNT(*) FROM share_cache").fetchone()[0]
@@ -217,13 +222,13 @@ def cleanup_old_backups(keep_count: int = BACKUP_KEEP_COUNT) -> dict:
 
 def get_db_stats() -> dict:
     """获取数据库统计：大小、总页数、空闲页数、碎片率、可回收空间。"""
-    if not DB_PATH.exists():
+    if not db_path().exists():
         return {"size": 0, "page_count": 0, "freelist_count": 0, "page_size": 0,
                 "fragmentation": 0.0, "reclaimable_bytes": 0}
 
     try:
-        size = DB_PATH.stat().st_size
-        conn = sqlite3.connect(str(DB_PATH))
+        size = db_path().stat().st_size
+        conn = sqlite3.connect(str(db_path()))
         page_count = conn.execute("PRAGMA page_count").fetchone()[0]
         freelist_count = conn.execute("PRAGMA freelist_count").fetchone()[0]
         page_size = conn.execute("PRAGMA page_size").fetchone()[0]
@@ -267,28 +272,28 @@ def vacuum_database() -> dict:
       3. 校验临时文件记录数与原库一致
       4. 原子替换原文件 + 清理 WAL/SHM
     """
-    if not DB_PATH.exists():
+    if not db_path().exists():
         return {"success": False, "error": "数据库文件不存在"}
 
-    before_size = DB_PATH.stat().st_size
+    before_size = db_path().stat().st_size
 
     # 1. 压缩前备份
     backup_result = create_backup(reason="压缩前自动备份")
     if not backup_result["success"]:
         return {"success": False, "error": f"压缩前备份失败：{backup_result.get('error')}"}
 
-    temp_path = DB_PATH.parent / "doukhub_vacuuming.db"
+    temp_path = db_path().parent / "doukhub_vacuuming.db"
     if temp_path.exists():
         temp_path.unlink()
 
     try:
         # 2. VACUUM INTO 到临时文件
-        src_conn = sqlite3.connect(str(DB_PATH), timeout=30.0)
+        src_conn = sqlite3.connect(str(db_path()), timeout=30.0)
         src_conn.execute(f"VACUUM INTO '{temp_path}'")
         src_conn.close()
 
         # 3. 校验记录数一致
-        orig_counts = _table_count(DB_PATH)
+        orig_counts = _table_count(db_path())
         new_counts = _table_count(temp_path)
         for key in ("accounts", "shares", "cookies"):
             if orig_counts[key] != new_counts[key]:
@@ -303,10 +308,10 @@ def vacuum_database() -> dict:
             return {"success": False, "error": f"完整性检查未通过：{integrity}"}
 
         # 4. 原子替换
-        os.replace(str(temp_path), str(DB_PATH))
-        _clear_wal_shm(DB_PATH)
+        os.replace(str(temp_path), str(db_path()))
+        _clear_wal_shm(db_path())
 
-        after_size = DB_PATH.stat().st_size
+        after_size = db_path().stat().st_size
         freed = before_size - after_size
 
         cleanup_old_backups(BACKUP_KEEP_COUNT)

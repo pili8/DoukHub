@@ -1,11 +1,13 @@
 """DoukHub 本地数据库管理"""
 import sqlite3
+import json
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-# 数据库文件路径
-DB_PATH = Path.home() / ".doukhub" / "doukhub.db"
+from .data_root import app_data_root
+
 
 
 class Database:
@@ -13,10 +15,25 @@ class Database:
 
     SCHEMA_VERSION = 1
 
+    # 去重值缓存存活时间（秒）。用于平台/状态这类低基数字段的筛选下拉，
+    # 值几乎不变，没必要每次打开筛选菜单都跑一次 DISTINCT。
+    DISTINCT_CACHE_TTL = 120.0
+
     def __init__(self, db_path: Optional[Path] = None):
-        self.db_path = db_path or DB_PATH
+        self.db_path = db_path or app_data_root() / "doukhub.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # key: "table::field" -> (expire_ts, [values])
+        self._distinct_cache: dict[str, tuple[float, list[str]]] = {}
         self._init_database()
+
+    def invalidate_distinct_cache(self, table: Optional[str] = None) -> None:
+        """失效去重值缓存。写入/删除/导入后调用；table 为空则清空全部。"""
+        if table is None:
+            self._distinct_cache.clear()
+            return
+        prefix = table + "::"
+        for key in [k for k in self._distinct_cache if k.startswith(prefix)]:
+            self._distinct_cache.pop(key, None)
 
     def _init_database(self):
         """初始化数据库表结构
@@ -498,6 +515,12 @@ class Database:
                 if _norm and _norm != _pf:
                     conn.execute(f'UPDATE {_tbl} SET 平台 = ? WHERE record_id = ?', (_norm, _rid))
 
+        # 硬删除迁移：清理旧软删除遗留的墓碑记录
+        for _tbl in ("share_cache", "account_cache", "cookie_cache"):
+            _cols = [r[1] for r in conn.execute(f"PRAGMA table_info({_tbl})").fetchall()]
+            if "is_deleted" in _cols:
+                conn.execute(f"DELETE FROM {_tbl} WHERE is_deleted = 1")
+
     def _connect(self) -> sqlite3.Connection:
         """Create one SQLite connection with the project's standard pragmas."""
         conn = sqlite3.connect(str(self.db_path), timeout=5.0)
@@ -518,30 +541,14 @@ class Database:
     def get_all_collections(self) -> list[dict]:
         """获取所有分享表记录"""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM share_cache WHERE is_deleted = 0 ORDER BY created_at DESC").fetchall()
+            rows = conn.execute("SELECT * FROM share_cache ORDER BY created_at DESC").fetchall()
             return [dict(row) for row in rows]
 
     def get_collection_by_share(self, share: str) -> Optional[dict]:
-        """根据 share_code 获取记录（排除软删除）"""
+        """根据 share_code 获取记录"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM share_cache WHERE share_code = ? AND is_deleted = 0", (share,)).fetchone()
+            row = conn.execute("SELECT * FROM share_cache WHERE share_code = ?", (share,)).fetchone()
             return dict(row) if row else None
-
-    def revive_collection_if_deleted(self, share: str) -> Optional[str]:
-        """复活软删除的分享记录，返回 record_id"""
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT record_id FROM share_cache WHERE share_code = ? AND is_deleted = 1",
-                (share,),
-            ).fetchone()
-            if row:
-                conn.execute(
-                    "UPDATE share_cache SET is_deleted = 0, deleted_at = NULL WHERE record_id = ?",
-                    (row["record_id"],),
-                )
-                conn.commit()
-                return row["record_id"]
-        return None
 
     def get_collection_by_id(self, record_id: str) -> Optional[dict]:
         """根据记录ID获取分享表记录"""
@@ -550,9 +557,9 @@ class Database:
             return dict(row) if row else None
 
     def get_collection_by_sec_user_id(self, sec_user_id: str) -> Optional[dict]:
-        """根据 sec_user_id 获取记录（排除软删除）"""
+        """根据 sec_user_id 获取记录"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM share_cache WHERE sec_user_id = ? AND is_deleted = 0", (sec_user_id,)).fetchone()
+            row = conn.execute("SELECT * FROM share_cache WHERE sec_user_id = ?", (sec_user_id,)).fetchone()
             return dict(row) if row else None
 
     def insert_collection(self, data: dict) -> bool:
@@ -579,11 +586,11 @@ class Database:
             return True
 
     def delete_collection(self, record_id: str) -> bool:
-        """软删除分享表记录（打墓碑）"""
+        """硬删除分享表记录"""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE share_cache SET is_deleted = 1, deleted_at = ? WHERE record_id = ?",
-                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id),
+                "DELETE FROM share_cache WHERE record_id = ?",
+                (record_id,),
             )
             conn.commit()
             return True
@@ -600,39 +607,14 @@ class Database:
     def get_all_accounts(self) -> list[dict]:
         """获取所有账号表记录"""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM account_cache WHERE is_deleted = 0 ORDER BY created_at DESC").fetchall()
+            rows = conn.execute("SELECT * FROM account_cache ORDER BY created_at DESC").fetchall()
             return [dict(row) for row in rows]
 
     def get_account_by_sec_user_id(self, sec_user_id: str) -> Optional[dict]:
-        """根据 sec_user_id 获取记录（排除软删除）"""
+        """根据 sec_user_id 获取记录"""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM account_cache WHERE sec_user_id = ? AND is_deleted = 0", (sec_user_id,)).fetchone()
+            row = conn.execute("SELECT * FROM account_cache WHERE sec_user_id = ?", (sec_user_id,)).fetchone()
             return dict(row) if row else None
-
-    def has_deleted_account(self, sec_user_id: str) -> bool:
-        """检查是否存在被软删除的账号记录（用于判断是否应跳过重新生成）"""
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM account_cache WHERE sec_user_id = ? AND is_deleted = 1",
-                (sec_user_id,),
-            ).fetchone()
-            return row is not None
-
-    def revive_account_if_deleted(self, sec_user_id: str) -> Optional[str]:
-        """复活软删除的账号记录，返回 record_id（无软删除记录则返回 None）"""
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT record_id FROM account_cache WHERE sec_user_id = ? AND is_deleted = 1",
-                (sec_user_id,)
-            ).fetchone()
-            if row:
-                conn.execute(
-                    "UPDATE account_cache SET is_deleted = 0, deleted_at = NULL WHERE record_id = ?",
-                    (row["record_id"],)
-                )
-                conn.commit()
-                return row["record_id"]
-        return None
 
     def get_account_by_id(self, record_id: str) -> Optional[dict]:
         """根据记录ID获取账号表记录"""
@@ -664,11 +646,11 @@ class Database:
             return True
 
     def delete_account(self, record_id: str) -> bool:
-        """软删除账号表记录（打墓碑）"""
+        """硬删除账号表记录"""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE account_cache SET is_deleted = 1, deleted_at = ? WHERE record_id = ?",
-                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id),
+                "DELETE FROM account_cache WHERE record_id = ?",
+                (record_id,),
             )
             conn.commit()
             return True
@@ -751,12 +733,22 @@ class Database:
             row = conn.execute(
                 """
                 SELECT * FROM collection_batches
-                WHERE status IN ('pending', 'running', 'cancelling')
+                WHERE status IN ('pending', 'running', 'paused', 'cancelling')
                 ORDER BY created_at, id
                 LIMIT 1
                 """
             ).fetchone()
             return dict(row) if row else None
+
+    def has_pending_or_running_single_work(self) -> bool:
+        """True when the recoverable single-work queue is not empty."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT EXISTS ("
+                "SELECT 1 FROM single_work_history "
+                "WHERE status IN ('pending', 'running'))"
+            ).fetchone()
+            return bool(row[0])
 
     def list_active_collection_batches(self) -> list[dict]:
         with self._connect() as conn:
@@ -1081,7 +1073,7 @@ class Database:
     def get_all_cookies(self) -> list[dict]:
         """获取所有 Cookie 记录"""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM cookie_cache WHERE is_deleted = 0 ORDER BY created_at DESC").fetchall()
+            rows = conn.execute("SELECT * FROM cookie_cache ORDER BY created_at DESC").fetchall()
             return [dict(row) for row in rows]
 
     def get_enabled_cookies(self) -> list[dict]:
@@ -1134,33 +1126,31 @@ class Database:
             return dict(row) if row else None
 
     def delete_cookie(self, record_id: str) -> bool:
-        """软删除 Cookie 记录（打墓碑）"""
+        """硬删除 Cookie 记录"""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE cookie_cache SET is_deleted = 1, deleted_at = ? WHERE record_id = ?",
-                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id),
+                "DELETE FROM cookie_cache WHERE record_id = ?",
+                (record_id,),
             )
             conn.commit()
             return True
+
+    # ========== 同步辅助 ==========
 
     # ========== 软删除辅助（删除同步专用） ==========
 
     _SYNC_TABLES = {"share_cache", "account_cache", "cookie_cache"}
 
     def get_deleted_ids(self, table: str) -> list[str]:
-        """获取墓碑记录（is_deleted=1）的 record_id 列表"""
-        if table not in self._SYNC_TABLES:
-            return []
-        with self._connect() as conn:
-            rows = conn.execute(f"SELECT record_id FROM {table} WHERE is_deleted = 1").fetchall()
-            return [row["record_id"] for row in rows]
+        """已改为硬删除，不再有墓碑记录。保留接口兼容，始终返回空列表。"""
+        return []
 
     def get_active_ids(self, table: str) -> list[str]:
-        """获取正常记录（is_deleted=0）的 record_id 列表"""
+        """获取全部记录的 record_id 列表（硬删除模式下全部都是活跃记录）"""
         if table not in self._SYNC_TABLES:
             return []
         with self._connect() as conn:
-            rows = conn.execute(f"SELECT record_id FROM {table} WHERE is_deleted = 0").fetchall()
+            rows = conn.execute(f"SELECT record_id FROM {table}").fetchall()
             return [row["record_id"] for row in rows]
 
     def get_synced_active_ids(self, table: str) -> list[str]:
@@ -1168,7 +1158,7 @@ class Database:
         if table not in self._SYNC_TABLES:
             return []
         with self._connect() as conn:
-            rows = conn.execute(f"SELECT record_id FROM {table} WHERE is_deleted = 0 AND synced = 1").fetchall()
+            rows = conn.execute(f"SELECT record_id FROM {table} WHERE synced = 1").fetchall()
             return [row["record_id"] for row in rows]
 
     def hard_delete(self, table: str, record_id: str) -> bool:
@@ -1185,7 +1175,7 @@ class Database:
         if table not in self._SYNC_TABLES:
             return False
         with self._connect() as conn:
-            conn.execute(f"DELETE FROM {table} WHERE record_id = ? AND is_deleted = 1", (record_id,))
+            conn.execute(f"DELETE FROM {table} WHERE record_id = ?", (record_id,))
             conn.commit()
             return True
 
@@ -1199,12 +1189,10 @@ class Database:
             "cookie_cache",
             "sync_history",
         ]
-        soft_delete_tables = {"share_cache", "account_cache", "cookie_cache"}
         counts = {}
         with self._connect() as conn:
             for table in tables:
-                where = " WHERE is_deleted = 0" if table in soft_delete_tables else ""
-                row = conn.execute(f"SELECT COUNT(*) as count FROM {table}{where}").fetchone()
+                row = conn.execute(f"SELECT COUNT(*) as count FROM {table}").fetchone()
                 counts[table] = row["count"] if row else 0
         return counts
 
@@ -1270,14 +1258,21 @@ class Database:
         limit: int = 100,
         offset: int = 0,
         search: str = "",
+        search_field: Optional[str] = None,
         sort_field: Optional[str] = None,
         sort_order: str = "desc",
-        filter_field: Optional[str] = None,
-        filter_value: Optional[str] = None,
-        filter_op: Optional[str] = None,
+        filters: Optional[str] = None,
+        need_total: bool = True,
     ) -> dict:
-        """通用表查询，支持搜索、排序、列级筛选、分页。
+        """通用表查询，支持搜索、排序、多条件筛选、分页。
         返回 {records, total, limit, offset}
+
+        search_field:
+            定向搜索字段。指定后只在这一列上做 LIKE，避免把所有列拼成 OR 链
+            导致的全表扫描（原实现是主要性能瓶颈）。为空则退化为全列搜索。
+        need_total:
+            是否需要精确总数。滚动加载后续批次时传 False，复用首批算出的值，
+            省掉重复的 COUNT(*) 全表扫描；此时返回的 total 为 -1。
         """
         with self._connect() as conn:
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
@@ -1285,25 +1280,49 @@ class Database:
             # 构造 WHERE（软删除过滤 + search 与 filter 为 AND 关系）
             params: list[Any] = []
             where_parts: list[str] = []
-            if "is_deleted" in cols:
-                where_parts.append('is_deleted = 0')
             if search:
-                where_parts.append("(" + " OR ".join([f'CAST("{c}" AS TEXT) LIKE ?' for c in cols]) + ")")
-                params += [f"%{search}%"] * len(cols)
-            if filter_field and filter_field in cols and filter_value is not None:
-                if filter_op == "equals":
-                    where_parts.append(f'CAST("{filter_field}" AS TEXT) = ?')
-                    params.append(str(filter_value))
-                elif filter_op == "contains":
-                    if filter_field == "标签":
-                        # 标签可能存为 Unicode 转义 JSON（\uXXXX），中文原值与转义形式都匹配
-                        escaped = str(filter_value).encode('unicode_escape').decode('ascii')
-                        where_parts.append(f'(CAST("{filter_field}" AS TEXT) LIKE ? OR CAST("{filter_field}" AS TEXT) LIKE ?)')
-                        params.append(f"%{filter_value}%")
-                        params.append(f"%{escaped}%")
+                # 定向搜索：search_field 支持逗号分隔多字段（前端"文本字段"默认档）。
+                # 只在指定列上做 LIKE，避免把所有列拼成 OR 链导致的全表扫描。
+                # 为空则退化为全列搜索（慢，仅作为旧前端的兼容路径）。
+                search_cols: list[str] = []
+                if search_field:
+                    search_cols = [c.strip() for c in str(search_field).split(",") if c.strip() and c.strip() in cols]
+                if search_cols:
+                    where_parts.append("(" + " OR ".join([f'CAST("{c}" AS TEXT) LIKE ?' for c in search_cols]) + ")")
+                    params += [f"%{search}%"] * len(search_cols)
+                else:
+                    where_parts.append("(" + " OR ".join([f'CAST("{c}" AS TEXT) LIKE ?' for c in cols]) + ")")
+                    params += [f"%{search}%"] * len(cols)
+
+            # filters: JSON 数组字符串，每项 {field, values: [...]}
+            # 同一字段多个值 = OR（IN），不同字段 = AND
+            if filters:
+                try:
+                    filter_list = json.loads(filters)
+                except (json.JSONDecodeError, TypeError):
+                    filter_list = []
+                for cond in filter_list:
+                    if not isinstance(cond, dict):
+                        continue
+                    f = cond.get("field", "")
+                    values = cond.get("values", [])
+                    if f not in cols or not values:
+                        continue
+                    if f == "标签":
+                        # 标签存为 JSON 数组文本，中文原值和 Unicode 转义形式都匹配
+                        tag_parts = []
+                        for v in values:
+                            v_str = str(v)
+                            escaped = v_str.encode('unicode_escape').decode('ascii')
+                            tag_parts.append(f'CAST("{f}" AS TEXT) LIKE ?')
+                            params.append(f"%{v_str}%")
+                            tag_parts.append(f'CAST("{f}" AS TEXT) LIKE ?')
+                            params.append(f"%{escaped}%")
+                        where_parts.append("(" + " OR ".join(tag_parts) + ")")
                     else:
-                        where_parts.append(f'CAST("{filter_field}" AS TEXT) LIKE ?')
-                        params.append(f"%{filter_value}%")
+                        placeholders = ",".join(["?"] * len(values))
+                        where_parts.append(f'CAST("{f}" AS TEXT) IN ({placeholders})')
+                        params += [str(v) for v in values]
             where = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
 
             # 构造 ORDER BY
@@ -1312,9 +1331,13 @@ class Database:
                 direction = "ASC" if sort_order.lower() == "asc" else "DESC"
                 order = f' ORDER BY "{sort_field}" {direction}'
 
-            total = conn.execute(
-                f"SELECT COUNT(*) FROM {table}{where}", params
-            ).fetchone()[0]
+            # 总数：need_total=False 时跳过，滚动加载后续批次可复用首批结果。
+            # 注意带 LIKE 条件的 COUNT 才是真正的开销（要对同一份 WHERE 再扫一遍全表）。
+            total = -1
+            if need_total:
+                total = conn.execute(
+                    f"SELECT COUNT(*) FROM {table}{where}", params
+                ).fetchone()[0]
             rows = conn.execute(
                 f"SELECT * FROM {table}{where}{order} LIMIT ? OFFSET ?",
                 params + [limit, offset],
@@ -1325,6 +1348,48 @@ class Database:
                 "limit": limit,
                 "offset": offset,
             }
+
+    def get_distinct_values(self, table: str, field: str) -> list[str]:
+        """获取某字段的去重值列表（标签字段会拆开 JSON 数组）。
+
+        带 TTL 缓存：平台/状态这类低基数字段的值几乎不变，
+        每次打开筛选菜单都跑一次 DISTINCT 是纯浪费。
+        写入类操作会调用 invalidate_distinct_cache() 主动失效。
+        """
+        cache_key = f"{table}::{field}"
+        now = time.monotonic()
+        cached = self._distinct_cache.get(cache_key)
+        if cached and cached[0] > now:
+            return cached[1]
+
+        with self._connect() as conn:
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            if field not in cols:
+                return []
+            rows = conn.execute(f'SELECT DISTINCT "{field}" FROM {table} WHERE "{field}" IS NOT NULL AND "{field}" != \'\'').fetchall()
+            vals = set()
+            for row in rows:
+                v = row[0]
+                if field == "标签":
+                    if isinstance(v, str):
+                        try:
+                            parsed = json.loads(v)
+                            if isinstance(parsed, list):
+                                v = parsed
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    if isinstance(v, list):
+                        for item in v:
+                            if item:
+                                vals.add(str(item))
+                    elif v:
+                        vals.add(str(v))
+                else:
+                    vals.add(str(v))
+            result = sorted(vals)
+
+        self._distinct_cache[cache_key] = (now + self.DISTINCT_CACHE_TTL, result)
+        return result
 
     def update_record_field(self, table: str, record_id: str, field: str, value: Any) -> bool:
         """通用单字段更新（用于启用/禁用开关）。
@@ -1355,6 +1420,8 @@ class Database:
                 params,
             )
             conn.commit()
+            if cursor.rowcount > 0:
+                self.invalidate_distinct_cache(table)
             return cursor.rowcount > 0
 
     def import_records(self, table: str, records: list[dict], skip_existing: bool = True) -> dict:
@@ -1470,40 +1537,33 @@ class Database:
                     result["failed"] += 1
                     result["errors"].append(f"{rid}: {e}")
             conn.commit()
+        if result["updated"]:
+            self.invalidate_distinct_cache(table)
         return result
 
     def batch_delete(self, table: str, record_ids: list[str]) -> dict:
-        """批量删除（软删除）多条记录。
+        """批量硬删除多条记录。
 
-        对于有 is_deleted 字段的表执行软删除，否则硬删除。
         Returns:
             {deleted, failed, errors[]}
         """
         if table not in self.VALID_TABLES:
             return {"deleted": 0, "failed": 0, "errors": [f"无效的表名: {table}"]}
         schema = self.get_table_schema(table)
-        col_names = [s["name"] for s in schema]
         pk_cols = [s["name"] for s in schema if s["pk"]]
         pk = pk_cols[0] if pk_cols else None
         if not pk:
             return {"deleted": 0, "failed": len(record_ids), "errors": ["表无主键"]}
 
-        is_soft = "is_deleted" in col_names
         result = {"deleted": 0, "failed": 0, "errors": []}
 
         with self._connect() as conn:
             for rid in record_ids:
                 try:
-                    if is_soft:
-                        cursor = conn.execute(
-                            f'UPDATE {table} SET is_deleted = 1, deleted_at = ? WHERE "{pk}" = ?',
-                            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), rid),
-                        )
-                    else:
-                        cursor = conn.execute(
-                            f'DELETE FROM {table} WHERE "{pk}" = ?',
-                            (rid,),
-                        )
+                    cursor = conn.execute(
+                        f'DELETE FROM {table} WHERE "{pk}" = ?',
+                        (rid,),
+                    )
                     if cursor.rowcount > 0:
                         result["deleted"] += 1
                     else:
@@ -1513,6 +1573,8 @@ class Database:
                     result["failed"] += 1
                     result["errors"].append(f"{rid}: {e}")
             conn.commit()
+        if result["deleted"]:
+            self.invalidate_distinct_cache(table)
         return result
 
     def insert_single(self, table: str, data: dict) -> dict:
@@ -1541,6 +1603,7 @@ class Database:
                     list(clean.values()),
                 )
                 conn.commit()
+            self.invalidate_distinct_cache(table)
             return {"success": True, "message": "添加成功", "record_id": clean.get("record_id", "")}
         except sqlite3.IntegrityError as e:
             return {"success": False, "message": f"记录已存在或冲突: {e}"}
@@ -1581,6 +1644,7 @@ class Database:
                 )
                 conn.commit()
                 if cursor.rowcount > 0:
+                    self.invalidate_distinct_cache(table)
                     return {"success": True, "message": "更新成功"}
                 return {"success": False, "message": "记录不存在"}
         except Exception as e:
@@ -1605,13 +1669,13 @@ class Database:
             # 找出重复的业务键
             rows = conn.execute(
                 f'SELECT "{bk}" as bk_val, COUNT(*) as cnt FROM {table} '
-                f'WHERE is_deleted = 0 AND "{bk}" != "" GROUP BY "{bk}" HAVING cnt > 1'
+                f'WHERE "{bk}" != "" GROUP BY "{bk}" HAVING cnt > 1'
             ).fetchall()
             results = []
             for row in rows:
                 bk_val = row["bk_val"]
                 records = conn.execute(
-                    f'SELECT * FROM {table} WHERE "{bk}" = ? AND is_deleted = 0',
+                    f'SELECT * FROM {table} WHERE "{bk}" = ?',
                     (bk_val,),
                 ).fetchall()
                 results.append({
@@ -1627,24 +1691,24 @@ class Database:
         with self._connect() as conn:
             # 分享表
             stats["share_cache"] = {
-                "total": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0").fetchone()[0],
-                "resolved": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND 解析状态='已就绪'").fetchone()[0],
-                "not_synced": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND 解析状态 != '已就绪'").fetchone()[0],
-                "has_error": conn.execute("SELECT COUNT(*) FROM share_cache WHERE is_deleted=0 AND 解析状态 = '解析失败'").fetchone()[0],
+                "total": conn.execute("SELECT COUNT(*) FROM share_cache").fetchone()[0],
+                "resolved": conn.execute("SELECT COUNT(*) FROM share_cache WHERE 解析状态='已就绪'").fetchone()[0],
+                "not_synced": conn.execute("SELECT COUNT(*) FROM share_cache WHERE 解析状态 != '已就绪'").fetchone()[0],
+                "has_error": conn.execute("SELECT COUNT(*) FROM share_cache WHERE 解析状态 = '解析失败'").fetchone()[0],
             }
             # 账号表
             stats["account_cache"] = {
-                "total": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0").fetchone()[0],
-                "enabled": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0 AND 启用=1").fetchone()[0],
-                "disabled": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0 AND (启用=0 OR 启用 IS NULL)").fetchone()[0],
-                "not_fetched": conn.execute("SELECT COUNT(*) FROM account_cache WHERE is_deleted=0 AND 获取状态 != '已获取'").fetchone()[0],
+                "total": conn.execute("SELECT COUNT(*) FROM account_cache").fetchone()[0],
+                "enabled": conn.execute("SELECT COUNT(*) FROM account_cache WHERE 启用=1").fetchone()[0],
+                "disabled": conn.execute("SELECT COUNT(*) FROM account_cache WHERE (启用=0 OR 启用 IS NULL)").fetchone()[0],
+                "not_fetched": conn.execute("SELECT COUNT(*) FROM account_cache WHERE 获取状态 != '已获取'").fetchone()[0],
             }
             # Cookie表
             stats["cookie_cache"] = {
-                "total": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE is_deleted=0").fetchone()[0],
-                "normal": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE is_deleted=0 AND 状态='正常'").fetchone()[0],
-                "invalid": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE is_deleted=0 AND 状态='失效'").fetchone()[0],
-                "enabled": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE is_deleted=0 AND 启用=1").fetchone()[0],
+                "total": conn.execute("SELECT COUNT(*) FROM cookie_cache").fetchone()[0],
+                "normal": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE 状态='正常'").fetchone()[0],
+                "invalid": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE 状态='失效'").fetchone()[0],
+                "enabled": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE 启用=1").fetchone()[0],
             }
             # 同步历史
             stats["sync_history"] = {

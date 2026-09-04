@@ -230,8 +230,8 @@ class TestAPIEndpoints:
         assert data["success"] == 1
         assert data["failed"] == 1
 
-    def test_api_table_filter_contains(self, app_env, tmp_path):
-        """API 透传列级筛选：contains 生效"""
+    def test_api_table_filter_values(self, app_env, tmp_path):
+        """API 透传多值筛选"""
         client, *_ = app_env
         import app.main as app_main
         from app.core.database import Database
@@ -246,7 +246,7 @@ class TestAPIEndpoints:
 
             r = client.get(
                 "/api/database/table/cookie_cache",
-                params={"filter_field": "Cookie", "filter_value": "bc", "filter_op": "contains"},
+                params={"filters": '[{"field":"Cookie","values":["abc123"]}]'},
             )
             assert r.status_code == 200
             data = r.json()
@@ -256,8 +256,8 @@ class TestAPIEndpoints:
         finally:
             app_main.database = orig_db
 
-    def test_api_table_filter_equals(self, app_env, tmp_path):
-        """API 透传列级筛选：equals 生效"""
+    def test_api_table_distinct_values(self, app_env, tmp_path):
+        """API 返回筛选弹窗所需的字段去重值"""
         client, *_ = app_env
         import app.main as app_main
         from app.core.database import Database
@@ -269,14 +269,10 @@ class TestAPIEndpoints:
             db.insert_cookie({"record_id": "c1", "Cookie": "aaa", "备注": "测试"})
             db.insert_cookie({"record_id": "c2", "Cookie": "bbb", "备注": "其他"})
 
-            r = client.get(
-                "/api/database/table/cookie_cache",
-                params={"filter_field": "备注", "filter_value": "测试", "filter_op": "equals"},
-            )
+            r = client.get("/api/database/table/cookie_cache/distinct/备注")
             assert r.status_code == 200
             data = r.json()
-            assert data["total"] == 1
-            assert data["records"][0]["record_id"] == "c1"
+            assert data == {"values": ["其他", "测试"]}
         finally:
             app_main.database = orig_db
 
