@@ -1399,41 +1399,8 @@ var FIELD_EDITORS = {
     var searchDebounceTimer = null;
     var currentSortField = '';
     var currentSortOrder = '';
-    // 筛选状态：条件式（金山多维表语义）。dtype: 'num'|'date'|''（决定后端比较方式）
-    var filterConds = [];   // [{field, op, value, value2, values, dtype}]
-    var filterMode = 'and'; // 'and' | 'or'
-
-    // 操作符集合与相对日期预设（与后端 _build_one_cond / _date_preset_sql 一一对应）
-    var FP_OP_SETS = {
-        num: [['between', '介于'], ['eq', '等于'], ['ne', '不等于'], ['gt', '大于'], ['gte', '大于等于'], ['lt', '小于'], ['lte', '小于等于'], ['empty', '为空'], ['nempty', '不为空']],
-        date: [['date', '相对日期'], ['between', '介于'], ['eq', '等于'], ['lt', '早于'], ['gt', '晚于'], ['empty', '为空'], ['nempty', '不为空']],
-        text: [['contains', '包含'], ['ncontains', '不包含'], ['in', '指定值'], ['eq', '等于'], ['ne', '不等于'], ['begin', '开头是'], ['end', '结尾是'], ['empty', '为空'], ['nempty', '不为空']],
-    };
-    var FP_DATE_PRESETS = [['today', '今天'], ['yesterday', '昨天'], ['tomorrow', '明天'], ['last7days', '最近 7 天'], ['last30days', '最近 30 天'], ['thisWeek', '本周'], ['thisMonth', '本月'], ['lastMonth', '上月']];
-
-    function fpFieldKind(fieldName) {
-        if (/时间|日期/.test(fieldName) || /_at$/.test(fieldName)) return 'date';
-        var f = null;
-        for (var i = 0; i < schemaFields.length; i++) {
-            if (schemaFields[i].name === fieldName) { f = schemaFields[i]; break; }
-        }
-        var type = f ? String(f.type || '').toUpperCase() : '';
-        if (type.indexOf('INT') >= 0 || type.indexOf('REAL') >= 0 || type.indexOf('NUM') >= 0 || type === 'FLOA' || type === 'DOUB') return 'num';
-        return 'text';
-    }
-    function fpNewCond(fieldName) {
-        var k = fpFieldKind(fieldName);
-        var op = k === 'num' ? 'between' : (k === 'date' ? 'date' : 'contains');
-        return { field: fieldName, op: op, value: '', value2: '', values: [], dtype: k === 'num' ? 'num' : (k === 'date' ? 'date' : '') };
-    }
-    function fpCondValid(c) {
-        if (!c || !c.field || !c.op) return false;
-        var op = c.op;
-        if (op === 'empty' || op === 'nempty' || op === 'date') return true;
-        if (op === 'in' || op === 'nin') return !!(c.values && c.values.length);
-        if (op === 'between') return (c.value !== '' && c.value != null) || (c.value2 !== '' && c.value2 != null);
-        return !(c.value === '' || c.value == null);
-    }
+    // 筛选状态：多选值模型 { fieldName: [value1, value2, ...] }
+    var currentFilters = {};
 
     // =========================================================================
     // 自定义单元格渲染器
@@ -1698,7 +1665,7 @@ var FIELD_RENDERERS = {
         }
         _render() {
             const isSorted = currentSortField === this.field;
-            const hasFilter = filterConds.some(function(c) { return c.field === this.field; }.bind(this));
+            const hasFilter = !!(currentFilters[this.field] && currentFilters[this.field].length);
             const btnActive = isSorted || hasFilter;
             const order = isSorted ? currentSortOrder : '';
             const arrow = order === 'asc' ? '↑' : (order === 'desc' ? '↓' : '');
@@ -1729,10 +1696,6 @@ var FIELD_RENDERERS = {
     // =========================================================================
     var filterPopupEl = null;
 
-    function closeFilterPopup() {
-        if (filterPopupEl) { filterPopupEl.remove(); filterPopupEl = null; }
-    }
-
     async function openFilterPopup(event, field) {
         closeFilterPopup();
         const btn = event.target.closest('button') || event.target;
@@ -1740,14 +1703,13 @@ var FIELD_RENDERERS = {
         const popup = document.createElement('div');
         popup.className = 'tbl-filter-popup';
         popup.style.cssText =
-            'position:fixed;z-index:20000;width:330px;background:var(--surface-overlay);' +
+            'position:fixed;z-index:20000;width:225px;background:var(--surface-overlay);' +
             'border:1px solid var(--border-default);border-radius:var(--radius-sm);' +
-            'box-shadow:var(--shadow-lg);padding:10px;font-size:13px;color:var(--text-primary);' +
-            'max-height:78vh;overflow-y:auto;';
-        let left = rect.left - 140;
+            'box-shadow:var(--shadow-lg);padding:10px;font-size:13px;color:var(--text-primary);';
+        let left = rect.left - 100;
         let top = rect.bottom + 6;
         if (left < 8) left = 8;
-        if (left + 338 > window.innerWidth) left = window.innerWidth - 346;
+        if (left + 225 > window.innerWidth) left = window.innerWidth - 233;
         popup.style.left = left + 'px';
         popup.style.top = top + 'px';
 
@@ -1767,50 +1729,17 @@ var FIELD_RENDERERS = {
         });
         popup.appendChild(sortRow);
 
-        // ===== 条件式筛选区（对齐金山多维表：字段 + 条件 + 值，且/或）=====
-        // 草稿机制：面板内编辑，点"确定"才生效
-        var draft = filterConds.map(function(c) {
-            var n = { field: c.field, op: c.op, value: c.value, value2: c.value2, values: c.values, dtype: c.dtype };
-            if (Array.isArray(n.values)) n.values = n.values.slice();
-            return n;
-        });
-        var draftMode = filterMode;
-        if (field && !draft.some(function(c) { return c.field === field; })) draft.push(fpNewCond(field));
+        // 搜索框
+        const searchInput = document.createElement('input');
+        searchInput.className = 'fp-search';
+        searchInput.type = 'text';
+        searchInput.placeholder = '搜索…';
+        popup.appendChild(searchInput);
 
-        // 且 / 或
-        const modeRow = document.createElement('div');
-        modeRow.className = 'fp-mode-row';
-        function renderModeRow() {
-            modeRow.innerHTML = '<span class="fp-mode-label">满足以下</span>';
-            [['and', '所有'], ['or', '任一']].forEach(function(p) {
-                const b = document.createElement('button');
-                b.type = 'button';
-                b.className = 'fp-mode-btn' + (draftMode === p[0] ? ' active' : '');
-                b.textContent = p[1];
-                b.addEventListener('click', function() { draftMode = p[0]; renderModeRow(); });
-                modeRow.appendChild(b);
-            });
-            const l2 = document.createElement('span');
-            l2.className = 'fp-mode-label';
-            l2.textContent = '条件';
-            modeRow.appendChild(l2);
-        }
-        renderModeRow();
-        popup.appendChild(modeRow);
-
-        const rowsBox = document.createElement('div');
-        rowsBox.className = 'fp-conds';
-        popup.appendChild(rowsBox);
-
-        const addCondBtn = document.createElement('button');
-        addCondBtn.type = 'button';
-        addCondBtn.className = 'fp-add-cond';
-        addCondBtn.textContent = '+ 添加条件';
-        addCondBtn.addEventListener('click', function() {
-            draft.push(fpNewCond(draft.length ? draft[draft.length - 1].field : (field || (schemaFields.find(function(f) { return !SYSTEM_FIELDS.includes(f.name); }) || {}).name)));
-            renderRows();
-        });
-        popup.appendChild(addCondBtn);
+        // 值列表容器
+        const listBox = document.createElement('div');
+        listBox.className = 'fp-list';
+        popup.appendChild(listBox);
 
         // 底部按钮
         const footer = document.createElement('div');
@@ -1822,7 +1751,7 @@ var FIELD_RENDERERS = {
         cancelBtn.textContent = '取消';
         cancelBtn.className = 'btn btn-secondary btn-sm';
         const clearBtn = document.createElement('button');
-        clearBtn.textContent = '清除全部';
+        clearBtn.textContent = '清除';
         clearBtn.className = 'btn btn-secondary btn-sm';
         footer.appendChild(clearBtn);
         footer.appendChild(cancelBtn);
@@ -1832,228 +1761,65 @@ var FIELD_RENDERERS = {
         document.body.appendChild(popup);
         filterPopupEl = popup;
 
-        // ---- 条件行渲染 ----
-        function renderRows() {
-            rowsBox.innerHTML = '';
-            if (!draft.length) {
-                rowsBox.innerHTML = '<div class="fp-empty-hint">暂无筛选条件</div>';
+        // 选中状态（临时副本）
+        const checked = new Set(currentFilters[field] || []);
+
+        // 异步加载去重值 + 每个值的记录数（value-counts 接口：标签字段已拆项计数）
+        var allValues = [];
+        var valueCounts = {};   // { value: count }
+        try {
+            // 传入其他字段的筛选条件：计数随其他筛选联动收窄（本字段自身条件由后端排除）
+            var otherKeys = Object.keys(currentFilters).filter(function(k) { return k !== field && currentFilters[k] && currentFilters[k].length; });
+            var q = otherKeys.map(function(k) { return { field: k, values: currentFilters[k] }; });
+            var cntUrl = '/api/database/table/' + currentTable + '/value-counts/' + encodeURIComponent(field);
+            if (q.length) cntUrl += '?filters=' + encodeURIComponent(JSON.stringify(q));
+            const resp = await apiCall(cntUrl, 'GET');
+            (resp.values || []).forEach(function(it) {
+                allValues.push(it.value);
+                valueCounts[String(it.value)] = it.count;
+            });
+        } catch (e) {
+            allValues = collectDistinctValues(field);
+        }
+        if (filterPopupEl !== popup) return;
+
+        function renderList(filterText) {
+            listBox.innerHTML = '';
+            const lower = (filterText || '').toLowerCase();
+            const filtered = allValues.filter(function(v) { return !lower || String(v).toLowerCase().includes(lower); });
+            if (!filtered.length) {
+                listBox.innerHTML = '<div class="fp-empty-hint">无匹配项</div>';
                 return;
             }
-            draft.forEach(function(cond, idx) { rowsBox.appendChild(renderCondRow(cond, idx)); });
-        }
-
-        function fpSelect(options, value, cls, onchange) {
-            const sel = document.createElement('select');
-            sel.className = cls || 'fp-sel';
-            options.forEach(function(o) {
-                const opt = document.createElement('option');
-                opt.value = o[0]; opt.textContent = o[1];
-                sel.appendChild(opt);
-            });
-            if (value != null) sel.value = value;
-            sel.addEventListener('change', function() { onchange(sel.value); });
-            return sel;
-        }
-
-        function renderCondRow(cond, idx) {
-            const row = document.createElement('div');
-            row.className = 'fp-cond';
-
-            const l1 = document.createElement('div');
-            l1.className = 'fp-cond-l1';
-            const fieldOpts = schemaFields
-                .filter(function(f) { return !SYSTEM_FIELDS.includes(f.name); })
-                .map(function(f) { return [f.name, FIELD_DISPLAY_NAMES[f.name] || f.name]; });
-            l1.appendChild(fpSelect(fieldOpts, cond.field, 'fp-sel fp-fsel', function(v) {
-                draft[idx] = fpNewCond(v);
-                renderRows();
-            }));
-            const kind = fpFieldKind(cond.field);
-            l1.appendChild(fpSelect(FP_OP_SETS[kind], cond.op, 'fp-sel fp-opsel', function(v) {
-                cond.op = v;
-                renderRows();
-            }));
-            const del = document.createElement('button');
-            del.type = 'button';
-            del.className = 'fp-del';
-            del.title = '删除条件';
-            del.textContent = '×';
-            del.addEventListener('click', function() { draft.splice(idx, 1); renderRows(); });
-            l1.appendChild(del);
-            row.appendChild(l1);
-
-            const l2 = document.createElement('div');
-            l2.className = 'fp-cond-l2';
-            l2.appendChild(renderValueControl(cond));
-            row.appendChild(l2);
-            return row;
-        }
-
-        function renderValueControl(cond) {
-            const op = cond.op;
-            const kind = fpFieldKind(cond.field);
-            if (op === 'in' || op === 'nin') return renderPickList(cond);
-            if (op === 'empty' || op === 'nempty') {
-                const s = document.createElement('span');
-                s.className = 'fp-noval';
-                s.textContent = '无需填写';
-                return s;
-            }
-            if (op === 'date') {
-                return fpSelect(FP_DATE_PRESETS, cond.value || 'today', 'fp-sel fp-val-inp', function(v) { cond.value = v; });
-            }
-            if (kind === 'num') {
-                const wrap = document.createElement('div');
-                wrap.className = 'fp-range';
-                if (op === 'between') {
-                    wrap.appendChild(mkNum(cond, 'value'));
-                    wrap.appendChild(tilde());
-                    wrap.appendChild(mkNum(cond, 'value2'));
-                } else {
-                    wrap.appendChild(mkNum(cond, 'value'));
-                }
-                return wrap;
-            }
-            if (kind === 'date') {
-                const wrap = document.createElement('div');
-                wrap.className = 'fp-range';
-                if (op === 'between') {
-                    wrap.appendChild(mkDate(cond, 'value'));
-                    wrap.appendChild(tilde());
-                    wrap.appendChild(mkDate(cond, 'value2'));
-                } else {
-                    wrap.appendChild(mkDate(cond, 'value'));
-                }
-                return wrap;
-            }
-            // 文本输入
-            const wrap = document.createElement('div');
-            wrap.className = 'fp-range';
-            const inp = document.createElement('input');
-            inp.type = 'text';
-            inp.className = 'fp-text-inp';
-            inp.placeholder = op === 'begin' ? '开头是…' : (op === 'end' ? '结尾是…' : (op === 'eq' || op === 'ne') ? '输入完整值…' : '输入关键字…');
-            inp.value = cond.value == null ? '' : cond.value;
-            inp.addEventListener('input', function() { cond.value = inp.value; });
-            wrap.appendChild(inp);
-            return wrap;
-
-            function mkNum(c, key) {
-                const i = document.createElement('input');
-                i.type = 'number';
-                i.className = 'fp-text-inp';
-                i.placeholder = key === 'value' ? '最小值' : '最大值';
-                i.value = c[key] == null ? '' : c[key];
-                i.addEventListener('input', function() { c[key] = i.value; });
-                return i;
-            }
-            function mkDate(c, key) {
-                const i = document.createElement('input');
-                i.type = 'date';
-                i.className = 'fp-text-inp';
-                i.value = c[key] == null ? '' : String(c[key]).slice(0, 10);
-                i.addEventListener('change', function() { c[key] = i.value; });
-                return i;
-            }
-            function tilde() {
-                const s = document.createElement('span');
-                s.className = 'fp-tilde';
-                s.textContent = '~';
-                return s;
-            }
-        }
-
-        // 选项值列表（带计数；口径 = 面板内其他条件，本字段自身条件不计入）
-        function renderPickList(cond) {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'fp-val-btn';
-            btn.textContent = (cond.values && cond.values.length) ? ('已选 ' + cond.values.length + ' 个值') : '点击选择值…';
-            btn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                toggleList(btn, cond);
-            });
-            return btn;
-        }
-
-        function toggleList(anchor, cond) {
-            const existing = popup.querySelector('.fp-countlist');
-            if (existing) {
-                const wasFor = existing.dataset.for === cond.field;
-                existing.remove();
-                if (wasFor) return; // 再点一次收起
-            }
-            const box = document.createElement('div');
-            box.className = 'fp-countlist';
-            box.dataset.for = cond.field;
-            box.innerHTML = '<div class="fp-empty-hint">加载计数…</div>';
-            const row = anchor.closest('.fp-cond');
-            row.parentNode.insertBefore(box, row.nextSibling);
-
-            const others = draft.filter(function(c) { return c !== cond && fpCondValid(c); });
-            const fj = others.length ? JSON.stringify({ mode: draftMode, conds: others }) : '';
-            apiCall('/api/database/table/' + currentTable + '/value-counts/' + encodeURIComponent(cond.field) + '?filters=' + encodeURIComponent(fj), 'GET')
-                .then(function(resp) {
-                    if (filterPopupEl !== popup) return;
-                    renderPickOptions(box, cond, resp.values || []);
-                })
-                .catch(function() {
-                    if (filterPopupEl !== popup) return;
-                    const vals = collectDistinctValues(cond.field);
-                    renderPickOptions(box, cond, vals.map(function(v) { return { value: v, count: -1 }; }));
+            filtered.forEach(function(v) {
+                const opt = document.createElement('label');
+                opt.className = 'fp-opt';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.checked = checked.has(v);
+                cb.addEventListener('change', function() {
+                    if (cb.checked) checked.add(v);
+                    else checked.delete(v);
                 });
-
-            function renderPickOptions(box2, c2, items) {
-                box2.innerHTML = '';
-                const si = document.createElement('input');
-                si.type = 'text';
-                si.className = 'fp-search';
-                si.placeholder = '搜索…';
-                box2.appendChild(si);
-                const lb = document.createElement('div');
-                lb.className = 'fp-list';
-                box2.appendChild(lb);
-                function paint(ftext) {
-                    lb.innerHTML = '';
-                    const lower = (ftext || '').toLowerCase();
-                    const shown = items.filter(function(x) { return !lower || String(x.value).toLowerCase().includes(lower); });
-                    if (!shown.length) { lb.innerHTML = '<div class="fp-empty-hint">无匹配项</div>'; return; }
-                    shown.forEach(function(x) {
-                        const opt = document.createElement('label');
-                        opt.className = 'fp-opt';
-                        const cb = document.createElement('input');
-                        cb.type = 'checkbox';
-                        cb.checked = (c2.values || []).some(function(v) { return String(v) === String(x.value); });
-                        cb.addEventListener('change', function() {
-                            c2.values = c2.values || [];
-                            if (cb.checked) c2.values.push(x.value);
-                            else c2.values = c2.values.filter(function(v) { return String(v) !== String(x.value); });
-                            btn.textContent = c2.values.length ? ('已选 ' + c2.values.length + ' 个值') : '点击选择值…';
-                        });
-                        const span = document.createElement('span');
-                        span.textContent = x.value;
-                        const cnt = document.createElement('span');
-                        cnt.className = 'fp-cnt';
-                        cnt.textContent = x.count >= 0 ? x.count : '';
-                        opt.appendChild(cb); opt.appendChild(span); opt.appendChild(cnt);
-                        lb.appendChild(opt);
-                    });
+                const span = document.createElement('span');
+                span.textContent = v;
+                opt.appendChild(cb);
+                opt.appendChild(span);
+                if (valueCounts[v] != null) {
+                    const cnt = document.createElement('span');
+                    cnt.className = 'fp-count';
+                    cnt.textContent = String(valueCounts[v]);
+                    opt.appendChild(cnt);
                 }
-                paint('');
-                si.addEventListener('input', function() { paint(si.value.trim()); });
-                setTimeout(function() { si.focus(); }, 0);
-            }
+                listBox.appendChild(opt);
+            });
         }
+        renderList('');
+        searchInput.addEventListener('input', function() { renderList(searchInput.value.trim()); });
 
-        renderRows();
-
-        // ---- 确定 / 取消 / 清除 ----
         confirmBtn.addEventListener('click', function(e) {
             e.stopPropagation();
-            filterConds = draft.filter(fpCondValid);
-            filterMode = draftMode;
-            closeFilterPopup();
-            showTable(currentTable, 1, currentKeyword);
+            applyFieldFilter(field, Array.from(checked));
         });
         cancelBtn.addEventListener('click', function(e) {
             e.stopPropagation();
@@ -2061,9 +1827,53 @@ var FIELD_RENDERERS = {
         });
         clearBtn.addEventListener('click', function(e) {
             e.stopPropagation();
-            draft = [];
-            renderRows();
+            applyFieldFilter(field, []);
         });
+        setTimeout(function() { searchInput.focus(); }, 0);
+    }
+
+    function closeFilterPopup() {
+        if (filterPopupEl) { filterPopupEl.remove(); filterPopupEl = null; }
+    }
+
+    // 收集当前表某字段的去重值（兜底用：仅当前页数据）
+    function collectDistinctValues(field) {
+        const vals = new Set();
+        if (gridApi) {
+            gridApi.forEachNode(function(node) {
+                if (!node.data || node.data[field] == null) return;
+                let v = node.data[field];
+                if (field === '标签') {
+                    if (typeof v === 'string') {
+                        try { const p = JSON.parse(v); if (Array.isArray(p)) v = p; } catch (e) {}
+                    }
+                    if (Array.isArray(v)) { v.forEach(function(t) { vals.add(String(t)); }); }
+                    else if (v) { vals.add(String(v)); }
+                } else {
+                    vals.add(String(v));
+                }
+            });
+        }
+        return Array.from(vals).sort();
+    }
+
+    function applyColSort(field, order) {
+        closeFilterPopup();
+        if (order) {
+            currentSortField = field;
+            currentSortOrder = order;
+        } else {
+            currentSortField = '';
+            currentSortOrder = '';
+        }
+        showTable(currentTable, 1, currentKeyword);
+    }
+
+    function applyFieldFilter(field, values) {
+        closeFilterPopup();
+        if (values && values.length) currentFilters[field] = values;
+        else delete currentFilters[field];
+        showTable(currentTable, 1, currentKeyword);
     }
 
     // 点击外部区域 / Esc 关闭菜单（使用命名函数以便 SPA 重入时移除）
@@ -2335,9 +2145,10 @@ var FIELD_RENDERERS = {
             if (f) url += '&search_field=' + encodeURIComponent(f);
         }
         if (currentSortField) url += '&sort_field=' + encodeURIComponent(currentSortField) + '&sort_order=' + encodeURIComponent(currentSortOrder || 'asc');
-        var validConds = filterConds.filter(fpCondValid);
-        if (validConds.length) {
-            url += '&filters=' + encodeURIComponent(JSON.stringify({ mode: filterMode, conds: validConds }));
+        var filterKeys = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; });
+        if (filterKeys.length) {
+            var filterArr = filterKeys.map(function(k) { return { field: k, values: currentFilters[k] }; });
+            url += '&filters=' + encodeURIComponent(JSON.stringify(filterArr));
         }
         return url;
     }
@@ -2623,8 +2434,7 @@ var FIELD_RENDERERS = {
             document.getElementById('table-tabs').dataset.lastTable !== tableName) {
             currentSortField = '';
             currentSortOrder = '';
-            filterConds = [];
-            filterMode = 'and';
+            currentFilters = {};
             currentSearchField = '__text__';
         }
         if (document.getElementById('table-tabs')) {
@@ -2658,7 +2468,7 @@ var FIELD_RENDERERS = {
 
         const kwSuffix = keyword ? ' · "' + keyword + '"' : '';
         document.getElementById('table-title').textContent = TABLE_NAMES[tableName] + kwSuffix;
-        var nFilterConds = filterConds.filter(fpCondValid).length;
+        var nFilterConds = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; }).length;
         var countBadge = document.getElementById('table-count-badge');
         countBadge.innerHTML = '';
         countBadge.appendChild(document.createTextNode('… 条'));
@@ -2666,7 +2476,7 @@ var FIELD_RENDERERS = {
             var badge = document.createElement('span');
             badge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--accent);cursor:pointer;';
             badge.textContent = '已筛选(' + nFilterConds + ') · 清除';
-            badge.addEventListener('click', function() { filterConds = []; filterMode = 'and'; showTable(currentTable, 1, currentKeyword); });
+            badge.addEventListener('click', function() { currentFilters = {}; showTable(currentTable, 1, currentKeyword); });
             countBadge.appendChild(badge);
         }
 
@@ -2769,11 +2579,10 @@ var FIELD_RENDERERS = {
 
     // 当前表浏览筛选条件 → 采集方案条件的映射（等级/标签/平台）
     function _presetCondition() {
-        const conds = filterConds.filter(fpCondValid);
-        if (!conds.length) return null;
-        const cond = conds[0];
-        const field = cond.field;
-        const value = String(cond.op === 'in' ? ((cond.values || [])[0] || '') : (cond.value || '')).trim();
+        const fields = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; });
+        if (!fields.length) return null;
+        const field = fields[0];
+        const value = String(currentFilters[field][0]).trim();
         if (!value) return null;
         if (field === '等级') {
             const n = parseInt(value);
@@ -3156,9 +2965,10 @@ container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><o
                 if (f) exportParams.push('search_field=' + encodeURIComponent(f));
             }
         }
-        var exportConds = filterConds.filter(fpCondValid);
-        if (exportConds.length) {
-            exportParams.push('filters=' + encodeURIComponent(JSON.stringify({ mode: filterMode, conds: exportConds })));
+        var exportKeys = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; });
+        if (exportKeys.length) {
+            var exportArr = exportKeys.map(function(k) { return { field: k, values: currentFilters[k] }; });
+            exportParams.push('filters=' + encodeURIComponent(JSON.stringify(exportArr)));
         }
         if (exportParams.length) url += '?' + exportParams.join('&');
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ph ph-circle-notch" style="animation:spin 0.8s linear infinite;"></i>'; }
