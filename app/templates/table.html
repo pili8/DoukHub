@@ -157,8 +157,8 @@
 }
 .tab-btn.active {
     background: var(--accent);
-    color: var(--text-on-accent, #0A0B0F);
-    box-shadow: var(--shadow-xs), var(--glow-primary);
+    color: var(--text-on-accent, #fff);
+    box-shadow: var(--shadow-xs);
     font-weight: 600;
 }
 /* 选中态图标统一用背景高对比色,避免各自颜色在 accent 背景上看不清 */
@@ -192,7 +192,7 @@
 .tbl-search-input:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
+    box-shadow: 0 0 0 3px var(--accent-light);
 }
 .tbl-search-input:focus + .tbl-search-icon,
 .tbl-search-wrapper:focus-within .tbl-search-icon {
@@ -252,13 +252,15 @@
     letter-spacing: -0.01em;
 }
 .tbl-count-badge {
+    display: inline-flex; align-items: center;
     font-size: 11px; font-weight: 600;
     padding: 3px 10px;
     border-radius: var(--radius-full);
-    background: var(--menu-hover);
+    background: var(--accent-light);
     color: var(--accent-text);
     font-family: var(--font-mono);
     letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
 }
 .tbl-action-group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .tbl-divider-v { width: 1px; height: 20px; background: var(--border-default); }
@@ -270,10 +272,10 @@
 }
 .tbl-batch-inline {
     padding: 6px 10px;
-    background: var(--surface-overlay);
+    background: var(--accent-light);
     border: 1px solid var(--accent);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-xs), var(--glow-primary);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xs);
 }
 .tbl-batch-count {
     font-size: 13px; color: var(--accent); font-weight: 700;
@@ -329,19 +331,25 @@
     --ag-foreground-color: var(--text-primary);
     --ag-header-background-color: var(--surface-raised);
     --ag-header-foreground-color: var(--text-secondary);
-    --ag-odd-row-background-color: transparent;
-    --ag-row-hover-color: var(--surface-overlay);
-    --ag-selected-row-background-color: var(--menu-hover);
+    --ag-odd-row-background-color: rgba(31, 27, 23, 0.022);
+    --ag-row-hover-color: var(--bg-hover);
+    --ag-selected-row-background-color: var(--accent-light);
     --ag-border-color: var(--border-default);
     --ag-row-border-color: var(--border-default);
     --ag-header-column-resize-handle-color: var(--border-default);
     --ag-font-family: var(--font-sans);
     --ag-font-size: 13px;
     --ag-cell-horizontal-padding: 10px;
-    --ag-header-height: 40px;
+    --ag-header-height: 42px;
     --ag-row-height: 40px;
     --ag-border-radius: 0;
     --ag-wrapper-border-radius: 0;
+    --ag-header-column-separator-display: block;
+    --ag-header-column-separator-height: 100%;
+    --ag-header-column-separator-width: 1px;
+    --ag-header-column-separator-color: var(--border-default);
+    --ag-borders: none;
+    --ag-cell-widget-spacing: 8px;
     --ag-input-focus-border-color: var(--accent);
     --ag-checkbox-checked-color: var(--accent);
     --ag-range-selection-border-color: var(--accent);
@@ -374,13 +382,24 @@
 .tbl-load-status {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 4px;
+    gap: 10px;
+    padding: 6px 2px;
     font-size: 12px;
     color: var(--text-muted);
     font-family: var(--font-mono, monospace);
 }
-.tbl-load-status .ls-total { color: var(--text-secondary); font-weight: 600; }
+/* 计数做成胶囊，数字用等宽对齐不跳动 */
+.tbl-load-status > span:first-child {
+    padding: 3px 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-full);
+    color: var(--text-secondary);
+}
+.tbl-load-status .ls-total {
+    color: var(--text-primary); font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
 .tbl-load-status .ls-spinner {
     display: none;
     align-items: center;
@@ -409,92 +428,312 @@
     color: var(--accent);
 }
 
-/* AG Grid 头部样式 */
+/* AG Grid 头部样式：去全大写（中文无效、英文显吵），走正文同族字号 */
 .ag-theme-quartz .ag-header-cell-label {
     font-weight: 600;
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: 12.5px;
+    letter-spacing: 0.01em;
+    color: var(--text-secondary);
 }
+.ag-theme-quartz .ag-header-cell { padding-left: 2px; padding-right: 2px; }
+.ag-theme-quartz .ag-header-row { border-bottom: 1px solid var(--border-default); }
 
-/* 表头筛选按钮（漏斗图标）：悬浮定位，不占文字空间；悬停列头才显示，有筛选/排序时常驻 */
+/* ===== 表头筛选按钮：悬浮于列头右侧，不占标题空间 ===== */
 .tbl-header-menu-btn {
     position: absolute;
-    right: 4px;
+    right: 5px;
     top: 50%;
     transform: translateY(-50%);
     display: inline-flex !important;
     align-items: center;
     justify-content: center;
-    width: 20px; height: 20px;
-    border: none; background: transparent;
-    color: var(--text-muted); cursor: pointer;
-    border-radius: 4px; flex-shrink: 0;
+    width: 22px; height: 22px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
     pointer-events: auto;
+    opacity: 0;
+    transition: opacity .12s, color .12s, background-color .12s;
 }
-.ag-header-cell:hover .tbl-header-menu-btn {
-    opacity: 1;
-    background: var(--bg-hover);
-}
+.ag-header-cell:hover .tbl-header-menu-btn,
+.ag-header-cell:focus-within .tbl-header-menu-btn { opacity: 1; }
 .tbl-header-menu-btn:hover {
-    background: var(--bg-hover);
+    background: var(--accent-light);
     color: var(--accent) !important;
 }
-.tbl-header-menu-btn.is-active { opacity: 1; color: var(--accent) !important; }
-/* 筛选弹窗 */
+/* 该列已有排序/筛选：胶囊常驻，一眼可辨 */
+.tbl-header-menu-btn.is-active {
+    opacity: 1;
+    background: var(--accent-light);
+    color: var(--accent) !important;
+}
+/* 已筛选角标：右上角实心小圆点 */
+.tbl-header-menu-btn.has-filter::after {
+    content: '';
+    position: absolute; top: -2px; right: -2px;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 2px var(--bg-surface);
+}
+.tbl-header-menu-btn svg { display: block; }
+
+/* ===== 筛选弹窗 ===== */
 .tbl-filter-popup {
-    animation: tbl-menu-in 120ms ease-out;
+    position: fixed;
+    z-index: 20000;
+    width: 252px;
+    padding: 0;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    color: var(--text-primary);
+    font-size: 13px;
+    overflow: hidden;
+    animation: tbl-menu-in 130ms cubic-bezier(0.2, 0, 0, 1);
     user-select: none;
+}
+/* 头部：字段名 + 关闭 */
+.tbl-filter-popup .fp-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 8px 8px 12px;
+}
+.tbl-filter-popup .fp-title {
+    flex: 1; min-width: 0;
+    font-size: 12px; font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: .01em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tbl-filter-popup .fp-close {
+    width: 22px; height: 22px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; background: transparent; border-radius: var(--radius-xs);
+    color: var(--text-muted); cursor: pointer; font-size: 14px;
+    font-family: inherit; line-height: 1;
+    transition: background .12s, color .12s;
+}
+.tbl-filter-popup .fp-close:hover { background: var(--danger-light); color: var(--danger-text); }
+/* 排序：分段控件（与页面 tabs / task-tabs 同一套视觉） */
+.tbl-filter-popup .fp-seg {
+    display: flex; gap: 3px;
+    margin: 0 10px 10px;
+    padding: 3px;
+    background: var(--bg-muted);
+    border-radius: var(--radius-sm);
+}
+.tbl-filter-popup .fp-seg-btn {
+    flex: 1; height: 26px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+    border: none; border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px; font-weight: 500; font-family: inherit;
+    cursor: pointer;
+    transition: background .12s, color .12s, box-shadow .12s;
+}
+.tbl-filter-popup .fp-seg-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.tbl-filter-popup .fp-seg-btn.active {
+    background: var(--accent); color: var(--text-on-accent);
+    font-weight: 600; box-shadow: var(--shadow-xs);
+}
+.tbl-filter-popup .fp-seg-btn .fp-arrow { font-weight: 700; }
+/* 值检索 */
+.tbl-filter-popup .fp-search-wrap {
+    position: relative;
+    display: flex; align-items: center;
+    margin: 0 10px 8px;
+}
+.tbl-filter-popup .fp-search-wrap > i {
+    position: absolute; left: 8px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px; color: var(--text-muted); pointer-events: none;
 }
 .tbl-filter-popup .fp-search {
     width: 100%; box-sizing: border-box;
-    padding: 6px 8px; margin-bottom: 6px;
+    padding: 6px 8px 6px 26px;
     border: 1px solid var(--border-default);
-    border-radius: var(--radius-xs);
+    border-radius: var(--radius-sm);
     font-size: 12px; background: var(--bg-input); color: var(--text-primary);
     font-family: inherit; outline: none;
+    transition: border-color .12s, box-shadow .12s;
 }
-.tbl-filter-popup .fp-search:focus { border-color: var(--accent); }
+.tbl-filter-popup .fp-search:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-light);
+}
+.tbl-filter-popup .fp-search::placeholder { color: var(--text-muted); }
+/* 全选 + 已选计数 */
+.tbl-filter-popup .fp-meta {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0 0 6px;
+    padding: 0 12px 6px;
+    border-bottom: 1px solid var(--border-default);
+}
+.tbl-filter-popup .fp-all {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px; color: var(--text-secondary);
+    cursor: pointer;
+}
+.tbl-filter-popup .fp-all:hover { color: var(--accent); }
+.tbl-filter-popup .fp-count {
+    margin-left: auto;
+    font-size: 11px; font-weight: 600;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+}
+/* 值列表 */
 .tbl-filter-popup .fp-list {
-    max-height: 200px; overflow-y: auto; margin-bottom: 6px;
+    max-height: 216px; overflow-y: auto;
+    padding: 0 6px 4px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
 }
+.tbl-filter-popup .fp-list::-webkit-scrollbar { width: 8px; }
+.tbl-filter-popup .fp-list::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 4px;
+    border: 2px solid var(--bg-surface);
+}
+.tbl-filter-popup .fp-list::-webkit-scrollbar-track { background: transparent; }
 .tbl-filter-popup .fp-opt {
-    display: flex; align-items: center; gap: 6px;
-    padding: 4px 8px; cursor: pointer;
-    border-radius: var(--radius-xs); font-size: 12px;
-    transition: background .08s;
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 8px; cursor: pointer;
+    border-radius: var(--radius-sm); font-size: 12.5px;
+    color: var(--text-primary);
+    transition: background .1s, color .1s;
 }
-.tbl-filter-popup .fp-opt:hover { background: var(--menu-hover); }
+.tbl-filter-popup .fp-opt:hover { background: var(--bg-hover); }
+.tbl-filter-popup .fp-opt:has(input:checked) {
+    background: var(--accent-light);
+    color: var(--accent-text);
+    font-weight: 600;
+}
+/* 自绘复选框：蓝底白勾，跟随主题 */
 .tbl-filter-popup .fp-opt input[type="checkbox"] {
-    width: 14px; height: 14px; accent-color: var(--accent);
-    flex-shrink: 0; margin: 0;
+    appearance: none; -webkit-appearance: none;
+    position: relative;
+    width: 15px; height: 15px; flex-shrink: 0; margin: 0;
+    border: 1.5px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--bg-input);
+    cursor: pointer;
+    transition: background .12s, border-color .12s;
+}
+.tbl-filter-popup .fp-opt input[type="checkbox"]:hover { border-color: var(--accent); }
+.tbl-filter-popup .fp-opt input[type="checkbox"]:checked {
+    background: var(--accent); border-color: var(--accent);
+}
+.tbl-filter-popup .fp-opt input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute; left: 4px; top: 1px;
+    width: 4px; height: 8px;
+    border: solid var(--text-on-accent);
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+}
+.tbl-filter-popup .fp-opt input[type="checkbox"]:focus-visible {
+    box-shadow: 0 0 0 3px var(--accent-light);
 }
 .tbl-filter-popup .fp-opt span {
     flex: 1; min-width: 0; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
 }
-.tbl-filter-popup .fp-sort-row {
-    display: flex; gap: 4px; padding: 4px 4px 6px;
-    border-bottom: 1px solid var(--border-default); margin-bottom: 6px;
-}
-.tbl-filter-popup .fp-sort-btn {
-    flex: 1; display: flex; align-items: center; justify-content: center; gap: 3px;
-    padding: 4px 6px; border: 1px solid var(--border-default);
-    border-radius: var(--radius-xs); background: transparent;
-    color: var(--text-secondary); cursor: pointer; font-size: 11px;
-    font-family: inherit; transition: border-color .1s, color .1s;
-}
-.tbl-filter-popup .fp-sort-btn:hover { border-color: var(--accent); color: var(--accent); }
-.tbl-filter-popup .fp-sort-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(45,212,191,.08); }
+/* 底部操作：清除靠左，取消/确定靠右 */
 .tbl-filter-popup .fp-footer {
-    display: flex; gap: 6px; justify-content: flex-end;
-    padding-top: 6px; border-top: 1px solid var(--border-default);
+    display: flex; gap: 6px; align-items: center;
+    padding: 8px 10px;
+    border-top: 1px solid var(--border-default);
+    background: var(--bg-muted);
 }
-.tbl-filter-popup .fp-footer .btn { padding: 4px 12px; font-size: 12px; }
-.fp-empty-hint { font-size: 12px; color: var(--text-muted); padding: 8px; text-align: center; }
+.tbl-filter-popup .fp-footer .fp-clear {
+    margin-right: auto;
+    border-color: transparent;
+    background: transparent;
+    color: var(--danger-text);
+}
+.tbl-filter-popup .fp-footer .fp-clear:hover { background: var(--danger-light); }
+.tbl-filter-popup .fp-footer .btn { padding: 5px 14px; font-size: 12px; }
+.fp-empty-hint {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-muted);
+    padding: 20px 8px; text-align: center;
+}
+.fp-empty-hint i { font-size: 18px; opacity: .45; }
+
+/* 条件式筛选面板（金山多维表风格） */
+.tbl-filter-popup .fp-mode-row {
+    display: flex; align-items: center; gap: 6px;
+    margin: 8px 0 8px;
+}
+.tbl-filter-popup .fp-mode-label { font-size: 12px; color: var(--text-muted); }
+.tbl-filter-popup .fp-mode-btn {
+    border: 1px solid var(--border-default); background: var(--bg-input);
+    color: var(--text-primary); font-size: 12px; padding: 2px 12px;
+    border-radius: var(--radius-xs); cursor: pointer;
+}
+.tbl-filter-popup .fp-mode-btn.active {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.tbl-filter-popup .fp-conds {
+    display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;
+}
+.tbl-filter-popup .fp-cond {
+    border: 1px solid var(--border-default); border-radius: var(--radius-xs);
+    padding: 6px; background: var(--bg-base);
+}
+.tbl-filter-popup .fp-cond-l1 { display: flex; align-items: center; gap: 6px; }
+.tbl-filter-popup .fp-fsel { flex: 1.1; min-width: 0; }
+.tbl-filter-popup .fp-opsel { flex: 1; min-width: 0; }
+.tbl-filter-popup .fp-del {
+    border: none; background: transparent; color: var(--text-muted);
+    font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; flex-shrink: 0;
+}
+.tbl-filter-popup .fp-del:hover { color: var(--danger); }
+.tbl-filter-popup .fp-cond-l2 { margin-top: 6px; }
+.tbl-filter-popup .fp-sel {
+    padding: 4px 6px; border: 1px solid var(--border-default); border-radius: var(--radius-xs);
+    font-size: 12px; background: var(--bg-input); color: var(--text-primary);
+}
+.tbl-filter-popup .fp-range { display: flex; align-items: center; gap: 6px; }
+.tbl-filter-popup .fp-tilde { color: var(--text-muted); }
+.tbl-filter-popup .fp-text-inp {
+    flex: 1; min-width: 0; padding: 4px 8px;
+    border: 1px solid var(--border-default); border-radius: var(--radius-xs);
+    font-size: 12px; background: var(--bg-input); color: var(--text-primary);
+    font-family: inherit; outline: none;
+}
+.tbl-filter-popup .fp-text-inp:focus { border-color: var(--accent); }
+.tbl-filter-popup .fp-noval { font-size: 12px; color: var(--text-muted); }
+.tbl-filter-popup .fp-add-cond {
+    width: 100%; border: 1px dashed var(--border-default); background: transparent;
+    color: var(--text-secondary); font-size: 12px; padding: 6px;
+    border-radius: var(--radius-xs); cursor: pointer; margin-bottom: 8px;
+}
+.tbl-filter-popup .fp-add-cond:hover { border-color: var(--accent); color: var(--accent); }
+.tbl-filter-popup .fp-val-btn {
+    width: 100%; text-align: left; padding: 4px 8px;
+    border: 1px solid var(--border-default); border-radius: var(--radius-xs);
+    background: var(--bg-input); color: var(--text-primary);
+    font-size: 12px; cursor: pointer;
+}
+.tbl-filter-popup .fp-val-btn:hover { border-color: var(--accent); }
+.tbl-filter-popup .fp-countlist {
+    border: 1px solid var(--border-default); border-radius: var(--radius-xs);
+    margin-top: 6px; background: var(--bg-input); padding: 6px;
+}
+.tbl-filter-popup .fp-cnt {
+    margin-left: auto; font-size: 11px; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
 @keyframes tbl-menu-in {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; transform: translateY(-6px) scale(.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* AG Grid 行悬停增强 */
@@ -510,12 +749,12 @@
 
 /* 跳转高亮：临时闪烁背景 */
 .ag-theme-quartz .ag-row.jump-highlight {
-    background: var(--accent-bg, rgba(59, 130, 246, 0.15)) !important;
+    background: var(--accent-light) !important;
     animation: jump-flash 0.5s ease-out 3;
 }
 @keyframes jump-flash {
     0%, 100% { background: transparent; }
-    50% { background: var(--accent-bg, rgba(59, 130, 246, 0.25)); }
+    50% { background: var(--accent-light); }
 }
 
 /* AG Grid 复选框 */
@@ -570,7 +809,7 @@
     border-radius: var(--radius-xs) !important;
     padding: 4px 8px !important;
     z-index: 10000 !important;
-    box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
+    box-shadow: 0 0 0 3px var(--accent-light);
 }
 .ag-theme-quartz .ag-popup { z-index: 10000 !important; }
 
@@ -597,6 +836,33 @@
 .ag-theme-quartz .ag-body-horizontal-scroll::-webkit-scrollbar {
     width: 6px; height: 6px;
 }
+
+/* ===== 单元格内状态胶囊 / 标签片（halo 浅底风格，全站统一） ===== */
+.tbl-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 10px;
+    border-radius: var(--radius-full);
+    font-size: 11px; font-weight: 600;
+    line-height: 18px;
+    white-space: nowrap;
+    user-select: none;
+}
+.tbl-pill::before {
+    content: '';
+    width: 5px; height: 5px; border-radius: 50%;
+    background: currentColor; opacity: .7;
+    flex-shrink: 0;
+}
+.tbl-tag {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: var(--radius-xs);
+    font-size: 10.5px; line-height: 17px;
+    margin-right: 3px;
+    white-space: nowrap;
+}
+.tbl-tag.mapped { background: var(--success-light); color: var(--success-text); }
+.tbl-tag.unmapped { background: var(--warning-light); color: var(--warning-text); }
 
 /* ===== 行内操作按钮 ===== */
 .tbl-action-btn {
@@ -716,34 +982,34 @@
     border: 1px solid var(--border-default);
 }
 
-/* ===== 字段分类表头着色 ===== */
+/* ===== 字段分类表头着色：极淡同色底 + 顶部实色条（明暗两主题通用） ===== */
 .ag-theme-quartz .ag-header-cell.col-cat-original {
-    background: rgba(96, 165, 250, 0.08) !important;
-    border-top: 2px solid rgba(96, 165, 250, 0.5);
+    background: rgba(0, 97, 164, 0.05) !important;
+    border-top: 2px solid var(--accent);
 }
 .ag-theme-quartz .ag-header-cell.col-cat-edit {
-    background: rgba(251, 191, 36, 0.08) !important;
-    border-top: 2px solid rgba(251, 191, 36, 0.5);
+    background: rgba(180, 83, 9, 0.05) !important;
+    border-top: 2px solid var(--warning);
 }
 .ag-theme-quartz .ag-header-cell.col-cat-fetched {
-    background: rgba(74, 222, 128, 0.08) !important;
-    border-top: 2px solid rgba(74, 222, 128, 0.5);
+    background: rgba(22, 163, 74, 0.05) !important;
+    border-top: 2px solid var(--success);
 }
 .ag-theme-quartz .ag-header-cell.col-cat-control {
-    background: rgba(167, 139, 250, 0.08) !important;
-    border-top: 2px solid rgba(167, 139, 250, 0.5);
+    background: rgba(107, 87, 120, 0.05) !important;
+    border-top: 2px solid var(--md-tertiary);
 }
 .ag-theme-quartz .ag-header-cell.col-cat-system {
-    background: rgba(148, 163, 184, 0.06) !important;
-    border-top: 2px solid rgba(148, 163, 184, 0.3);
+    background: rgba(148, 163, 184, 0.08) !important;
+    border-top: 2px solid var(--text-muted);
 }
 .ag-theme-quartz .ag-header-cell.col-cat-credential {
-    background: rgba(251, 191, 36, 0.08) !important;
-    border-top: 2px solid rgba(251, 191, 36, 0.5);
+    background: rgba(180, 83, 9, 0.05) !important;
+    border-top: 2px solid var(--warning);
 }
 .ag-theme-quartz .ag-header-cell.col-cat-status {
-    background: rgba(167, 139, 250, 0.08) !important;
-    border-top: 2px solid rgba(167, 139, 250, 0.5);
+    background: rgba(107, 87, 120, 0.05) !important;
+    border-top: 2px solid var(--md-tertiary);
 }
 
 /* ===== 分类图例 ===== */
@@ -751,24 +1017,28 @@
     display: inline-flex; align-items: center; gap: 8px;
     margin-left: 8px;
 }
+/* 图例：浅底小胶囊 + 同色圆点，去掉旧主题的霓虹发光 */
 .tbl-cat-item {
-    display: inline-flex; align-items: center; gap: 4px;
-    font-size: 10px; color: var(--text-muted);
-    font-weight: 500;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 9px;
+    border-radius: var(--radius-full);
+    font-size: 10.5px; font-weight: 600;
     letter-spacing: 0.02em;
+    background: rgba(148, 163, 184, 0.10);
+    color: var(--text-secondary);
 }
 .tbl-cat-dot {
-    width: 8px; height: 8px; border-radius: 50%;
+    width: 6px; height: 6px; border-radius: 50%;
     display: inline-block; flex-shrink: 0;
-    box-shadow: 0 0 6px currentColor;
+    background: currentColor;
 }
-.tbl-cat-dot.col-cat-original { background: rgba(96, 165, 250, 0.8); color: rgba(96, 165, 250, 0.4); }
-.tbl-cat-dot.col-cat-edit { background: rgba(251, 191, 36, 0.8); color: rgba(251, 191, 36, 0.4); }
-.tbl-cat-dot.col-cat-fetched { background: rgba(74, 222, 128, 0.8); color: rgba(74, 222, 128, 0.4); }
-.tbl-cat-dot.col-cat-control { background: rgba(167, 139, 250, 0.8); color: rgba(167, 139, 250, 0.4); }
-.tbl-cat-dot.col-cat-system { background: rgba(148, 163, 184, 0.6); color: rgba(148, 163, 184, 0.3); }
-.tbl-cat-dot.col-cat-credential { background: rgba(251, 191, 36, 0.8); color: rgba(251, 191, 36, 0.4); }
-.tbl-cat-dot.col-cat-status { background: rgba(167, 139, 250, 0.8); color: rgba(167, 139, 250, 0.4); }
+.tbl-cat-item.col-cat-original { background: rgba(0, 97, 164, 0.08); color: var(--accent); }
+.tbl-cat-item.col-cat-edit { background: rgba(180, 83, 9, 0.10); color: var(--warning); }
+.tbl-cat-item.col-cat-fetched { background: rgba(22, 163, 74, 0.10); color: var(--success); }
+.tbl-cat-item.col-cat-control { background: rgba(107, 87, 120, 0.10); color: var(--md-tertiary); }
+.tbl-cat-item.col-cat-system { background: rgba(148, 163, 184, 0.14); color: var(--text-secondary); }
+.tbl-cat-item.col-cat-credential { background: rgba(180, 83, 9, 0.10); color: var(--warning); }
+.tbl-cat-item.col-cat-status { background: rgba(107, 87, 120, 0.10); color: var(--md-tertiary); }
 
 /* ===== 表图标颜色 ===== */
 .tab-icon.coll { color: var(--accent); }
@@ -846,7 +1116,7 @@
 .tbl-form-input:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
+    box-shadow: 0 0 0 3px var(--accent-light);
 }
 .tbl-form-input:disabled {
     opacity: 0.5;
@@ -868,11 +1138,6 @@ input[type="checkbox"]:disabled {
     .tbl-action-group { justify-content: flex-end; }
     .tbl-grid { height: calc(100vh - 380px); }
 }
-/* 列头筛选按钮：悬停显示；有排序/筛选时常驻 */
-.tbl-header-menu-btn { opacity: 0; transition: opacity .12s, color .12s; display: inline-flex; }
-.ag-header-cell:hover .tbl-header-menu-btn,
-.ag-header-cell:focus-within .tbl-header-menu-btn { opacity: 1; }
-.tbl-header-menu-btn.is-active { opacity: 1; }
 /* 存为方案弹窗：整体容器 */
 .sp-body { display: flex; flex-direction: column; gap: 14px; }
 /* 存为方案弹窗：保存方式选项 */
@@ -886,7 +1151,7 @@ input[type="checkbox"]:disabled {
 .save-preset-opt:hover { border-color: var(--accent); }
 .save-preset-opt:has(input:checked) {
   border-color: var(--accent);
-  background: rgba(45, 212, 191, 0.07);
+  background: var(--accent-light);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 .save-preset-opt input[type="radio"] { accent-color: var(--accent); width: 15px; height: 15px; flex-shrink: 0; margin: 0; }
@@ -1116,7 +1381,7 @@ var FIELD_EDITORS = {
         const items = TABLE_LEGENDS[tableName];
         if (!items) { legend.innerHTML = ''; return; }
         legend.innerHTML = items.map(function(it) {
-            return '<span class="tbl-cat-item"><span class="tbl-cat-dot col-cat-' + it.cls + '"></span>' + it.label + '</span>';
+            return '<span class="tbl-cat-item col-cat-' + it.cls + '"><span class="tbl-cat-dot"></span>' + it.label + '</span>';
         }).join('');
     }
 
@@ -1134,7 +1399,41 @@ var FIELD_EDITORS = {
     var searchDebounceTimer = null;
     var currentSortField = '';
     var currentSortOrder = '';
-    var currentFilters = {}; // { fieldName: [value1, value2, ...] }
+    // 筛选状态：条件式（金山多维表语义）。dtype: 'num'|'date'|''（决定后端比较方式）
+    var filterConds = [];   // [{field, op, value, value2, values, dtype}]
+    var filterMode = 'and'; // 'and' | 'or'
+
+    // 操作符集合与相对日期预设（与后端 _build_one_cond / _date_preset_sql 一一对应）
+    var FP_OP_SETS = {
+        num: [['between', '介于'], ['eq', '等于'], ['ne', '不等于'], ['gt', '大于'], ['gte', '大于等于'], ['lt', '小于'], ['lte', '小于等于'], ['empty', '为空'], ['nempty', '不为空']],
+        date: [['date', '相对日期'], ['between', '介于'], ['eq', '等于'], ['lt', '早于'], ['gt', '晚于'], ['empty', '为空'], ['nempty', '不为空']],
+        text: [['contains', '包含'], ['ncontains', '不包含'], ['in', '指定值'], ['eq', '等于'], ['ne', '不等于'], ['begin', '开头是'], ['end', '结尾是'], ['empty', '为空'], ['nempty', '不为空']],
+    };
+    var FP_DATE_PRESETS = [['today', '今天'], ['yesterday', '昨天'], ['tomorrow', '明天'], ['last7days', '最近 7 天'], ['last30days', '最近 30 天'], ['thisWeek', '本周'], ['thisMonth', '本月'], ['lastMonth', '上月']];
+
+    function fpFieldKind(fieldName) {
+        if (/时间|日期/.test(fieldName) || /_at$/.test(fieldName)) return 'date';
+        var f = null;
+        for (var i = 0; i < schemaFields.length; i++) {
+            if (schemaFields[i].name === fieldName) { f = schemaFields[i]; break; }
+        }
+        var type = f ? String(f.type || '').toUpperCase() : '';
+        if (type.indexOf('INT') >= 0 || type.indexOf('REAL') >= 0 || type.indexOf('NUM') >= 0 || type === 'FLOA' || type === 'DOUB') return 'num';
+        return 'text';
+    }
+    function fpNewCond(fieldName) {
+        var k = fpFieldKind(fieldName);
+        var op = k === 'num' ? 'between' : (k === 'date' ? 'date' : 'contains');
+        return { field: fieldName, op: op, value: '', value2: '', values: [], dtype: k === 'num' ? 'num' : (k === 'date' ? 'date' : '') };
+    }
+    function fpCondValid(c) {
+        if (!c || !c.field || !c.op) return false;
+        var op = c.op;
+        if (op === 'empty' || op === 'nempty' || op === 'date') return true;
+        if (op === 'in' || op === 'nin') return !!(c.values && c.values.length);
+        if (op === 'between') return (c.value !== '' && c.value != null) || (c.value2 !== '' && c.value2 != null);
+        return !(c.value === '' || c.value == null);
+    }
 
     // =========================================================================
     // 自定义单元格渲染器
@@ -1163,8 +1462,8 @@ var FIELD_EDITORS = {
     }
 
     function boolDisplayRenderer(params) {
-        if (params.value === true || params.value === 1) return '<span style="color: var(--success); font-weight: 600;">是</span>';
-        if (params.value === false || params.value === 0) return '<span style="color: var(--text-muted);">否</span>';
+        if (params.value === true || params.value === 1) return statusPillHtml('是', 'success');
+        if (params.value === false || params.value === 0) return statusPillHtml('否', 'muted');
         return '<span style="color: var(--text-muted); font-style: italic;">-</span>';
     }
 
@@ -1186,50 +1485,38 @@ var FIELD_EDITORS = {
         return checkbox;
     }
 
-// 获取状态渲染器（枚举：待获取/已获取/获取失败）
-function fetchStatusRenderer(params) {
-var val = params.value || '待获取';
-var dotColors = {
-'待获取':   'var(--text-muted)',
-'已获取':   'var(--success)',
-'获取失败': 'var(--danger)',
+// 状态胶囊配色表：浅底 + 深字（halo 风格），明暗主题自动跟随
+var STATUS_TONES = {
+    '待解析': 'muted', '待获取': 'muted', '否': 'muted',
+    '已就绪': 'accent',
+    '已生成': 'success', '已获取': 'success', '正常': 'success', '是': 'success',
+    '已删除': 'warning',
+    '解析失败': 'danger', '获取失败': 'danger', '失效': 'danger',
 };
-var c = dotColors[val] || dotColors['待获取'];
-var el = document.createElement('span');
-el.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:var(--radius-full);font-size:11px;font-weight:600;user-select:none;';
-var dot = document.createElement('i');
-var glow = (c === 'var(--text-muted)') ? 'none' : '0 0 6px ' + c;
-dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + c + ';box-shadow:' + glow + ';';
-var label = document.createElement('span');
-label.textContent = val;
-label.style.color = c;
-el.appendChild(dot);
-el.appendChild(label);
-return el;
+var TONE_VARS = {
+    muted:   ['var(--bg-muted)', 'var(--text-secondary)'],
+    accent:  ['var(--accent-light)', 'var(--accent-text)'],
+    success: ['var(--success-light)', 'var(--success-text)'],
+    warning: ['var(--warning-light)', 'var(--warning-text)'],
+    danger:  ['var(--danger-light)', 'var(--danger-text)'],
+};
+
+// 生成状态胶囊（值来自受控枚举，仍做转义以防注入）
+function statusPillHtml(text, tone) {
+    var pair = TONE_VARS[tone] || TONE_VARS.muted;
+    return '<span class="tbl-pill" style="background:' + pair[0] + ';color:' + pair[1] + ';">' + htmlEscape(text) + '</span>';
 }
 
-    // 解析状态渲染器：状态灯风格（圆点+文字）
+// 获取状态渲染器（枚举：待获取 / 已获取 / 获取失败）
+function fetchStatusRenderer(params) {
+    var val = params.value || '待获取';
+    return statusPillHtml(val, STATUS_TONES[val] || 'muted');
+}
+
+    // 解析状态渲染器（枚举：待解析 / 已就绪 / 已生成 / 已删除 / 解析失败）
     function parseStatusRenderer(params) {
         var val = params.value || '待解析';
-        var dotColors = {
-            '待解析':   'var(--text-muted)',
-            '已就绪':   '#3b82f6',
-            '已生成':   'var(--success)',
-            '已删除':   'var(--warning)',
-            '解析失败': 'var(--danger)',
-        };
-        var c = dotColors[val] || dotColors['待解析'];
-        var el = document.createElement('span');
-        el.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:var(--radius-full);font-size:11px;font-weight:600;user-select:none;';
-        var dot = document.createElement('i');
-        var glow = (c === 'var(--text-muted)') ? 'none' : '0 0 6px ' + c;
-        dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + c + ';box-shadow:' + glow + ';';
-        var label = document.createElement('span');
-        label.textContent = val;
-        label.style.color = c;
-        el.appendChild(dot);
-        el.appendChild(label);
-        return el;
+        return statusPillHtml(val, STATUS_TONES[val] || 'muted');
     }
 
     function tagsRenderer(params) {
@@ -1251,11 +1538,10 @@ return el;
                 var isMapped = TAGS_MAPPING && Object.keys(TAGS_MAPPING).some(function(k) {
                     return TAGS_MAPPING[k].toLowerCase() === _tagLower || k.toLowerCase() === _tagLower;
                 });
-            var style = isMapped
-                ? 'display:inline-block;padding:0 5px;border-radius:3px;font-size:10px;line-height:16px;background:rgba(34,197,94,.07);color:var(--success);margin-right:2px;border:1px solid rgba(34,197,94,.22);'
-                    : 'display:inline-block;padding:0 5px;border-radius:3px;font-size:10px;line-height:16px;background:var(--warning-light);color:var(--warning);margin-right:2px;border:1px solid var(--warning);';
-                var display = String(t).length > 12 ? String(t).substring(0, 12) + '...' : t;
-                return '<span title="' + (isMapped ? '' : '未匹配映射') + '" style="' + style + '">' + display + '</span>';
+                var cls = isMapped ? 'tbl-tag mapped' : 'tbl-tag unmapped';
+                var raw = String(t);
+                var display = raw.length > 12 ? raw.substring(0, 12) + '...' : raw;
+                return '<span class="' + cls + '" title="' + (isMapped ? htmlEscape(raw) : '未匹配映射') + '">' + htmlEscape(display) + '</span>';
             }).join('') + (tags.length > 5 ? '<span style="font-size:11px;color:var(--text-muted);">+' + (tags.length - 5) + '</span>' : '');
         }
         let display = String(val);
@@ -1281,9 +1567,7 @@ return el;
     function statusBadgeRenderer(params) {
         const val = params.value;
         if (!val) return '<span style="color: var(--text-muted);">-</span>';
-        if (val === '正常') return '<span style="background: var(--success-light); color: var(--success-text); padding: 2px 10px; border-radius: 4px; font-size: 11px; font-weight: 600;">正常</span>';
-        if (val === '失效') return '<span style="background: var(--danger-light); color: var(--danger-text); padding: 2px 10px; border-radius: 4px; font-size: 11px; font-weight: 600;">失效</span>';
-        return '<span>' + val + '</span>';
+        return statusPillHtml(val, STATUS_TONES[val] || 'muted');
     }
 
     function actionsRenderer(params) {
@@ -1364,6 +1648,45 @@ var FIELD_RENDERERS = {
         ));
     }
 
+    // 全选表头：infinite 行模型不支持 headerCheckboxSelection，用自定义表头实现。
+    // 勾选 = 选中所有已加载行；行选择变化时同步勾选态（全亮/半选）。
+    var TblSelectAllHeader = class {
+        init(params) {
+            var self = this;
+            this.gui = document.createElement('div');
+            this.gui.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;width:100%;';
+            this.cb = document.createElement('input');
+            this.cb.type = 'checkbox';
+            this.cb.className = 'tbl-select-all-cb';
+            this.cb.style.cssText = 'width:14px;height:14px;accent-color:var(--accent);cursor:pointer;margin:0;';
+            this.cb.addEventListener('change', function() {
+                if (!gridApi) return;
+                var checked = self.cb.checked;
+                gridApi.forEachNode(function(node) {
+                    if (node.data) node.setSelected(checked);
+                });
+            });
+            this.gui.appendChild(this.cb);
+        }
+        refresh() { return true; }
+        getGui() { return this.gui; }
+        destroy() { this.gui = null; }
+    };
+
+    function syncSelectAllHeader() {
+        if (!gridApi) return;
+        var cb = document.querySelector('.tbl-select-all-cb');
+        if (!cb) return;
+        var total = 0, selected = 0;
+        gridApi.forEachNode(function(node) {
+            if (!node.data) return;
+            total++;
+            if (node.isSelected()) selected++;
+        });
+        cb.checked = total > 0 && selected === total;
+        cb.indeterminate = selected > 0 && selected < total;
+    }
+
     var DoukHeaderComponent = class {
         init(params) {
             this.params = params;
@@ -1375,7 +1698,7 @@ var FIELD_RENDERERS = {
         }
         _render() {
             const isSorted = currentSortField === this.field;
-            const hasFilter = !!(currentFilters[this.field] && currentFilters[this.field].length);
+            const hasFilter = filterConds.some(function(c) { return c.field === this.field; }.bind(this));
             const btnActive = isSorted || hasFilter;
             const order = isSorted ? currentSortOrder : '';
             const arrow = order === 'asc' ? '↑' : (order === 'desc' ? '↓' : '');
@@ -1383,13 +1706,11 @@ var FIELD_RENDERERS = {
             const safeField = htmlEscape(this.field);
             const funnelSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5z"/></svg>';
             this.gui.innerHTML =
-                '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
-                (btnActive ? 'padding-right:22px;' : 'padding-right:4px;') +
-                '" title="' + safeName + '">' + safeName +
-                (isSorted ? '<span style="color:var(--accent);margin-left:4px;font-weight:700;">' + arrow + '</span>' : '') +
+                '<span class="tbl-hdr-label' + (btnActive ? ' is-active' : '') + '" title="' + safeName + '">' + safeName +
+                (isSorted ? '<span class="tbl-sort-arrow">' + arrow + '</span>' : '') +
                 '</span>' +
-                '<button class="tbl-header-menu-btn' + (btnActive ? ' is-active' : '') + '" data-field="' + safeField + '" title="排序 / 筛选">' +
-                funnelSvg + '</button>';
+                '<button class="tbl-header-menu-btn' + (btnActive ? ' is-active' : '') + (hasFilter ? ' has-filter' : '') +
+                '" data-field="' + safeField + '" title="排序 / 筛选">' + funnelSvg + '</button>';
             this.gui.querySelector('.tbl-header-menu-btn').addEventListener('click', (e) => {
                 e.stopPropagation();
                 openFilterPopup(e, this.field);
@@ -1408,6 +1729,10 @@ var FIELD_RENDERERS = {
     // =========================================================================
     var filterPopupEl = null;
 
+    function closeFilterPopup() {
+        if (filterPopupEl) { filterPopupEl.remove(); filterPopupEl = null; }
+    }
+
     async function openFilterPopup(event, field) {
         closeFilterPopup();
         const btn = event.target.closest('button') || event.target;
@@ -1415,13 +1740,14 @@ var FIELD_RENDERERS = {
         const popup = document.createElement('div');
         popup.className = 'tbl-filter-popup';
         popup.style.cssText =
-            'position:fixed;z-index:20000;width:225px;background:var(--surface-overlay);' +
+            'position:fixed;z-index:20000;width:330px;background:var(--surface-overlay);' +
             'border:1px solid var(--border-default);border-radius:var(--radius-sm);' +
-            'box-shadow:var(--shadow-lg);padding:10px;font-size:13px;color:var(--text-primary);';
-        let left = rect.left - 100;
+            'box-shadow:var(--shadow-lg);padding:10px;font-size:13px;color:var(--text-primary);' +
+            'max-height:78vh;overflow-y:auto;';
+        let left = rect.left - 140;
         let top = rect.bottom + 6;
         if (left < 8) left = 8;
-        if (left + 225 > window.innerWidth) left = window.innerWidth - 233;
+        if (left + 338 > window.innerWidth) left = window.innerWidth - 346;
         popup.style.left = left + 'px';
         popup.style.top = top + 'px';
 
@@ -1441,17 +1767,50 @@ var FIELD_RENDERERS = {
         });
         popup.appendChild(sortRow);
 
-        // 搜索框
-        const searchInput = document.createElement('input');
-        searchInput.className = 'fp-search';
-        searchInput.type = 'text';
-        searchInput.placeholder = '搜索…';
-        popup.appendChild(searchInput);
+        // ===== 条件式筛选区（对齐金山多维表：字段 + 条件 + 值，且/或）=====
+        // 草稿机制：面板内编辑，点"确定"才生效
+        var draft = filterConds.map(function(c) {
+            var n = { field: c.field, op: c.op, value: c.value, value2: c.value2, values: c.values, dtype: c.dtype };
+            if (Array.isArray(n.values)) n.values = n.values.slice();
+            return n;
+        });
+        var draftMode = filterMode;
+        if (field && !draft.some(function(c) { return c.field === field; })) draft.push(fpNewCond(field));
 
-        // 值列表容器
-        const listBox = document.createElement('div');
-        listBox.className = 'fp-list';
-        popup.appendChild(listBox);
+        // 且 / 或
+        const modeRow = document.createElement('div');
+        modeRow.className = 'fp-mode-row';
+        function renderModeRow() {
+            modeRow.innerHTML = '<span class="fp-mode-label">满足以下</span>';
+            [['and', '所有'], ['or', '任一']].forEach(function(p) {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'fp-mode-btn' + (draftMode === p[0] ? ' active' : '');
+                b.textContent = p[1];
+                b.addEventListener('click', function() { draftMode = p[0]; renderModeRow(); });
+                modeRow.appendChild(b);
+            });
+            const l2 = document.createElement('span');
+            l2.className = 'fp-mode-label';
+            l2.textContent = '条件';
+            modeRow.appendChild(l2);
+        }
+        renderModeRow();
+        popup.appendChild(modeRow);
+
+        const rowsBox = document.createElement('div');
+        rowsBox.className = 'fp-conds';
+        popup.appendChild(rowsBox);
+
+        const addCondBtn = document.createElement('button');
+        addCondBtn.type = 'button';
+        addCondBtn.className = 'fp-add-cond';
+        addCondBtn.textContent = '+ 添加条件';
+        addCondBtn.addEventListener('click', function() {
+            draft.push(fpNewCond(draft.length ? draft[draft.length - 1].field : (field || (schemaFields.find(function(f) { return !SYSTEM_FIELDS.includes(f.name); }) || {}).name)));
+            renderRows();
+        });
+        popup.appendChild(addCondBtn);
 
         // 底部按钮
         const footer = document.createElement('div');
@@ -1463,7 +1822,7 @@ var FIELD_RENDERERS = {
         cancelBtn.textContent = '取消';
         cancelBtn.className = 'btn btn-secondary btn-sm';
         const clearBtn = document.createElement('button');
-        clearBtn.textContent = '清除';
+        clearBtn.textContent = '清除全部';
         clearBtn.className = 'btn btn-secondary btn-sm';
         footer.appendChild(clearBtn);
         footer.appendChild(cancelBtn);
@@ -1473,48 +1832,228 @@ var FIELD_RENDERERS = {
         document.body.appendChild(popup);
         filterPopupEl = popup;
 
-        // 选中状态（临时副本）
-        const checked = new Set(currentFilters[field] || []);
-
-        // 异步加载去重值
-        var allValues = [];
-        try {
-            const resp = await apiCall('/api/database/table/' + currentTable + '/distinct/' + encodeURIComponent(field), 'GET');
-            allValues = resp.values || [];
-        } catch (e) { allValues = collectDistinctValues(field); }
-        if (filterPopupEl !== popup) return;
-
-        function renderList(filterText) {
-            listBox.innerHTML = '';
-            const lower = (filterText || '').toLowerCase();
-            const filtered = allValues.filter(function(v) { return !lower || String(v).toLowerCase().includes(lower); });
-            if (!filtered.length) {
-                listBox.innerHTML = '<div class="fp-empty-hint">无匹配项</div>';
+        // ---- 条件行渲染 ----
+        function renderRows() {
+            rowsBox.innerHTML = '';
+            if (!draft.length) {
+                rowsBox.innerHTML = '<div class="fp-empty-hint">暂无筛选条件</div>';
                 return;
             }
-            filtered.forEach(function(v) {
-                const opt = document.createElement('label');
-                opt.className = 'fp-opt';
-                const cb = document.createElement('input');
-                cb.type = 'checkbox';
-                cb.checked = checked.has(v);
-                cb.addEventListener('change', function() {
-                    if (cb.checked) checked.add(v);
-                    else checked.delete(v);
-                });
-                const span = document.createElement('span');
-                span.textContent = v;
-                opt.appendChild(cb);
-                opt.appendChild(span);
-                listBox.appendChild(opt);
-            });
+            draft.forEach(function(cond, idx) { rowsBox.appendChild(renderCondRow(cond, idx)); });
         }
-        renderList('');
-        searchInput.addEventListener('input', function() { renderList(searchInput.value.trim()); });
 
+        function fpSelect(options, value, cls, onchange) {
+            const sel = document.createElement('select');
+            sel.className = cls || 'fp-sel';
+            options.forEach(function(o) {
+                const opt = document.createElement('option');
+                opt.value = o[0]; opt.textContent = o[1];
+                sel.appendChild(opt);
+            });
+            if (value != null) sel.value = value;
+            sel.addEventListener('change', function() { onchange(sel.value); });
+            return sel;
+        }
+
+        function renderCondRow(cond, idx) {
+            const row = document.createElement('div');
+            row.className = 'fp-cond';
+
+            const l1 = document.createElement('div');
+            l1.className = 'fp-cond-l1';
+            const fieldOpts = schemaFields
+                .filter(function(f) { return !SYSTEM_FIELDS.includes(f.name); })
+                .map(function(f) { return [f.name, FIELD_DISPLAY_NAMES[f.name] || f.name]; });
+            l1.appendChild(fpSelect(fieldOpts, cond.field, 'fp-sel fp-fsel', function(v) {
+                draft[idx] = fpNewCond(v);
+                renderRows();
+            }));
+            const kind = fpFieldKind(cond.field);
+            l1.appendChild(fpSelect(FP_OP_SETS[kind], cond.op, 'fp-sel fp-opsel', function(v) {
+                cond.op = v;
+                renderRows();
+            }));
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'fp-del';
+            del.title = '删除条件';
+            del.textContent = '×';
+            del.addEventListener('click', function() { draft.splice(idx, 1); renderRows(); });
+            l1.appendChild(del);
+            row.appendChild(l1);
+
+            const l2 = document.createElement('div');
+            l2.className = 'fp-cond-l2';
+            l2.appendChild(renderValueControl(cond));
+            row.appendChild(l2);
+            return row;
+        }
+
+        function renderValueControl(cond) {
+            const op = cond.op;
+            const kind = fpFieldKind(cond.field);
+            if (op === 'in' || op === 'nin') return renderPickList(cond);
+            if (op === 'empty' || op === 'nempty') {
+                const s = document.createElement('span');
+                s.className = 'fp-noval';
+                s.textContent = '无需填写';
+                return s;
+            }
+            if (op === 'date') {
+                return fpSelect(FP_DATE_PRESETS, cond.value || 'today', 'fp-sel fp-val-inp', function(v) { cond.value = v; });
+            }
+            if (kind === 'num') {
+                const wrap = document.createElement('div');
+                wrap.className = 'fp-range';
+                if (op === 'between') {
+                    wrap.appendChild(mkNum(cond, 'value'));
+                    wrap.appendChild(tilde());
+                    wrap.appendChild(mkNum(cond, 'value2'));
+                } else {
+                    wrap.appendChild(mkNum(cond, 'value'));
+                }
+                return wrap;
+            }
+            if (kind === 'date') {
+                const wrap = document.createElement('div');
+                wrap.className = 'fp-range';
+                if (op === 'between') {
+                    wrap.appendChild(mkDate(cond, 'value'));
+                    wrap.appendChild(tilde());
+                    wrap.appendChild(mkDate(cond, 'value2'));
+                } else {
+                    wrap.appendChild(mkDate(cond, 'value'));
+                }
+                return wrap;
+            }
+            // 文本输入
+            const wrap = document.createElement('div');
+            wrap.className = 'fp-range';
+            const inp = document.createElement('input');
+            inp.type = 'text';
+            inp.className = 'fp-text-inp';
+            inp.placeholder = op === 'begin' ? '开头是…' : (op === 'end' ? '结尾是…' : (op === 'eq' || op === 'ne') ? '输入完整值…' : '输入关键字…');
+            inp.value = cond.value == null ? '' : cond.value;
+            inp.addEventListener('input', function() { cond.value = inp.value; });
+            wrap.appendChild(inp);
+            return wrap;
+
+            function mkNum(c, key) {
+                const i = document.createElement('input');
+                i.type = 'number';
+                i.className = 'fp-text-inp';
+                i.placeholder = key === 'value' ? '最小值' : '最大值';
+                i.value = c[key] == null ? '' : c[key];
+                i.addEventListener('input', function() { c[key] = i.value; });
+                return i;
+            }
+            function mkDate(c, key) {
+                const i = document.createElement('input');
+                i.type = 'date';
+                i.className = 'fp-text-inp';
+                i.value = c[key] == null ? '' : String(c[key]).slice(0, 10);
+                i.addEventListener('change', function() { c[key] = i.value; });
+                return i;
+            }
+            function tilde() {
+                const s = document.createElement('span');
+                s.className = 'fp-tilde';
+                s.textContent = '~';
+                return s;
+            }
+        }
+
+        // 选项值列表（带计数；口径 = 面板内其他条件，本字段自身条件不计入）
+        function renderPickList(cond) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'fp-val-btn';
+            btn.textContent = (cond.values && cond.values.length) ? ('已选 ' + cond.values.length + ' 个值') : '点击选择值…';
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggleList(btn, cond);
+            });
+            return btn;
+        }
+
+        function toggleList(anchor, cond) {
+            const existing = popup.querySelector('.fp-countlist');
+            if (existing) {
+                const wasFor = existing.dataset.for === cond.field;
+                existing.remove();
+                if (wasFor) return; // 再点一次收起
+            }
+            const box = document.createElement('div');
+            box.className = 'fp-countlist';
+            box.dataset.for = cond.field;
+            box.innerHTML = '<div class="fp-empty-hint">加载计数…</div>';
+            const row = anchor.closest('.fp-cond');
+            row.parentNode.insertBefore(box, row.nextSibling);
+
+            const others = draft.filter(function(c) { return c !== cond && fpCondValid(c); });
+            const fj = others.length ? JSON.stringify({ mode: draftMode, conds: others }) : '';
+            apiCall('/api/database/table/' + currentTable + '/value-counts/' + encodeURIComponent(cond.field) + '?filters=' + encodeURIComponent(fj), 'GET')
+                .then(function(resp) {
+                    if (filterPopupEl !== popup) return;
+                    renderPickOptions(box, cond, resp.values || []);
+                })
+                .catch(function() {
+                    if (filterPopupEl !== popup) return;
+                    const vals = collectDistinctValues(cond.field);
+                    renderPickOptions(box, cond, vals.map(function(v) { return { value: v, count: -1 }; }));
+                });
+
+            function renderPickOptions(box2, c2, items) {
+                box2.innerHTML = '';
+                const si = document.createElement('input');
+                si.type = 'text';
+                si.className = 'fp-search';
+                si.placeholder = '搜索…';
+                box2.appendChild(si);
+                const lb = document.createElement('div');
+                lb.className = 'fp-list';
+                box2.appendChild(lb);
+                function paint(ftext) {
+                    lb.innerHTML = '';
+                    const lower = (ftext || '').toLowerCase();
+                    const shown = items.filter(function(x) { return !lower || String(x.value).toLowerCase().includes(lower); });
+                    if (!shown.length) { lb.innerHTML = '<div class="fp-empty-hint">无匹配项</div>'; return; }
+                    shown.forEach(function(x) {
+                        const opt = document.createElement('label');
+                        opt.className = 'fp-opt';
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.checked = (c2.values || []).some(function(v) { return String(v) === String(x.value); });
+                        cb.addEventListener('change', function() {
+                            c2.values = c2.values || [];
+                            if (cb.checked) c2.values.push(x.value);
+                            else c2.values = c2.values.filter(function(v) { return String(v) !== String(x.value); });
+                            btn.textContent = c2.values.length ? ('已选 ' + c2.values.length + ' 个值') : '点击选择值…';
+                        });
+                        const span = document.createElement('span');
+                        span.textContent = x.value;
+                        const cnt = document.createElement('span');
+                        cnt.className = 'fp-cnt';
+                        cnt.textContent = x.count >= 0 ? x.count : '';
+                        opt.appendChild(cb); opt.appendChild(span); opt.appendChild(cnt);
+                        lb.appendChild(opt);
+                    });
+                }
+                paint('');
+                si.addEventListener('input', function() { paint(si.value.trim()); });
+                setTimeout(function() { si.focus(); }, 0);
+            }
+        }
+
+        renderRows();
+
+        // ---- 确定 / 取消 / 清除 ----
         confirmBtn.addEventListener('click', function(e) {
             e.stopPropagation();
-            applyFieldFilter(field, Array.from(checked));
+            filterConds = draft.filter(fpCondValid);
+            filterMode = draftMode;
+            closeFilterPopup();
+            showTable(currentTable, 1, currentKeyword);
         });
         cancelBtn.addEventListener('click', function(e) {
             e.stopPropagation();
@@ -1522,53 +2061,9 @@ var FIELD_RENDERERS = {
         });
         clearBtn.addEventListener('click', function(e) {
             e.stopPropagation();
-            applyFieldFilter(field, []);
+            draft = [];
+            renderRows();
         });
-        setTimeout(function() { searchInput.focus(); }, 0);
-    }
-
-    function closeFilterPopup() {
-        if (filterPopupEl) { filterPopupEl.remove(); filterPopupEl = null; }
-    }
-
-    // 收集当前表某字段的去重值（兜底用：仅当前页数据）
-    function collectDistinctValues(field) {
-        const vals = new Set();
-        if (gridApi) {
-            gridApi.forEachNode(function(node) {
-                if (!node.data || node.data[field] == null) return;
-                let v = node.data[field];
-                if (field === '标签') {
-                    if (typeof v === 'string') {
-                        try { const p = JSON.parse(v); if (Array.isArray(p)) v = p; } catch (e) {}
-                    }
-                    if (Array.isArray(v)) { v.forEach(function(t) { vals.add(String(t)); }); }
-                    else if (v) { vals.add(String(v)); }
-                } else {
-                    vals.add(String(v));
-                }
-            });
-        }
-        return Array.from(vals).sort();
-    }
-
-    function applyColSort(field, order) {
-        closeFilterPopup();
-        if (order) {
-            currentSortField = field;
-            currentSortOrder = order;
-        } else {
-            currentSortField = '';
-            currentSortOrder = '';
-        }
-        showTable(currentTable, 1, currentKeyword);
-    }
-
-    function applyFieldFilter(field, values) {
-        closeFilterPopup();
-        if (values && values.length) currentFilters[field] = values;
-        else delete currentFilters[field];
-        showTable(currentTable, 1, currentKeyword);
     }
 
     // 点击外部区域 / Esc 关闭菜单（使用命名函数以便 SPA 重入时移除）
@@ -1720,7 +2215,8 @@ var FIELD_RENDERERS = {
             headerName: '',
             width: 42,
             checkboxSelection: true,
-            headerCheckboxSelection: true,
+            // infinite 行模型不支持 headerCheckboxSelection，用自定义表头实现"全选已加载行"
+            headerComponent: TblSelectAllHeader,
             sortable: false,
             filter: false,
             pinned: 'left',
@@ -1839,10 +2335,9 @@ var FIELD_RENDERERS = {
             if (f) url += '&search_field=' + encodeURIComponent(f);
         }
         if (currentSortField) url += '&sort_field=' + encodeURIComponent(currentSortField) + '&sort_order=' + encodeURIComponent(currentSortOrder || 'asc');
-        var filterKeys = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; });
-        if (filterKeys.length) {
-            var filterArr = filterKeys.map(function(k) { return { field: k, values: currentFilters[k] }; });
-            url += '&filters=' + encodeURIComponent(JSON.stringify(filterArr));
+        var validConds = filterConds.filter(fpCondValid);
+        if (validConds.length) {
+            url += '&filters=' + encodeURIComponent(JSON.stringify({ mode: filterMode, conds: validConds }));
         }
         return url;
     }
@@ -1952,7 +2447,7 @@ var FIELD_RENDERERS = {
                 datasource: makeDatasource(),
                 cacheBlockSize: BLOCK_SIZE,
                 maxBlocksInCache: 10,
-                blockLoadDebounce: 50,
+                blockLoadDebounceMillis: 50,
                 rowSelection: 'multiple',
                 suppressRowClickSelection: true,
                 animateRows: false,
@@ -1974,7 +2469,7 @@ var FIELD_RENDERERS = {
                     return params.data.record_id || ('ID_' + (params.data.ID || ''));
                 },
                 onCellValueChanged: onCellValueChanged,
-                onSelectionChanged: () => updateBatchToolbar(),
+                onSelectionChanged: () => { updateBatchToolbar(); syncSelectAllHeader(); },
                 onColumnResized: (e) => saveColState(e),
                 onColumnMoved: (e) => saveColState(e),
             });
@@ -2128,7 +2623,8 @@ var FIELD_RENDERERS = {
             document.getElementById('table-tabs').dataset.lastTable !== tableName) {
             currentSortField = '';
             currentSortOrder = '';
-            currentFilters = {};
+            filterConds = [];
+            filterMode = 'and';
             currentSearchField = '__text__';
         }
         if (document.getElementById('table-tabs')) {
@@ -2162,15 +2658,15 @@ var FIELD_RENDERERS = {
 
         const kwSuffix = keyword ? ' · "' + keyword + '"' : '';
         document.getElementById('table-title').textContent = TABLE_NAMES[tableName] + kwSuffix;
-        var filterKeys = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; });
+        var nFilterConds = filterConds.filter(fpCondValid).length;
         var countBadge = document.getElementById('table-count-badge');
         countBadge.innerHTML = '';
         countBadge.appendChild(document.createTextNode('… 条'));
-        if (filterKeys.length) {
+        if (nFilterConds) {
             var badge = document.createElement('span');
             badge.style.cssText = 'margin-left:8px;font-size:11px;color:var(--accent);cursor:pointer;';
-            badge.textContent = '已筛选 · 清除';
-            badge.addEventListener('click', function() { currentFilters = {}; showTable(currentTable, 1, currentKeyword); });
+            badge.textContent = '已筛选(' + nFilterConds + ') · 清除';
+            badge.addEventListener('click', function() { filterConds = []; filterMode = 'and'; showTable(currentTable, 1, currentKeyword); });
             countBadge.appendChild(badge);
         }
 
@@ -2273,10 +2769,11 @@ var FIELD_RENDERERS = {
 
     // 当前表浏览筛选条件 → 采集方案条件的映射（等级/标签/平台）
     function _presetCondition() {
-        const fields = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; });
-        if (!fields.length) return null;
-        const field = fields[0];
-        const value = String(currentFilters[field][0]).trim();
+        const conds = filterConds.filter(fpCondValid);
+        if (!conds.length) return null;
+        const cond = conds[0];
+        const field = cond.field;
+        const value = String(cond.op === 'in' ? ((cond.values || [])[0] || '') : (cond.value || '')).trim();
         if (!value) return null;
         if (field === '等级') {
             const n = parseInt(value);
@@ -2659,10 +3156,9 @@ container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><o
                 if (f) exportParams.push('search_field=' + encodeURIComponent(f));
             }
         }
-        var exportFilterKeys = Object.keys(currentFilters).filter(function(k) { return currentFilters[k] && currentFilters[k].length; });
-        if (exportFilterKeys.length) {
-            var exportFilterArr = exportFilterKeys.map(function(k) { return { field: k, values: currentFilters[k] }; });
-            exportParams.push('filters=' + encodeURIComponent(JSON.stringify(exportFilterArr)));
+        var exportConds = filterConds.filter(fpCondValid);
+        if (exportConds.length) {
+            exportParams.push('filters=' + encodeURIComponent(JSON.stringify({ mode: filterMode, conds: exportConds })));
         }
         if (exportParams.length) url += '?' + exportParams.join('&');
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ph ph-circle-notch" style="animation:spin 0.8s linear infinite;"></i>'; }

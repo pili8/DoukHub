@@ -1252,6 +1252,180 @@ class Database:
                 for r in rows
             ]
 
+    # ------------------------------------------------------------------
+    # 筛选条件解析（金山多维表语义）
+    # filters JSON 两种格式：
+    #   v2: {"mode": "and"|"or", "conds": [{field, op, value, value2, dtype}]}
+    #   v1（兼容）: [{"field": ..., "values": [...]}]  → 等价 op=in
+    # op 全集：
+    #   in/nin  contains/ncontains  begin/end
+    #   eq/ne  gt/gte/lt/lte  between  empty/nempty
+    #   date  # value 为相对日期预设（today/yesterday/tomorrow/
+    #         # last7days/last30days/thisWeek/thisMonth/lastMonth）
+    # dtype: "num" 数值比较(CAST AS NUMERIC)；"date" 日期比较(取 YYYY-MM-DD 前缀)
+    # ------------------------------------------------------------------
+    _OP_SYMBOL = {"eq": "=", "ne": "!=", "gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
+
+    def _date_preset_sql(self, preset: str, col_expr: str) -> Optional[str]:
+        """相对日期预设 → SQL（col_expr 是 YYYY-MM-DD 前缀表达式）。"""
+        preset = str(preset)
+        if preset == "today":
+            return f"{col_expr} = date('now','localtime')"
+        if preset == "yesterday":
+            return f"{col_expr} = date('now','localtime','-1 day')"
+        if preset == "tomorrow":
+            return f"{col_expr} = date('now','localtime','+1 day')"
+        if preset == "last7days":
+            return f"{col_expr} BETWEEN date('now','localtime','-6 day') AND date('now','localtime')"
+        if preset == "last30days":
+            return f"{col_expr} BETWEEN date('now','localtime','-29 day') AND date('now','localtime')"
+        if preset == "thisWeek":
+            return f"{col_expr} BETWEEN date('now','localtime','weekday 1','-7 day') AND date('now','localtime','weekday 1','-1 day')"
+        if preset == "thisMonth":
+            return f"{col_expr} BETWEEN date('now','localtime','start of month') AND date('now','localtime','start of month','+1 month','-1 day')"
+        if preset == "lastMonth":
+            return f"{col_expr} BETWEEN date('now','localtime','start of month','-1 month') AND date('now','localtime','start of month','-1 day')"
+        return None
+
+    def _build_one_cond(self, cond: dict, cols: list, params: list) -> Optional[str]:
+        """单条筛选条件 → SQL 片段（参数追加到 params）。非法/空条件返回 None。"""
+        f = str(cond.get("field", ""))
+        op = str(cond.get("op", "in")).strip()
+        if f not in cols:
+            return None
+        qf = f'"{f}"'
+        tq = f'CAST({qf} AS TEXT)'
+        dtype = cond.get("dtype")
+        if dtype == "date" and op in ("eq", "ne", "gt", "gte", "lt", "lte", "between", "date"):
+            tq = f'substr({qf}, 1, 10)'  # 日期列存 'YYYY-MM-DD HH:MM:SS'，按天比较
+
+        # 相对日期预设
+        if op == "date":
+            return self._date_preset_sql(cond.get("value", ""), tq)
+
+        # 为空 / 不为空
+        if op == "empty":
+            return f"({qf} IS NULL OR {tq} = '')"
+        if op == "nempty":
+            return f"({qf} IS NOT NULL AND {tq} != '')"
+
+        # 多值包含 / 不含
+        if op in ("in", "nin"):
+            values = cond.get("value", cond.get("values", []))
+            if isinstance(values, (str, int, float)):
+                values = [values]
+            values = [str(v) for v in (values or []) if str(v) != ""]
+            if not values:
+                return None
+            if f == "标签":
+                # 标签存 JSON 数组文本，原值和 Unicode 转义形式都要匹配
+                parts = []
+                for v in values:
+                    esc = v.encode("unicode_escape").decode("ascii")
+                    parts.append(f"{tq} LIKE ?")
+                    params.append(f"%{v}%")
+                    parts.append(f"{tq} LIKE ?")
+                    params.append(f"%{esc}%")
+                inner = "(" + " OR ".join(parts) + ")"
+                return f"(NOT {inner} OR {qf} IS NULL)" if op == "nin" else inner
+            placeholders = ",".join(["?"] * len(values))
+            kw = "NOT IN" if op == "nin" else "IN"
+            params += values
+            return f"{tq} {kw} ({placeholders})"
+
+        # 文本匹配
+        if op in ("contains", "ncontains", "begin", "end"):
+            v = str(cond.get("value", ""))
+            if v == "":
+                return None
+            if op == "contains":
+                if f == "标签":
+                    esc = v.encode("unicode_escape").decode("ascii")
+                    params += [f"%{v}%", f"%{esc}%"]
+                    return f"({tq} LIKE ? OR {tq} LIKE ?)"
+                params.append(f"%{v}%")
+                return f"{tq} LIKE ?"
+            if op == "ncontains":
+                if f == "标签":
+                    esc = v.encode("unicode_escape").decode("ascii")
+                    params += [f"%{v}%", f"%{esc}%"]
+                    return f"(({tq} NOT LIKE ? AND {tq} NOT LIKE ?) OR {qf} IS NULL)"
+                params.append(f"%{v}%")
+                return f"({tq} NOT LIKE ? OR {qf} IS NULL)"
+            pattern = v + "%" if op == "begin" else "%" + v
+            params.append(pattern)
+            return f"{tq} LIKE ?"
+
+        # 比较 / 区间
+        if op in self._OP_SYMBOL:
+            sym = self._OP_SYMBOL[op]
+            v = cond.get("value")
+            if v is None or str(v) == "":
+                return None
+            if dtype == "num":
+                params.append(v)
+                return f"CAST({qf} AS NUMERIC) {sym} ?"
+            params.append(str(v))
+            return f"{tq} {sym} ?"
+        if op == "between":
+            v1 = cond.get("value")
+            v2 = cond.get("value2")
+            has1 = v1 is not None and str(v1) != ""
+            has2 = v2 is not None and str(v2) != ""
+            if not has1 and not has2:
+                return None
+            if dtype == "num":
+                expr = f"CAST({qf} AS NUMERIC)"
+            else:
+                expr = tq
+            if not has2:
+                params.append(v1)
+                return f"{expr} >= ?"
+            if not has1:
+                params.append(v2)
+                return f"{expr} <= ?"
+            params += [v1, v2]
+            return f"({expr} >= ? AND {expr} <= ?)"
+
+        return None
+
+    def _parse_filters(self, filters: Optional[str]) -> tuple:
+        """filters JSON → (mode, conds)；兼容 v1 数组格式。"""
+        if not filters:
+            return "and", []
+        try:
+            parsed = json.loads(filters)
+        except (json.JSONDecodeError, TypeError):
+            return "and", []
+        if isinstance(parsed, dict):
+            mode = str(parsed.get("mode", "and")).lower()
+            if mode not in ("and", "or"):
+                mode = "and"
+            conds = parsed.get("conds", []) or []
+            return mode, [c for c in conds if isinstance(c, dict)]
+        if isinstance(parsed, list):
+            conds = [
+                {"field": c.get("field"), "op": "in", "value": c.get("values", [])}
+                for c in parsed if isinstance(c, dict) and c.get("field")
+            ]
+            return "and", conds
+        return "and", []
+
+    def _conds_where(self, conds: list, cols: list, params: list,
+                     mode: str = "and", exclude_field: Optional[str] = None) -> str:
+        """条件列表 → WHERE 片段（不含 WHERE 关键字）；exclude_field 用于计数时排除本字段条件。"""
+        sqls = []
+        for cond in conds or []:
+            if exclude_field is not None and str(cond.get("field", "")) == str(exclude_field):
+                continue
+            sql = self._build_one_cond(cond, cols, params)
+            if sql:
+                sqls.append(sql)
+        if not sqls:
+            return ""
+        joiner = " OR " if mode == "or" else " AND "
+        return "(" + joiner.join(sqls) + ")"
+
     def query_table(
         self,
         table: str,
@@ -1294,35 +1468,12 @@ class Database:
                     where_parts.append("(" + " OR ".join([f'CAST("{c}" AS TEXT) LIKE ?' for c in cols]) + ")")
                     params += [f"%{search}%"] * len(cols)
 
-            # filters: JSON 数组字符串，每项 {field, values: [...]}
-            # 同一字段多个值 = OR（IN），不同字段 = AND
+            # filters: v2 {"mode","conds"} 或 v1 数组（兼容），语义见 _build_one_cond 注释
             if filters:
-                try:
-                    filter_list = json.loads(filters)
-                except (json.JSONDecodeError, TypeError):
-                    filter_list = []
-                for cond in filter_list:
-                    if not isinstance(cond, dict):
-                        continue
-                    f = cond.get("field", "")
-                    values = cond.get("values", [])
-                    if f not in cols or not values:
-                        continue
-                    if f == "标签":
-                        # 标签存为 JSON 数组文本，中文原值和 Unicode 转义形式都匹配
-                        tag_parts = []
-                        for v in values:
-                            v_str = str(v)
-                            escaped = v_str.encode('unicode_escape').decode('ascii')
-                            tag_parts.append(f'CAST("{f}" AS TEXT) LIKE ?')
-                            params.append(f"%{v_str}%")
-                            tag_parts.append(f'CAST("{f}" AS TEXT) LIKE ?')
-                            params.append(f"%{escaped}%")
-                        where_parts.append("(" + " OR ".join(tag_parts) + ")")
-                    else:
-                        placeholders = ",".join(["?"] * len(values))
-                        where_parts.append(f'CAST("{f}" AS TEXT) IN ({placeholders})')
-                        params += [str(v) for v in values]
+                fmode, conds = self._parse_filters(filters)
+                cond_sql = self._conds_where(conds, cols, params, mode=fmode)
+                if cond_sql:
+                    where_parts.append(cond_sql)
             where = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
 
             # 构造 ORDER BY
@@ -1390,6 +1541,65 @@ class Database:
 
         self._distinct_cache[cache_key] = (now + self.DISTINCT_CACHE_TTL, result)
         return result
+
+    def get_value_counts(self, table: str, field: str, filters: Optional[str] = None) -> dict:
+        """筛选菜单选项计数：每个去重值在"其他筛选条件下"的命中条数。
+
+        - filters 传入当前全部条件，本字段自身的条件会被排除（金山多维表口径：
+          逐层收窄时，其他维度的计数随之变化）。
+        - 标签字段按拆开后的 JSON 数组逐项计数。
+        - 表在数千行量级，现算即可，不做缓存。
+        返回 {values: [{value, count}], total: 有值记录总数}
+        """
+        with self._connect() as conn:
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            if field not in cols:
+                return {"values": [], "total": 0}
+            params: list[Any] = []
+            fmode, conds = self._parse_filters(filters)
+            cond_sql = self._conds_where(conds, cols, params, mode=fmode, exclude_field=field)
+            qf = f'"{field}"'
+
+            if field == "标签":
+                where = f" WHERE {cond_sql}" if cond_sql else ""
+                rows = conn.execute(f"SELECT {qf} FROM {table}{where}", params).fetchall()
+                counts: dict = {}
+                total = 0
+                for row in rows:
+                    v = row[0]
+                    if not v:
+                        continue
+                    if isinstance(v, str):
+                        try:
+                            parsed = json.loads(v)
+                            if isinstance(parsed, list):
+                                v = parsed
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    items = v if isinstance(v, list) else [v]
+                    hit = False
+                    for item in items:
+                        if not item:
+                            continue
+                        k = str(item)
+                        counts[k] = counts.get(k, 0) + 1
+                        hit = True
+                    if hit:
+                        total += 1
+                ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+                return {"values": [{"value": k, "count": c} for k, c in ordered], "total": total}
+
+            base = f" WHERE {cond_sql}" if cond_sql else " WHERE 1=1"
+            base += f" AND {qf} IS NOT NULL AND CAST({qf} AS TEXT) != ''"
+            rows = conn.execute(
+                f"SELECT CAST({qf} AS TEXT) AS v, COUNT(*) AS c "
+                f"FROM {table}{base} GROUP BY v ORDER BY c DESC, v ASC",
+                params,
+            ).fetchall()
+            return {
+                "values": [{"value": r[0], "count": r[1]} for r in rows],
+                "total": sum(r[1] for r in rows),
+            }
 
     def update_record_field(self, table: str, record_id: str, field: str, value: Any) -> bool:
         """通用单字段更新（用于启用/禁用开关）。

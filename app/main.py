@@ -2081,6 +2081,15 @@ async def api_database_distinct_values(table_name: str, field_name: str):
     return {"values": values}
 
 
+@app.get("/api/database/table/{table_name}/value-counts/{field_name}")
+async def api_database_value_counts(table_name: str, field_name: str, filters: str = ""):
+    """筛选选项计数：每个值在"其他筛选条件下"的命中条数（金山多维表口径）"""
+    db = get_database()
+    if table_name not in db.VALID_TABLES:
+        return JSONResponse({"success": False, "message": "无效的表名"}, status_code=400)
+    return db.get_value_counts(table_name, field_name, filters=filters or None)
+
+
 @app.get("/api/database/table/{table_name}/schema")
 async def api_database_table_schema(table_name: str):
     """获取表结构（字段列表）"""
