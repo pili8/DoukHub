@@ -8,7 +8,8 @@ from tests.test_api import app_env
 
 def test_base_loads_canonical_stylesheet_and_local_lucide():
     source = Path("app/templates/base.html").read_text(encoding="utf-8")
-    assert 'href="/static/css/style.css?v=5"' in source
+    # 版本号随样式改动递增，契约只锁定"本地样式 + 数字缓存戳"的形式
+    assert re.search(r'href="/static/css/style\.css\?v=\d+"', source)
     assert "theme-material.css" not in source
     assert 'src="/static/js/lucide.min.js"' in source
     assert "https://unpkg.com/lucide" not in source
@@ -41,11 +42,13 @@ def test_doukhub_design_tokens_are_defined():
 
 def test_all_template_custom_property_references_are_defined():
     css = Path("app/static/css/style.css").read_text(encoding="utf-8")
-    defined_tokens = set(re.findall(r"(?m)^\s*(--[\w-]+)\s*:", css))
+    # 定义可在任意位置（含选择器同行 / 页内 <style>），不只限行首
+    defined_tokens = set(re.findall(r"(--[\w-]+)\s*:", css))
     referenced_tokens = set()
 
     for template in Path("app/templates").rglob("*.html"):
         source = template.read_text(encoding="utf-8")
+        defined_tokens.update(re.findall(r"(--[\w-]+)\s*:", source))
         referenced_tokens.update(re.findall(r"var\(\s*(--[\w-]+)", source))
 
     assert referenced_tokens
@@ -256,9 +259,9 @@ def test_global_shell_uses_lucide_icons(app_env):
 
 def test_spa_router_refreshes_lucide_icons():
     source = Path("app/templates/base.html").read_text(encoding="utf-8")
-    assert "function refreshIcons()" in source
+    assert "function refreshIcons(" in source
     load_page_body = source.split("async function loadPage", 1)[1].split("\n        }", 1)[0]
-    refresh_call = "if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();"
+    refresh_call = "window._doukhubRefreshIcons("
     assert refresh_call in load_page_body
     assert "DOMContentLoaded" not in load_page_body
     assert load_page_body.index("await rebindScripts(ps);") < load_page_body.index(refresh_call)
@@ -291,8 +294,8 @@ def test_shell_css_sizes_lucide_svg_icons():
         ".nav-group .nav-submenu a svg[data-lucide]": "16px",
         ".dh-modal-header h3 svg[data-lucide]": "18px",
         ".dh-modal-close svg[data-lucide]": "16px",
-        "#mode-toggle svg[data-lucide]": "16px",
-        "#task-badge svg[data-lucide]": "16px",
+        # mode-toggle / task-badge 图标统一由 footer-btn 规则约束（选择器已合并）
+        ".footer-btn svg[data-lucide]": "16px",
     }
     for selector, size in expected_sizes.items():
         assert f"width: {size};" in rules[selector]
@@ -304,7 +307,7 @@ def test_core_page_lucide_runtime_svgs_have_explicit_sizes():
     rules = _style_rules(css)
     expected_sizes = {
         ".btn svg[data-lucide]": "14px",
-        ".card h3 svg[data-lucide]": "17px",
+        ".card h3 svg[data-lucide]": "26px",
         ".workflow-title svg[data-lucide]": "17px",
         ".empty-state svg[data-lucide]": "36px",
         ".workflow-notice svg[data-lucide]": "17px",
@@ -400,7 +403,7 @@ def test_collection_console_uses_page_head_and_lucide(app_env):
     response = client.get("/collect")
     assert response.status_code == 200
     assert 'class="page-head"' in response.text
-    assert "日常增量采集" in response.text
+    assert "增量采集" in response.text
     assert "data-lucide=" in response.text
     assert 'class="ph ph-' not in response.text
 
@@ -409,18 +412,18 @@ def test_collection_page_preserves_workflow_contracts(app_env):
     client, *_ = app_env
     response = client.get("/collect")
     detail_response = client.get("/collect/detail")
+    # v2.2.5 采集控制台重构后的结构契约
     for element_id in (
-        "collection-preview-status",
         "collection-status",
         "preview-total",
-        "batch-progress-bar",
-        "batch-detail-actions",
+        "run-progress-bar",
+        "batch-detail-modal",
     ):
         assert f'id="{element_id}"' in response.text
-    assert "previewCollectionScope" in response.text
-    assert "selectBatchDetail" in response.text
+    assert "workflow-panel" in response.text
+    assert "renderBatchDetailBody" in response.text
 
-    assert 'id="detail-submit"' in detail_response.text
+    assert 'id="single-work-list"' in detail_response.text
     assert "invalidateResolvedSingleWorks" in detail_response.text
 
 
@@ -451,7 +454,7 @@ def test_settings_page_preserves_system_controls_and_api_calls(app_env):
 def test_theme_material_is_no_longer_the_canonical_asset(app_env):
     client, *_ = app_env
     response = client.get("/collect")
-    assert 'href="/static/css/style.css?v=5"' in response.text
+    assert re.search(r'href="/static/css/style\.css\?v=\d+"', response.text)
     assert "theme-material.css" not in response.text
     assert "workflow-panel" in response.text
 

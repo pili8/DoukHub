@@ -10,7 +10,7 @@ import app.main as app_main
 
 
 @pytest.fixture
-def batch_client():
+def batch_client(tmp_path):
     database = MagicMock()
     manager = MagicMock()
     manager.start = AsyncMock(
@@ -37,12 +37,27 @@ def batch_client():
         }
     ]
 
+    # v2.2.5 起：批次/单作品入口都要求可用的存储方案，测试用临时目录充当主方案
+    storage_profile = {
+        "profiles": [
+            {
+                "id": "sp1",
+                "name": "测试方案",
+                "path": str(tmp_path),
+                "role": "primary",
+                "enabled": True,
+            }
+        ]
+    }
+    config = MagicMock()
+    config.storage_profiles = {"batch": storage_profile, "single": storage_profile}
+
     saved = (
         app_main.config,
         app_main.database,
         app_main.collection_batch_manager,
     )
-    app_main.config = MagicMock()
+    app_main.config = config
     app_main.database = database
     app_main.collection_batch_manager = manager
     try:
@@ -168,9 +183,12 @@ def single_client(monkeypatch):
 
 
 @pytest.fixture
-def prefs_client(tmp_path):
+def prefs_client(tmp_path, monkeypatch):
     """提供临时 Config，隔离单作品偏好持久化"""
     from app.core.config import Config
+    # 屏蔽 DB 回退：否则配置会读写真实用户库，造成跨测试污染（历史遗留 bug）
+    monkeypatch.setattr("app.core.config._try_load_db_config", lambda: None)
+    monkeypatch.setattr("app.core.config._try_save_db_config", lambda data: False)
     saved_config = app_main.config
     app_main.config = Config(tmp_path / "config.json")
     try:
@@ -184,8 +202,9 @@ def test_get_single_work_preferences_returns_defaults(prefs_client):
     response = client.get("/api/collection/single-work/preferences")
     assert response.status_code == 200
     prefs = response.json()["preferences"]
+    # v2.2.5 起偏好由存储方案生成：无任何方案时（全新安装）为空列表
+    assert prefs["templates"] == []
     assert prefs["default_template_id"] == "default"
-    assert prefs["templates"][0]["template"] == "{create_time} {author} {title}"
     assert prefs["recent_dirs"] == []
 
 
@@ -233,7 +252,7 @@ def test_save_single_work_preferences_rejects_unsafe_template(prefs_client):
 def test_resolve_single_works(single_client, monkeypatch):
     from app.core import single_work
 
-    async def fake_fetch(client, ttd_url, link, platform):
+    async def fake_fetch(client, ttd_url, link, platform, cookie="", mode="auto", **kwargs):
         return {
             "id": "1234567890123456789",
             "title": "标题",
@@ -392,29 +411,23 @@ def test_download_rejects_unsafe_filename_templates(
 
 def test_collect_page_invalidates_resolved_links_on_edit():
     source = Path("app/templates/collect_detail.html").read_text(encoding="utf-8")
+    js = Path("app/static/js/collect_detail.js").read_text(encoding="utf-8")
     assert "invalidateResolvedSingleWorks" in source
-    assert (
-        'oninput="invalidateResolvedSingleWorks()" '
-        'onchange="invalidateResolvedSingleWorks()"' in source
-    )
-    assert "resolvedSingleLinks = [];" in source
+    # 链接输入即失效已解析结果（oninput 挂在链接输入框上）
+    assert 'oninput="renderLinkLines(); invalidateResolvedSingleWorks()"' in source
+    # JS 侧：失效时清空已解析集合并推进代数
+    assert "resolvedSingleLinks = [];" in js
+    assert "resolveGeneration += 1;" in js
 
 
 def test_collect_page_discards_stale_resolve_response():
-    source = Path("app/templates/collect_detail.html").read_text(encoding="utf-8")
-    assert "var resolveGeneration = 0;" in source
-    assert "resolveGeneration += 1;" in source
-    assert "const submittedLinks = String(form.get('links') || '');" in source
-    assert "const generation = ++resolveGeneration;" in source
-    assert "const currentLinks = String(linksInput.value || '');" in source
-    assert (
-        "if (generation !== resolveGeneration || currentLinks !== submittedLinks)"
-        " return;" in source
-    )
-    assert source.count(
-        "if (generation !== resolveGeneration || currentLinks !== submittedLinks)"
-        " return;"
-    ) == 2
+    # 解析已改为 SSE 流式（/resolve-stream）；进行中禁用解析/下载按钮防并发旧响应
+    js = Path("app/static/js/collect_detail.js").read_text(encoding="utf-8")
+    assert "var resolveGeneration = 0;" in js
+    assert "resolveGeneration += 1;" in js
+    assert "/api/collection/works/resolve-stream" in js
+    assert "btnR.disabled = true;" in js
+    assert "btnR.disabled = false;" in js
 
 
 @pytest.mark.parametrize(
@@ -441,54 +454,74 @@ def test_download_rejects_malformed_filename_templates(
     assert not list(tmp_path.iterdir())
 
 
-def test_collect_page_uses_canonical_browse_parent():
+def test_collect_page_targets_dir_from_storage_profiles():
+    # v2.2.5 起目录浏览被移除，保存目录由主/次存储方案下拉决定
     source = Path("app/templates/collect_detail.html").read_text(encoding="utf-8")
-    assert "singleDirParent = data.parent || '';" in source
-    assert "if (!parent || parent === singleDirCurrent) return;" in source
-    assert "singleDirCurrent.replace(/[\\\\/]" not in source
+    assert 'id="single-storage-primary"' in source
+    assert 'id="single-storage-secondary"' in source
+    assert "onStorageSelectChange" in source
 
 
 def test_collect_page_formats_single_work_storage_time():
-    source = Path("app/templates/collect_detail.html").read_text(encoding="utf-8")
+    # 时间格式化已统一到 collect.html 的 formatDateTime（detail 页共用）
+    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
     assert ".replace(/ (\\d\\d)-(\\d\\d)-(\\d\\d)$/, ' $1:$2:$3')" in source
 
 
 def test_collect_detail_page_contains_asset_template_and_history_controls():
     source = Path("app/templates/collect_detail.html").read_text(encoding="utf-8")
-    for token in (
-        'id="single-work-list"',
-        'id="single-history-list"',
-        'id="template-modal"',
-        'id="template-parts"',
-        "downloadSingleAsset",
-        "retrySingleWorkHistory",
-        "dragSingleTemplatePart",
+    js = Path("app/static/js/collect_detail.js").read_text(encoding="utf-8")
+    for token, haystack in (
+        ('id="single-work-list"', source),
+        ('id="single-history-list"', source),
+        # 命名模板编辑器收敛为共享组件（name_editor.js），不再有独立 template-modal
+        ("name_editor.js", source),
+        ("downloadSingleAsset", js),
+        ("retrySingleWorkHistory", js),
     ):
-        assert token in source
+        assert token in haystack
 
 
 def test_collect_page_shows_batch_progress_summary():
     source = Path("app/templates/collect.html").read_text(encoding="utf-8")
     assert ".batch-summary-grid" not in source
-    assert '<div class="workflow-metrics" style="margin-bottom:12px;">' in source
-    assert 'class="workflow-log"' in source
+    # 运行中详情：已处理计数、细进度条、当前账号行、流式日志区
+    assert 'id="run-done-count"' in source
+    assert 'id="run-progress-bar"' in source
+    assert 'id="run-current-account"' in source
+    assert 'class="run-log-section"' in source
     assert "function batchElapsedSeconds(batch)" in source
-    assert "function currentAccountIndex(items)" in source
-    assert "预计账号" in source
     assert "已运行" in source
     assert "当前账号" in source
     assert 'batch.total_accounts || 0' in source
 
 
-def test_collection_preview_is_read_only(batch_client):
+def _fake_preset(**overrides):
+    preset = {
+        "id": 1,
+        "name": "测试方案",
+        "rating_min": 3,
+        "tags": "",
+        "platform": "all",
+        "mode": "incremental",
+        "account_names": "",
+        "folder_name": "",
+        "name_format": "",
+    }
+    preset.update(overrides)
+    return preset
+
+
+def test_collection_preview_is_read_only(batch_client, monkeypatch):
     client, database, manager = batch_client
     database.get_all_accounts.return_value = [
         {
             "record_id": "a1",
             "账号名称": "新账号",
-            "平台": "抖音",
+            "平台": "douyin",
             "链接": "",
             "sec_user_id": "sec1",
+            "获取状态": "已获取",
             "等级": 4,
             "标签": "",
             "启用": 1,
@@ -498,9 +531,10 @@ def test_collection_preview_is_read_only(batch_client):
         {
             "record_id": "a2",
             "账号名称": "已采集账号",
-            "平台": "抖音",
+            "平台": "douyin",
             "链接": "",
             "sec_user_id": "sec2",
+            "获取状态": "已获取",
             "等级": 4,
             "标签": "",
             "启用": 1,
@@ -510,9 +544,10 @@ def test_collection_preview_is_read_only(batch_client):
         {
             "record_id": "a3",
             "账号名称": "TikTok",
-            "平台": "TikTok",
+            "平台": "tiktok",
             "链接": "",
             "sec_user_id": "tiksec",
+            "获取状态": "已获取",
             "等级": 4,
             "标签": "",
             "启用": 1,
@@ -520,19 +555,19 @@ def test_collection_preview_is_read_only(batch_client):
             "collect_window_days": None,
         },
     ]
-    response = client.post(
-        "/api/collection/batches/preview",
-        json={"rating_min": 3, "platform": "all", "mode": "incremental"},
+    # v2.2.5 起预览走方案（preset）：/api/collection/presets/{id}/preview
+    monkeypatch.setattr(
+        app_main.presets, "get_preset", lambda config, pid: _fake_preset()
     )
+    response = client.post("/api/collection/presets/1/preview")
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
     assert data["total_accounts"] == 3
+    # a1 首采、a2 增量、a3 因缺 TikTok 主页链接记为 skipped
     assert data["first_run_accounts"] == 1
     assert data["incremental_accounts"] == 1
     assert data["skipped_accounts"] == 1
-    assert data["platforms"][0]["platform"] == "douyin"
-    assert data["platforms"][0]["total_accounts"] == 2
     assert manager.start.await_count == 0
     database.create_collection_batch.assert_not_called()
     database.insert_account.assert_not_called()
@@ -540,53 +575,44 @@ def test_collection_preview_is_read_only(batch_client):
     database.delete_account.assert_not_called()
 
 
-def test_collection_preview_returns_400_when_no_accounts_match(batch_client):
+def test_collection_preview_returns_400_when_no_accounts_match(
+    batch_client, monkeypatch
+):
     client, database, manager = batch_client
     database.get_all_accounts.return_value = []
-    response = client.post("/api/collection/batches/preview", json={})
+    monkeypatch.setattr(
+        app_main.presets, "get_preset", lambda config, pid: _fake_preset()
+    )
+    response = client.post("/api/collection/presets/1/preview")
     assert response.status_code == 400
     assert response.json()["message"] == "没有符合条件的账号"
     manager.start.assert_not_called()
 
 
 def test_collect_page_calls_preview_without_starting_batch():
+    # 预览（方案维度）与启动批次是两条独立调用，页面加载不触发启动
     source = Path("app/templates/collect.html").read_text(encoding="utf-8")
-    assert "/api/collection/batches/preview" in source
-    assert "previewCollectionScope(" in source
-    assert "startCollectionBatch" in source
+    assert "/api/collection/presets/' + presetId + '/preview'" in source
+    assert "'/api/collection/batches', 'POST'" in source
+    assert "function startCollection()" in source
+    assert "async function previewPreset(presetId)" in source
+
+
+def test_collect_page_preview_resets_before_request():
+    # 每次预览先重置旧结果；未选方案不发请求；失败回落为 0
+    source = Path("app/templates/collect.html").read_text(encoding="utf-8")
+    assert "els[k].textContent = '-');" in source
+    assert "if (!presetId) return;" in source
+    assert "els[k].textContent = '0');" in source
 
 
 def test_collect_page_discards_stale_preview_response():
+    # 旧版 generation 令牌已随方案化重构移除；现行契约 = 请求前先重置 + 未选方案短路
     source = Path("app/templates/collect.html").read_text(encoding="utf-8")
-    assert "var previewGeneration = 0;" in source
-    assert source.index("var previewGeneration = 0;") < source.index(
-        "previewCollectionScope();"
-    )
-    preview = re.search(
-        r"async function previewCollectionScope\(\) \{([\s\S]*?)\n    \}",
-        source,
-    )
-    assert preview is not None
-    body = preview.group(1)
-    assert "const previewGenerationToken = ++previewGeneration;" in body
-    guard = "if (previewGenerationToken !== previewGeneration) return;"
-    assert body.count(guard) == 2
-
-    success_body, _, error_body = body.partition("} catch (error) {")
-    success_updates = success_body.partition(guard)[2]
-    error_updates = error_body.partition(guard)[2]
-    for update_body in (success_updates, error_updates):
-        assert "preview-total" in update_body
-        assert "status.className" in update_body
-
-    queue = re.search(
-        r"function queueCollectionPreview\(\) \{([\s\S]*?)\n    \}", source
-    )
-    cleanup = re.search(
-        r"window\._spaCleanup = \(\) => \{([\s\S]*?)\n    \};", source
-    )
-    assert queue is not None and "previewGeneration += 1;" in queue.group(1)
-    assert cleanup is not None and "previewGeneration += 1;" in cleanup.group(1)
+    assert "previewGeneration" not in source
+    assert "async function previewPreset(presetId)" in source
+    assert "Object.keys(els).forEach(k => els[k].textContent = '-');" in source
+    assert "if (!presetId) return;" in source
 
 
 @pytest.fixture

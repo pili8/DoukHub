@@ -304,8 +304,27 @@ class SyncOverviewFakeDatabase:
     def get_enabled_cookies(self):
         return [{"Cookie": "ok"}]
 
+    def get_all_cookies(self):
+        return [{"启用": 1}]
+
     def get_sync_history(self, task_type, limit=20):
         return self.histories.get(task_type, [])
+
+    def get_account_collection_stats(self):
+        # v2.2.5 起健康度读批次明细聚合；fake 无明细 → 全部按未采集处理
+        return [
+            {
+                "sec_user_id": acc.get("sec_user_id") or "",
+                "account_name": acc.get("账号名称") or "",
+                "success": 0,
+                "failed": 0,
+                "skipped": 0,
+                "last_finished_at": "",
+                "last_status": "",
+                "last_message": "",
+            }
+            for acc in self.accounts
+        ]
 
 
 @pytest.mark.parametrize(
@@ -325,20 +344,20 @@ class SyncOverviewFakeDatabase:
         (
             [{"share_code": "a", "sec_user_id": "", "解析状态": "待解析"}],
             [],
-            ['id="sync-all-btn"', "继续处理", "待解析 1 条"],
+            ['id="sync-all-btn"', "继续第 2-3 步", "待解析 1 条"],
             ["去导入分享表"],
         ),
         (
             [{"share_code": "a", "sec_user_id": "sec_new", "解析状态": "已生成"}],
             [],
-            ['id="sync-all-btn"', "生成待处理账号", "待生成 1 条"],
+            ['id="sync-all-btn"', "执行第 2-3 步", "待生成 1 条"],
             ["去导入分享表"],
         ),
         (
             [{"share_code": "a", "sec_user_id": "sec_old", "解析状态": "已生成"}],
             [{"sec_user_id": "sec_old", "获取状态": "已获取"}],
             ["暂无可处理数据", 'id="sync-all-btn"', "disabled"],
-            ["去导入分享表", ">继续处理</button>"],
+            ["去导入分享表", 'data-idle-text="继续第 2-3 步"', 'data-idle-text="执行第 2-3 步"'],
         ),
     ],
 )
@@ -362,7 +381,7 @@ def test_sync_overview_recommends_next_action_from_local_data(
 
     assert response.status_code == 200
     assert "账号状态" in response.text
-    assert "处理本地已导入的分享表数据" in response.text
+    assert "这里只执行第 2-3 步" in response.text
     assert "最近导入" in response.text
     assert "最近处理结果" in response.text
     for text in contains:
@@ -377,7 +396,7 @@ def test_collect_navigation_uses_grouped_submenu(app_env):
     source = Path("app/templates/base.html").read_text(encoding="utf-8")
 
     assert '<a href="/collect/overview" title="采集" class="nav-group-toggle"' in response.text
-    assert 'href="/collect" title="日常增量采集"' in response.text
+    assert 'href="/collect" title="增量采集"' in response.text
     assert 'href="/collect/detail" title="单作品采集"' in response.text
     assert "querySelectorAll('.nav-group').forEach" in source
     assert "groups[0]" not in source
@@ -416,17 +435,15 @@ def test_collect_pages_are_separated_by_route(app_env):
     detail_page = client.get("/collect/detail")
 
     assert account_page.status_code == 200
-    assert "日常增量采集" in account_page.text
-    assert 'id="account-form"' in account_page.text
-    assert 'id="detail-form"' not in account_page.text
-    assert 'id="collection-tabs"' not in account_page.text
+    assert "增量采集" in account_page.text
+    # 增量页以方案下拉 + 开始采集为核心，不包含单作品链接输入
+    assert 'id="preset-select"' in account_page.text
+    assert 'id="links-input"' not in account_page.text
 
     assert detail_page.status_code == 200
     assert "单作品采集" in detail_page.text
-    assert 'id="detail-form"' in detail_page.text
-    assert 'id="account-form"' not in detail_page.text
-    assert 'id="collection-tabs"' not in detail_page.text
-    assert "命名模板" in detail_page.text
+    assert 'id="links-input"' in detail_page.text
+    assert 'id="preset-select"' not in detail_page.text
     assert "下载历史" in detail_page.text
 
 
@@ -535,10 +552,10 @@ def test_collect_page_is_daily_incremental_console(app_env):
     client, *_ = app_env
     response = client.get("/collect")
     assert response.status_code == 200
-    assert "日常增量采集" in response.text
+    assert "增量采集" in response.text
     assert "workflow-panel" in response.text
-    assert 'id="detail-form"' not in response.text
-    assert "开始日常增量采集" in response.text
+    assert 'id="links-input"' not in response.text
+    assert "开始采集" in response.text
     assert 'id="collection-last-run"' in response.text
     assert 'id="collection-last-success"' in response.text
 
@@ -547,9 +564,9 @@ def test_collect_page_contains_preview_metrics(app_env):
     client, *_ = app_env
     response = client.get("/collect")
     assert 'id="preview-total"' in response.text
-    assert 'id="preview-first-run"' in response.text
-    assert 'id="preview-incremental"' in response.text
-    assert 'id="preview-skipped"' in response.text
+    assert 'id="preview-first"' in response.text
+    assert 'id="preview-incr"' in response.text
+    assert 'id="preview-skip"' in response.text
 
 
 def test_all_workflow_pages_use_shared_status_component(app_env):
@@ -574,23 +591,25 @@ def test_collection_batch_panel_renders_live_progress_and_actions(app_env):
     response = client.get("/collect")
     source = Path("app/templates/collect.html").read_text(encoding="utf-8")
 
-    assert "function batchProgressPercent(items)" in source
-    assert 'id="batch-progress-bar"' in source
-    assert 'id="batch-progress-text"' in source
-    assert "function renderBatchDetailActions(batch)" in source
-    assert "renderBatchDetailActions(batch)" in source
-    assert "cancelCollectionBatch('${batch.id}')" in source
-    assert "retryCollectionBatch('${batch.id}')" in source
-    assert "['pending', 'running', 'cancelling'].includes(batch.status)" in source
-    assert "const automaticBatch = selectBatchDetail(data.batches || [])" in source
-    assert "showBatchDetail(automaticBatch.id, true)" in source
-    assert "batch-detail-actions" in response.text
+    # 运行中面板：细进度条 + 已处理计数 + 当前账号行
+    assert 'id="run-progress-bar"' in source
+    assert 'id="run-done-count"' in source
+    assert 'id="run-current-account"' in source
+    # 活动批次自动选中（含暂停态），仅有一个选择函数
+    assert "function selectActiveBatch(batches)" in source
+    assert "['pending', 'running', 'paused', 'cancelling'].includes(batch.status)" in source
+    assert "var active = selectActiveBatch(allBatches);" in source
+    # 批次操作：取消 / 重试（生成重试批次）
+    assert "function cancelBatch(batchId)" in source
+    assert "onclick=\"cancelBatch(" in source
+    assert "onclick=\"retryBatch(" in source
+    assert "batch-detail-modal" in response.text
 
 
 def test_collection_detail_selection_executes_without_active_batch():
     source = Path("app/templates/collect.html").read_text(encoding="utf-8")
     match = re.search(
-        r"function selectBatchDetail\(batches\) \{.*?\n    \}",
+        r"function selectActiveBatch\(batches\) \{.*?\n\}",
         source,
         re.DOTALL,
     )
@@ -605,7 +624,9 @@ def test_collection_detail_selection_executes_without_active_batch():
     ]
     script = (
         f"{match.group(0)}; "
-        f"console.log(JSON.stringify({cases}.map(selectBatchDetail)))"
+        "console.log(JSON.stringify("
+        f"{cases}.map(b => selectActiveBatch(b) || null)"
+        "))"
     )
     result = subprocess.run(
         ["node", "-e", script],
@@ -613,9 +634,10 @@ def test_collection_detail_selection_executes_without_active_batch():
         capture_output=True,
         text=True,
     )
+    # 现行语义：只选中活动批次（pending/running/paused/cancelling），无活动返回 None
     assert json.loads(result.stdout) == [
         None,
-        {"id": "latest", "status": "completed"},
+        None,
         {"id": "active", "status": "running"},
     ]
 
@@ -625,17 +647,21 @@ def test_collection_preview_cannot_overwrite_batch_status(app_env):
     response = client.get("/collect")
     source = Path("app/templates/collect.html").read_text(encoding="utf-8")
 
-    preview_body = source.split("async function previewCollectionScope()", 1)[1]
-    preview_body = preview_body.split("function queueCollectionPreview()", 1)[0]
+    # 方案预览函数体（previewPreset → 开始采集注释为止）
+    preview_body = source.split("async function previewPreset(presetId)", 1)[1]
+    preview_body = preview_body.split("// ===== 开始采集 =====", 1)[0]
+    # 批次状态函数体（updateCollectionStatus → refreshCollectionBatches 为止）
     batch_body = source.split("function updateCollectionStatus(batches)", 1)[1]
     batch_body = batch_body.split("async function refreshCollectionBatches()", 1)[0]
 
     assert 'id="collection-status"' in response.text
-    assert 'id="collection-preview-status"' in response.text
-    assert "collection-preview-status" in preview_body
-    assert "collection-status" not in preview_body
+    # 批次状态只归 updateCollectionStatus 管
     assert "collection-status" in batch_body
-    assert "collection-preview-status" not in batch_body
+    assert "collection-status" not in preview_body
+    # 预览只写四个 preview-* 指标，不碰批次状态
+    assert "preview-total" in preview_body
+    assert "preview-skip" in preview_body
+    assert "preview-total" not in batch_body
 
 
 def test_cancelled_workflow_status_uses_warning_style():
