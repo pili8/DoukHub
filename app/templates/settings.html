@@ -235,10 +235,10 @@
   --bay-text-2: var(--dh-text-secondary, #5C564E);
   --bay-dim: var(--dh-text-muted, #A39E96);
   --bay-accent: var(--dh-accent, #0061A4);
-  --bay-amber: #D97706;
-  --bay-green: #16A34A;
-  --bay-red: #DC2626;
-  --bay-violet: #A855F7;
+  --bay-amber: var(--dh-warning, #D97706);
+  --bay-green: var(--dh-success, #16A34A);
+  --bay-red: var(--dh-danger, #DC2626);
+  --bay-violet: var(--dh-purple, #A855F7);
   --bay-chip-bg: rgba(31,27,23,.05);
   --bay-hover-bg: rgba(31,27,23,.07);
   --bay-edit-bg: transparent;
@@ -250,11 +250,7 @@
   position: relative;
 }
 [data-theme="dark"] #storage-bay {
-  --bay-bg: #211C17; --bay-panel: #2A241D; --bay-slot: #211C17;
-  --bay-line: rgba(237,233,227,.12); --bay-line-strong: rgba(237,233,227,.26);
-  --bay-text: #EDE9E3; --bay-text-2: #B9B2A7; --bay-dim: #857F75;
-  --bay-accent: #6FB3E8; --bay-amber: #E8A33D; --bay-green: #57C97E;
-  --bay-red: #EF6E6E; --bay-violet: #B49BF5;
+  --bay-line: color-mix(in srgb, var(--dh-border) 40%, transparent); --bay-line-strong: var(--dh-border-strong);
   --bay-chip-bg: rgba(255,255,255,.05);
   --bay-hover-bg: rgba(255,255,255,.05);
   --bay-edit-bg: transparent;
@@ -345,12 +341,12 @@
 .s-badge { display:inline-flex; align-items:center; gap:5px; flex-shrink:0; padding:1.5px 8px 1.5px 7px; border-radius:999px; font-size:10.5px; font-weight:600; letter-spacing:.01em; white-space:nowrap; border:none; }
 .s-badge::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; flex-shrink:0; }
 .s-badge.lead { background:var(--dh-accent-soft, rgba(0,97,164,.1)); color:var(--accent); }
-.s-badge.warn { background:rgba(217,119,6,.1); color:#D97706; }
-.s-badge.ok { background:rgba(22,163,74,.1); color:#16A34A; }
-.s-badge.fail { background:rgba(220,38,38,.1); color:#DC2626; }
+.s-badge.warn { background:var(--dh-warning-soft, rgba(217,119,6,.1)); color:var(--dh-warning, #D97706); }
+.s-badge.ok { background:var(--dh-success-soft, rgba(22,163,74,.1)); color:var(--dh-success, #16A34A); }
+.s-badge.fail { background:var(--dh-danger-soft, rgba(220,38,38,.1)); color:var(--dh-danger, #DC2626); }
 .s-badge.none { background:var(--bg-muted); color:var(--text-muted); }
 .s-badge.none:empty { display:none; }
-.s-badge.draft { background:rgba(245,158,11,.08); color:#D97706; border:1px dashed rgba(217,119,6,.5); }
+.s-badge.draft { background:var(--dh-warning-soft, rgba(245,158,11,.08)); color:var(--dh-warning, #D97706); border:1px dashed color-mix(in srgb, var(--dh-warning, #D97706) 50%, transparent); }
 
 /* —— 工单内排版（沿用属性面板范式） —— */
 .sheet .sf-title { margin-top:8px; }
@@ -411,11 +407,11 @@
 .slot-icon-btn { width:28px; height:26px; border:1px solid transparent; background:none; border-radius:6px; color:var(--text-muted); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; transition:background .12s ease, color .12s ease; }
 .slot-icon-btn svg[data-lucide] { width:14px; height:14px; }
 .slot-icon-btn:hover:not(:disabled) { background:var(--bg-muted); color:var(--text-primary); }
-.slot-icon-btn.danger:hover:not(:disabled) { color:#DC2626; background:rgba(220,38,38,.08); }
+.slot-icon-btn.danger:hover:not(:disabled) { color:var(--dh-danger); background:var(--dh-danger-soft); }
 .slot-icon-btn:disabled { opacity:.35; cursor:default; }
-.btn.on { background:var(--accent); color:#fff; border-color:var(--accent); }
-.btn.danger { color:#dc2626; border-color:rgba(220,38,38,.35); }
-.btn.danger:hover { background:rgba(220,38,38,.08); }
+.btn.on { background:var(--accent); color:var(--text-on-accent, #fff); border-color:var(--accent); }
+.btn.danger { color:var(--dh-danger); border-color:color-mix(in srgb, var(--dh-danger) 35%, transparent); }
+.btn.danger:hover { background:var(--dh-danger-soft); }
 
 /* —— 添加方案 / 空仓位 —— */
 .rack-add-bar { margin-top:8px; }
