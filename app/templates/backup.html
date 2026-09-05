@@ -109,8 +109,11 @@
         const el = document.getElementById('backup-list');
         const backups = data.backups || [];
         if (backups.length === 0) {
-            el.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:24px;">
-                暂无备份。<button class="btn btn-primary btn-sm" style="margin-left:8px;" onclick="createBackup()">立即创建第一份备份</button>
+            el.innerHTML = `<div class="empty-state compact">
+                <i class="ph ph-archive"></i>
+                <div class="es-title">暂无备份</div>
+                <div class="es-desc">创建备份后可在数据库异常时一键恢复</div>
+                <div class="es-action"><button class="btn btn-primary btn-sm" onclick="createBackup()">立即创建第一份备份</button></div>
             </div>`;
             return;
         }

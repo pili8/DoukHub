@@ -104,9 +104,10 @@
                 <i data-lucide="list-checks"></i>
                 <span id="task-badge-count" class="footer-badge">0</span>
               </button>
-              <div id="global-collect-progress" style="display:none;position:fixed;left:68px;bottom:16px;z-index:9999;background:var(--dh-surface,#fff);border:1px solid var(--dh-border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--dh-text);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.15);" onclick="openTaskPanel()">
+              <div id="global-collect-progress" class="global-progress-chip" style="display:none;" onclick="openTaskPanel()">
+                <i class="ph ph-pulse"></i>
                 <span id="global-collect-label">采集 0%</span>
-                <div style="width:90px;height:4px;background:var(--bg-hover);border-radius:2px;margin-top:4px;overflow:hidden;"><div id="global-collect-bar" style="width:0%;height:100%;background:var(--accent);transition:width .5s;"></div></div>
+                <div class="gpc-bar"><div id="global-collect-bar"></div></div>
               </div>
             </div>
             <button id="sidebar-collapse-btn" class="sidebar-collapse-edge" onclick="toggleSidebar()" title="折叠侧边栏">
@@ -558,6 +559,27 @@
     @media (min-width: 769px) {
       body.sidebar-open .sidebar { position: sticky; top: 0; transform: none; }
     }
+
+    /* ===== 全局采集进度浮条：胶囊形 + 呼吸图标 + 细进度条，明暗自适应 ===== */
+    .global-progress-chip {
+        position: fixed; left: 68px; bottom: 16px; z-index: 9999;
+        display: none; align-items: center; gap: 8px;
+        background: var(--dh-surface, #fff);
+        border: 1px solid var(--dh-border);
+        border-radius: 9999px;
+        padding: 7px 14px 7px 11px;
+        font-size: 12px; font-weight: 600; color: var(--dh-text);
+        cursor: pointer;
+        box-shadow: 0 4px 16px rgba(31,27,23,.16), 0 1px 4px rgba(31,27,23,.08);
+        transition: box-shadow .15s, transform .15s;
+    }
+    .global-progress-chip:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(31,27,23,.22), 0 2px 6px rgba(31,27,23,.1); }
+    .global-progress-chip > i { font-size: 14px; color: var(--dh-accent); animation: gpc-pulse 1.6s ease-in-out infinite; }
+    .global-progress-chip.is-paused > i { color: var(--dh-warning); animation: none; }
+    .global-progress-chip.is-paused .gpc-bar > div { background: var(--dh-warning); }
+    @keyframes gpc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+    .global-progress-chip .gpc-bar { width: 90px; height: 4px; background: var(--dh-surface-muted, var(--bg-hover)); border-radius: 2px; overflow: hidden; }
+    .global-progress-chip .gpc-bar > div { width: 0%; height: 100%; background: var(--dh-accent); border-radius: 2px; transition: width .5s; }
     </style>
 
     <script>
@@ -928,6 +950,7 @@
             if (!batch) { widget.style.display = 'none'; return; }
             const done = batch.success + batch.failed + batch.skipped;
             const pct = batch.total > 0 ? Math.round(done / batch.total * 100) : 0;
+            widget.classList.toggle('is-paused', batch.status === 'paused');
             document.getElementById('global-collect-label').textContent = (batch.status === 'paused' ? '已暂停 ' : '采集 ') + pct + '%';
             document.getElementById('global-collect-bar').style.width = pct + '%';
             widget.style.display = 'block';
@@ -961,7 +984,7 @@
         function _taskCardHtml(t) {
             const done = t.success + t.failed + t.skipped;
             const pct = t.total > 0 ? Math.round(done / t.total * 100) : 0;
-            const statusColors = { pending: '#d97706', running: '#3b82f6', paused: '#f59e0b', cancelling: '#9ca3af', done: '#16a34a', failed: '#dc2626', cancelled: '#9ca3af' };
+            const statusColors = { pending: 'var(--dh-warning)', running: 'var(--dh-accent)', paused: 'var(--dh-warning)', cancelling: 'var(--dh-text-muted)', done: 'var(--dh-success)', failed: 'var(--dh-danger)', cancelled: 'var(--dh-text-muted)' };
             const statusColor = statusColors[t.status] || 'var(--text-muted)';
             const statusLabel = TASK_STATUS_LABEL[t.status] || t.status;
             const typeLabel = TASK_TYPE_LABEL[t.type] || t.type;
@@ -984,7 +1007,7 @@
                 '</div>' +
                 '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">总 ' + t.total + ' · 成功 ' + t.success + ' · 失败 ' + t.failed + (t.skipped ? ' · 跳过 ' + t.skipped : '') + '</div>' +
                 '<div style="height:4px;background:var(--bg-hover);border-radius:2px;overflow:hidden;margin-bottom:6px;"><div style="width:' + pct + '%;height:100%;background:var(--accent);transition:width .3s;"></div></div>' +
-                (logHtml ? '<div style="font-family:var(--font-mono);font-size:11px;line-height:1.5;max-height:80px;overflow-y:auto;background:#0f172a;color:#cbd5e1;padding:6px 8px;border-radius:var(--radius-xs);">' + logHtml + '</div>' : '') +
+                (logHtml ? '<div class="log-panel" style="max-height:80px;padding:6px 8px;font-size:11px;line-height:1.5;">' + logHtml + '</div>' : '') +
                 '</div>';
         }
         function renderActiveTasks(tasks) {
@@ -993,7 +1016,7 @@
             const active = tasks.filter(function (t) { return t.status === 'pending' || t.status === 'running' || t.status === 'cancelling'; });
             const html = active.length
                 ? active.map(_taskCardHtml).join('')
-                : '<div style="color:var(--text-muted);text-align:center;padding:24px;font-size:13px;">暂无进行中的任务</div>';
+                : '<div class="empty-state compact"><i class="ph ph-tray"></i><div class="es-title">暂无进行中的任务</div><div class="es-desc">采集任务开始后会在这里实时显示</div></div>';
             if (body.innerHTML !== html) body.innerHTML = html;
         }
         var _historyOffset = 0;
@@ -1008,7 +1031,7 @@
             if (reset) {
                 _historyOffset = 0;
                 _historyList = [];
-                body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:24px;font-size:13px;">加载中...</div>';
+                body.innerHTML = '<div class="empty-state compact"><i class="ph ph-spinner"></i><div class="es-title">加载中...</div></div>';
             }
             try {
                 const data = await apiCall('/api/tasks/history?limit=20&offset=' + _historyOffset, 'GET');
@@ -1018,15 +1041,15 @@
                 _historyOffset += list.length;
                 drawHistoryList(body);
             } catch (e) {
-                body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:24px;font-size:13px;">加载失败</div>';
+                body.innerHTML = '<div class="empty-state compact"><i class="ph ph-warning-circle"></i><div class="es-title">加载失败</div><div class="es-desc">' + (e && e.message ? e.message : '请稍后重试') + '</div></div>';
             }
         }
         function drawHistoryList(body) {
             if (!_historyList.length) {
-                body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:24px;font-size:13px;">暂无历史记录</div>';
+                body.innerHTML = '<div class="empty-state compact"><i class="ph ph-clock-counter-clockwise"></i><div class="es-title">暂无历史记录</div><div class="es-desc">采集完成的任务会归档在这里</div></div>';
                 return;
             }
-            const statusColors = { pending: '#d97706', running: '#3b82f6', done: '#16a34a', failed: '#dc2626', cancelled: '#9ca3af' };
+            const statusColors = { pending: 'var(--dh-warning)', running: 'var(--dh-accent)', done: 'var(--dh-success)', failed: 'var(--dh-danger)', cancelled: 'var(--dh-text-muted)' };
             body.innerHTML = _historyList.map(function (h, idx) {
                 const uid = idx;
                 const statusColor = statusColors[h.status] || 'var(--text-muted)';
@@ -1048,7 +1071,7 @@
                     '</div>' +
                     '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">总 ' + (h.total || 0) + ' · 成功 ' + (h.success || 0) + ' · 失败 ' + (h.failed || 0) + (h.skipped ? ' · 跳过 ' + h.skipped : '') + (when ? ' · ' + when : '') + '</div>' +
                     (logHtml ? '<a onclick="toggleHistoryLog(' + uid + ', this)" style="font-size:11px;color:var(--accent);cursor:pointer;">展开日志</a>' +
-                    '<div id="hist-log-' + uid + '" style="display:none;margin-top:6px;font-family:var(--font-mono);font-size:11px;line-height:1.5;background:#0f172a;color:#cbd5e1;padding:6px 8px;border-radius:var(--radius-xs);">' + logHtml + '</div>' : '') +
+                    '<div id="hist-log-' + uid + '" class="log-panel" style="display:none;margin-top:6px;max-height:200px;padding:6px 8px;font-size:11px;line-height:1.5;">' + logHtml + '</div>' : '') +
                     '</div>';
             }).join('') +
             (_historyHasMore ? '<div style="text-align:center;padding:8px;"><button class="btn btn-secondary btn-sm" onclick="loadHistory(false)">加载更多</button></div>' : '');

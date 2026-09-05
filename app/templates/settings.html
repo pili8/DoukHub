@@ -49,9 +49,9 @@
 }
 .settings-tab:hover { color: var(--text-primary); background: var(--menu-hover, var(--bg-hover)); }
 .settings-tab.active {
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--text-on-accent, #fff);
 }
-.settings-tab.active svg[data-lucide] { color: #fff; }
+.settings-tab.active svg[data-lucide] { color: var(--text-on-accent, #fff); }
 .settings-tab svg[data-lucide] { width: 13px; height: 13px; flex-shrink: 0; }
 
 /* ===== 分组面板：只有当前组显示 ===== */
@@ -68,15 +68,18 @@
 .settings-group-label svg[data-lucide] { width: 13px; height: 13px; }
 
 /* ===== 影响范围标签 ===== */
+/* 单作品紫色为本页局部令牌（全局无 purple 语义），明暗各给一档 */
+:root { --dh-purple: #A855F7; --dh-purple-soft: rgba(168,85,247,.12); }
+:root[data-theme="dark"] { --dh-purple: #C084FC; --dh-purple-soft: rgba(192,132,252,.16); }
 .scope-tag {
   display: inline-flex; align-items: center;
   font-size: 10px; font-weight: 600; padding: 1px 7px;
   border-radius: 9999px; margin-left: 6px; vertical-align: middle;
   white-space: nowrap;
 }
-.scope-tag[data-scope="global"] { background: rgba(0,97,164,0.1); color: var(--accent); border: 1px solid rgba(0,97,164,0.2); }
-.scope-tag[data-scope="batch"] { background: rgba(22,163,74,0.1); color: #16A34A; border: 1px solid rgba(22,163,74,0.2); }
-.scope-tag[data-scope="single"] { background: rgba(168,85,247,0.1); color: #A855F7; border: 1px solid rgba(168,85,247,0.2); }
+.scope-tag[data-scope="global"] { background: var(--dh-accent-soft); color: var(--dh-accent); border: 1px solid color-mix(in srgb, var(--dh-accent) 22%, transparent); }
+.scope-tag[data-scope="batch"] { background: var(--dh-success-soft); color: var(--dh-success); border: 1px solid color-mix(in srgb, var(--dh-success) 22%, transparent); }
+.scope-tag[data-scope="single"] { background: var(--dh-purple-soft); color: var(--dh-purple); border: 1px solid color-mix(in srgb, var(--dh-purple) 22%, transparent); }
 
 /* 命名 chips / 摘要行样式已随旧版方案卡移除（命名编辑统一走共享 name_editor 弹窗） */
 /* 目录结构预览样式已并入存储调度台（Storage Deck）样式块 */
@@ -113,7 +116,7 @@
 .switch-item input[type="checkbox"] {
   appearance: none; -webkit-appearance: none; margin: 0;
   width: 44px; height: 24px; border-radius: 12px;
-  background: #E0E0E0;
+  background: var(--border-strong, var(--border-default, #E0E0E0));
   position: relative; cursor: pointer;
   transition: background .2s;
 }
@@ -123,7 +126,7 @@
 .switch-item input[type="checkbox"]::after {
   content: ""; position: absolute; top: 2px; left: 2px;
   width: 20px; height: 20px; border-radius: 50%;
-  background: #fff;
+  background: var(--dh-surface, #fff);
   transition: transform .2s;
 }
 .switch-item input[type="checkbox"]:checked::after {
@@ -146,7 +149,7 @@
   border-color: var(--accent); color: var(--accent); background: var(--dh-accent-soft, #E7F0F8);
 }
 .settings-actions .btn-primary {
-  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  background: var(--accent); color: var(--text-on-accent, #fff); border: 1px solid var(--accent);
 }
 .settings-actions .btn-primary:hover { background: var(--accent-hover, #004F8A); }
 .size-settings { min-height: 30px; padding: 0 12px; font-size: 12px; }
@@ -703,13 +706,50 @@
     // ===== 折叠卡片（默认展开；点击头部折叠/展开） =====
     function toggleCard(btn) {
         var card = btn.closest('.settings-card');
+        var body = card.querySelector('.settings-card-body');
         // 默认展开：显式折叠用 .collapsed 记录，.open 保持兼容（open = 非 collapsed）
+        // 展开动画：JS 测量高度 + height 过渡；.collapsed(display:none) 仅作初始/兜底状态
+        if (!body) { card.classList.toggle('collapsed'); card.classList.toggle('open'); return; }
         if (card.classList.contains('collapsed')) {
             card.classList.remove('collapsed');
             card.classList.add('open');
+            body.style.display = '';
+            body.style.overflow = 'hidden';
+            body.style.transition = 'none';
+            body.style.height = '0px';
+            body.style.paddingTop = '0px';
+            body.style.paddingBottom = '0px';
+            requestAnimationFrame(function () {
+                body.style.transition = 'height .24s ease, padding .24s ease';
+                body.style.height = body.scrollHeight + 'px';
+                body.style.paddingTop = '';
+                body.style.paddingBottom = '';
+                setTimeout(function () {
+                    body.style.height = '';
+                    body.style.overflow = '';
+                    body.style.transition = '';
+                }, 260);
+            });
         } else {
-            card.classList.add('collapsed');
             card.classList.remove('open');
+            body.style.overflow = 'hidden';
+            body.style.transition = 'none';
+            body.style.height = body.scrollHeight + 'px';
+            requestAnimationFrame(function () {
+                body.style.transition = 'height .24s ease, padding .24s ease';
+                body.style.height = '0px';
+                body.style.paddingTop = '0px';
+                body.style.paddingBottom = '0px';
+                setTimeout(function () {
+                    card.classList.add('collapsed');
+                    body.style.display = 'none';
+                    body.style.height = '';
+                    body.style.overflow = '';
+                    body.style.paddingTop = '';
+                    body.style.paddingBottom = '';
+                    body.style.transition = '';
+                }, 260);
+            });
         }
         if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     }

@@ -8,11 +8,9 @@
     </div>
 </div>
 
-<div class="card">
-    <h3><i class="ph ph-chart-bar"></i> 数据概览</h3>
-    <div id="stats-container" class="db-stats-enhanced">
-        <div style="text-align:center;color:var(--text-muted);padding:20px;"><i class="ph ph-spinner"></i> 加载中...</div>
-    </div>
+<!-- 指标卡网格：直接承载统计，不再套一层"数据概览"卡（避免与页头标题重复） -->
+<div id="stats-container" class="db-stats-enhanced">
+    <div class="empty-state compact" style="grid-column:1/-1;"><i class="ph ph-spinner"></i><div class="es-title">加载中...</div></div>
 </div>
 
 <div class="card">
@@ -59,20 +57,40 @@
 {% endblock %}
 
 <style>
-.db-stats-enhanced { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.db-stats-enhanced .stats-card { padding: 16px; background: var(--bg-muted); border-radius: var(--radius); border-left: 4px solid var(--border-default); border: 1px solid var(--border-default); }
-.db-stats-enhanced .stats-card.coll { border-left-color: var(--accent); }
-.db-stats-enhanced .stats-card.acc { border-left-color: var(--success); }
-.db-stats-enhanced .stats-card.ck  { border-left-color: var(--warning); }
-.db-stats-enhanced .stats-card.hist { border-left-color: var(--info); }
-.db-stats-enhanced .stats-card.task { border-left-color: #8b5cf6; }
-.db-stats-enhanced .stats-card .stats-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary); }
-.db-stats-enhanced .stats-card .stats-num { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.db-stats-enhanced .stats-card .stats-sub { display: flex; gap: 12px; margin-top: 8px; font-size: 12px; flex-wrap: wrap; }
-.db-stats-enhanced .stats-card .stats-sub span { color: var(--text-muted); }
-.db-stats-enhanced .stats-card .stats-sub .ok { color: var(--success); }
-.db-stats-enhanced .stats-card .stats-sub .warn { color: var(--warning); }
-.db-stats-enhanced .stats-card .stats-sub .err { color: var(--danger); }
+/* 指标卡网格：左侧语义色竖条 + 大数字，颜色经 --sc-color 注入（每卡一色） */
+/* 定时任务紫色为本页局部令牌 */
+:root { --dh-purple: #8B5CF6; --dh-purple-soft: rgba(139,92,246,.12); }
+:root[data-theme="dark"] { --dh-purple: #A78BFA; --dh-purple-soft: rgba(167,139,250,.16); }
+.db-stats-enhanced { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.db-stats-enhanced .stats-card {
+    position: relative; padding: 16px 16px 14px;
+    background: var(--dh-surface, var(--bg-surface));
+    border: 1px solid var(--dh-border, var(--border-default));
+    border-radius: var(--dh-radius, var(--radius));
+    overflow: hidden;
+    transition: box-shadow .18s, transform .18s;
+}
+.db-stats-enhanced .stats-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md, 0 4px 12px rgba(31,27,23,.1)); }
+.db-stats-enhanced .stats-card::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--sc-color, var(--dh-border, var(--border-default)));
+}
+.db-stats-enhanced .stats-card.coll { --sc-color: var(--dh-accent); }
+.db-stats-enhanced .stats-card.acc  { --sc-color: var(--dh-success); }
+.db-stats-enhanced .stats-card.ck   { --sc-color: var(--dh-warning); }
+.db-stats-enhanced .stats-card.hist { --sc-color: var(--info); }
+.db-stats-enhanced .stats-card.task { --sc-color: var(--dh-purple); }
+.db-stats-enhanced .stats-card .stats-title {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 12.5px; font-weight: 600; margin-bottom: 10px; color: var(--dh-text-secondary, var(--text-secondary));
+}
+.db-stats-enhanced .stats-card .stats-title i { font-size: 15px; color: var(--sc-color); }
+.db-stats-enhanced .stats-card .stats-num { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; color: var(--sc-color); }
+.db-stats-enhanced .stats-card .stats-sub { display: flex; gap: 12px; margin-top: 10px; font-size: 12px; flex-wrap: wrap; }
+.db-stats-enhanced .stats-card .stats-sub span { color: var(--dh-text-muted, var(--text-muted)); }
+.db-stats-enhanced .stats-card .stats-sub .ok { color: var(--dh-success, var(--success)); }
+.db-stats-enhanced .stats-card .stats-sub .warn { color: var(--dh-warning, var(--warning)); }
+.db-stats-enhanced .stats-card .stats-sub .err { color: var(--dh-danger, var(--danger)); }
 @media (max-width: 768px) { .db-stats-enhanced { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 420px) { .db-stats-enhanced { grid-template-columns: 1fr; } }
 </style>
@@ -126,7 +144,7 @@ ${coll.has_error ? `<span class="err">解析失败 ${coll.has_error}</span>` : '
             const task = s.scheduled_tasks || {};
             html += `<div class="stats-card task">
                 <div class="stats-title"><i class="ph ph-calendar-clock"></i> 定时任务</div>
-                <div class="stats-num" style="color:#8b5cf6;">${task.total || 0}</div>
+                <div class="stats-num" style="color:var(--dh-purple);">${task.total || 0}</div>
                 <div class="stats-sub"><span class="ok">启用 ${task.enabled || 0}</span></div>
             </div>`;
             container.innerHTML = html;
@@ -138,7 +156,7 @@ ${coll.has_error ? `<span class="err">解析失败 ${coll.has_error}</span>` : '
                     <div class="stats-card acc"><div class="stats-title">账号表</div><div class="stats-num" style="color:var(--success);">${data.account_cache || 0}</div></div>
                     <div class="stats-card ck"><div class="stats-title">Cookie表</div><div class="stats-num" style="color:var(--warning);">${data.cookie_cache || 0}</div></div>
                     <div class="stats-card hist"><div class="stats-title">采集历史</div><div class="stats-num" style="color:var(--info);">${data.collection_history || 0}</div></div>
-                    <div class="stats-card task"><div class="stats-title">定时任务</div><div class="stats-num" style="color:#8b5cf6;">${data.scheduled_tasks || 0}</div></div>
+                    <div class="stats-card task"><div class="stats-title">定时任务</div><div class="stats-num" style="color:var(--dh-purple);">${data.scheduled_tasks || 0}</div></div>
                 `;
             } catch (e2) { showToast('获取统计失败: ' + e2.message, 'error'); }
         }

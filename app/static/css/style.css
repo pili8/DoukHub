@@ -437,14 +437,24 @@ code, pre { font-family: var(--font-mono); }
   line-height: 1.5;
 }
 
+/* 卡头图标统一 chip 化：软色圆角底 + 语义色图标，页面间视觉一致 */
 .card h3 i {
-  font-size: 17px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--dh-accent-soft);
   color: var(--dh-accent);
+  font-size: 15px;
 }
 
 .card h3 svg[data-lucide] {
-  width: 17px;
-  height: 17px;
+  width: 26px;
+  height: 26px;
+  padding: 5px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--dh-accent-soft);
   color: var(--dh-accent);
 }
 
@@ -882,6 +892,14 @@ tbody tr:hover {
   display: block;
 }
 
+/* 空状态扩展：主文案 / 副文案 / 操作按钮 / 紧凑变体（弹窗、卡片内使用） */
+.empty-state .es-title { font-size: 14px; font-weight: 600; color: var(--dh-text-secondary, var(--md-on-surface-variant)); }
+.empty-state .es-desc { font-size: 12px; color: var(--dh-text-muted, var(--md-on-surface-variant)); margin-top: 4px; }
+.empty-state .es-action { margin-top: 14px; }
+.empty-state.compact { padding: 24px 16px; }
+.empty-state.compact i { font-size: 30px; margin-bottom: 8px; }
+.empty-state.compact svg[data-lucide] { width: 26px; height: 26px; margin-bottom: 8px; }
+
 /* ===== 15. M3 Linear Progress Indicator ===== */
 .progress-bar-container {
   width: 100%;
@@ -1130,6 +1148,9 @@ tbody tr:hover {
   color: var(--md-on-surface-variant);
 }
 
+/* 日志面板：全局统一组件（任务面板/历史日志/工作流日志共用）
+   明暗自适应：亮色浅米底深字，暗色深底浅字，四色日志走语义令牌 */
+.log-panel,
 .workflow-log {
   max-height: 320px;
   overflow-y: auto;
@@ -1145,10 +1166,10 @@ tbody tr:hover {
   word-break: break-word;
 }
 
-.workflow-log .log-ok { color: var(--dh-success); }
-.workflow-log .log-err { color: var(--dh-danger); }
-.workflow-log .log-info { color: var(--dh-accent); }
-.workflow-log .log-warn { color: var(--dh-warning); }
+.log-panel .log-ok, .workflow-log .log-ok { color: var(--dh-success); }
+.log-panel .log-err, .workflow-log .log-err { color: var(--dh-danger); }
+.log-panel .log-info, .workflow-log .log-info { color: var(--dh-accent); }
+.log-panel .log-warn, .workflow-log .log-warn { color: var(--dh-warning); }
 
 /* 健康度跳转链接：保持徽章外观，悬停略有反馈 */
 .health-link {
