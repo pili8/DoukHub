@@ -58,19 +58,17 @@
 
 <style>
 /* 指标卡网格：左侧语义色竖条 + 大数字，颜色经 --sc-color 注入（每卡一色） */
-/* 定时任务紫色为本页局部令牌 */
-:root { --dh-purple: #8B5CF6; --dh-purple-soft: rgba(139,92,246,.12); }
-:root[data-theme="dark"] { --dh-purple: #A78BFA; --dh-purple-soft: rgba(167,139,250,.16); }
+/* 紫（定时任务）统一用全局 --dh-purple，不在本页另起一套色值 */
 .db-stats-enhanced { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 14px; }
 .db-stats-enhanced .stats-card {
     position: relative; padding: 16px 16px 14px;
-    background: var(--dh-surface, var(--bg-surface));
-    border: 1px solid var(--dh-border, var(--border-default));
-    border-radius: var(--dh-radius, var(--radius));
+    background: var(--dh-surface);
+    border: 1px solid var(--dh-border);
+    border-radius: var(--dh-radius);
     overflow: hidden;
     transition: box-shadow .18s, transform .18s;
 }
-.db-stats-enhanced .stats-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md, 0 4px 12px rgba(31,27,23,.1)); }
+.db-stats-enhanced .stats-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .db-stats-enhanced .stats-card::before {
     content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
     background: var(--sc-color, var(--dh-border, var(--border-default)));
@@ -82,15 +80,15 @@
 .db-stats-enhanced .stats-card.task { --sc-color: var(--dh-purple); }
 .db-stats-enhanced .stats-card .stats-title {
     display: flex; align-items: center; gap: 7px;
-    font-size: 12.5px; font-weight: 600; margin-bottom: 10px; color: var(--dh-text-secondary, var(--text-secondary));
+    font-size: 12.5px; font-weight: 600; margin-bottom: 10px; color: var(--dh-text-secondary);
 }
 .db-stats-enhanced .stats-card .stats-title i { font-size: 15px; color: var(--sc-color); }
 .db-stats-enhanced .stats-card .stats-num { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; color: var(--sc-color); }
 .db-stats-enhanced .stats-card .stats-sub { display: flex; gap: 12px; margin-top: 10px; font-size: 12px; flex-wrap: wrap; }
-.db-stats-enhanced .stats-card .stats-sub span { color: var(--dh-text-muted, var(--text-muted)); }
-.db-stats-enhanced .stats-card .stats-sub .ok { color: var(--dh-success, var(--success)); }
-.db-stats-enhanced .stats-card .stats-sub .warn { color: var(--dh-warning, var(--warning)); }
-.db-stats-enhanced .stats-card .stats-sub .err { color: var(--dh-danger, var(--danger)); }
+.db-stats-enhanced .stats-card .stats-sub span { color: var(--dh-text-muted); }
+.db-stats-enhanced .stats-card .stats-sub .ok { color: var(--dh-success); }
+.db-stats-enhanced .stats-card .stats-sub .warn { color: var(--dh-warning); }
+.db-stats-enhanced .stats-card .stats-sub .err { color: var(--dh-danger); }
 @media (max-width: 768px) { .db-stats-enhanced { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 420px) { .db-stats-enhanced { grid-template-columns: 1fr; } }
 </style>

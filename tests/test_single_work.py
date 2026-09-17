@@ -45,7 +45,7 @@ def test_normalize_work_uses_ttd_extracted_fields():
     )
     assert work["title"] == "标题"
     assert work["author"] == "作者"
-    assert work["create_time"] == "2026-08-15 10-00-00"
+    assert work["create_time"] == "20260815_100000"
     assert work["platform"] == "douyin"
 
 
@@ -106,7 +106,7 @@ def test_fetch_and_download_work(tmp_path):
                 "https://www.douyin.com/video/1234567890123456789",
                 "douyin",
             )
-            return await download_work(client, work, tmp_path, "{author} {title}")
+            return await download_work(client, work, tmp_path, "{author} {title}", dl_client=client)
 
     paths = asyncio.run(run())
     assert [path.name for path in paths] == ["作者 标题_1.jpg", "作者 标题_2.jpg"]
@@ -173,6 +173,7 @@ def test_download_work_selects_asset_and_uses_override(tmp_path):
                 tmp_path,
                 filename_override="自定义名字",
                 asset_indexes=[2],
+                dl_client=client,
             )
 
     paths = asyncio.run(run())

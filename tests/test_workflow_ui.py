@@ -163,8 +163,27 @@ def test_workflow_system_is_responsive_and_motion_restrained():
         "/sync/refresh",
     ],
 )
-def test_sync_pages_use_shared_workflow_panels(app_env, path):
+def test_sync_pages_use_shared_workflow_panels(app_env, tmp_path, path):
     client, *_ = app_env
+    # 隔离库默认为空：overview 需要 share_cache 数据、子页需要 sync_history 历史才渲染对应区块
+    import sqlite3
+    conn = sqlite3.connect(tmp_path / "doukhub.db")
+    conn.execute(
+        "INSERT OR IGNORE INTO share_cache (record_id, share_code, 解析状态) VALUES ('r1', 'code1', '已就绪')"
+    )
+    history_type = {
+        "/sync/import": "import_collection",
+        "/sync/resolve": "update_collection",
+        "/sync/account": "sync_account",
+        "/sync/refresh": "refresh_accounts",
+    }.get(path)
+    if history_type:
+        conn.execute(
+            "INSERT INTO sync_history (task_type, status, log_json) VALUES (?, '成功', '[]')",
+            (history_type,),
+        )
+    conn.commit()
+    conn.close()
     response = client.get(path)
     assert response.status_code == 200
     assert "workflow-panel" in response.text

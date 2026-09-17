@@ -42,7 +42,7 @@
         </div>
         <div class="tbl-action-group">
             <div class="tbl-action-normal" id="action-normal">
-                <button class="btn btn-success btn-sm" onclick="openAddModal()" id="btn-add-record"><i class="ph ph-plus"></i> 新增</button>
+                <button class="btn btn-primary btn-sm" onclick="openAddModal()" id="btn-add-record"><i class="ph ph-plus"></i> 新增</button>
                 <button class="btn btn-secondary btn-sm" onclick="checkDuplicates()" id="btn-duplicates"><i class="ph ph-copy"></i> 查重</button>
                 <button class="btn btn-secondary btn-sm" onclick="validateCookies()" id="btn-validate-cookie" style="display:none;"><i class="ph ph-shield-check"></i> 验证Cookie</button>
                 <div class="tbl-divider-v"></div>
@@ -162,13 +162,13 @@
 }
 .tab-btn.active {
     background: var(--accent);
-    color: var(--text-on-accent, #fff);
+    color: var(--text-on-accent);
     box-shadow: var(--shadow-xs);
     font-weight: 600;
 }
 /* 选中态图标统一用背景高对比色,避免各自颜色在 accent 背景上看不清 */
 .tab-btn.active .tab-icon {
-    color: var(--text-on-accent, #0A0B0F) !important;
+    color: var(--text-on-accent) !important;
 }
 .tab-btn .tab-icon { font-size: 15px; transition: transform var(--transition-fast); }
 .tab-btn:hover .tab-icon { transform: scale(1.15); }
@@ -489,7 +489,7 @@
     padding: 6px 2px;
     font-size: 12px;
     color: var(--text-muted);
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-mono);
 }
 /* 计数做成胶囊，数字用等宽对齐不跳动 */
 .tbl-load-status > span:first-child {
@@ -1410,7 +1410,7 @@ var FIELD_EDITORS = {
 '采集类型': { editor: 'agSelectCellEditor', params: { values: ['发布', '喜欢'] } },
 '状态': { editor: 'agSelectCellEditor', params: { values: ['正常', '失效'] } },
 '平台': { editor: 'agSelectCellEditor', params: { values: ['douyin', 'tiktok', 'xhs'] } },
-'解析状态': { editor: 'agSelectCellEditor', params: { values: ['待解析', '已就绪', '已生成', '已删除', '解析失败'] } },
+'解析状态': { editor: 'agSelectCellEditor', params: { values: ['待解析', '已就绪', '已生成', '已删除', '解析失败', '链接失效', '非主页链接', '暂不支持'] } },
 '获取状态': { editor: 'agSelectCellEditor', params: { values: ['待获取', '已获取', '获取失败'] } },
 '备注': { editor: 'agTextCellEditor' },
         '任务名称': { editor: 'agTextCellEditor' },
@@ -1617,6 +1617,8 @@ var STATUS_TONES = {
     '已生成': 'success', '已获取': 'success', '正常': 'success', '是': 'success',
     '已删除': 'warning',
     '解析失败': 'danger', '获取失败': 'danger', '失效': 'danger',
+    // 终态（已退出流程，不再重试）：用橙与红色「解析失败」区分
+    '链接失效': 'warning', '非主页链接': 'warning', '暂不支持': 'warning',
 };
 var TONE_VARS = {
     muted:   ['var(--bg-muted)', 'var(--text-secondary)'],
@@ -3105,7 +3107,7 @@ var FIELD_RENDERERS = {
             html += '</select>';
             container.innerHTML = html;
 } else if (field === '解析状态') {
-container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><option value="">选择…</option><option value="待解析">待解析</option><option value="已就绪">已就绪</option><option value="已生成">已生成</option><option value="已删除">已删除</option><option value="解析失败">解析失败</option></select>';
+container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><option value="">选择…</option><option value="待解析">待解析</option><option value="已就绪">已就绪</option><option value="已生成">已生成</option><option value="已删除">已删除</option><option value="解析失败">解析失败</option><option value="链接失效">链接失效</option><option value="非主页链接">非主页链接</option><option value="暂不支持">暂不支持</option></select>';
 } else if (field === '获取状态') {
 container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><option value="">选择…</option><option value="待获取">待获取</option><option value="已获取">已获取</option><option value="获取失败">获取失败</option></select>';
 } else {

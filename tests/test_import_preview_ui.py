@@ -3,6 +3,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from app.core.syncer_v2 import Syncer
+
 
 def _function(source, name):
     match = re.search(
@@ -14,12 +16,23 @@ def _function(source, name):
     return match.group(0)
 
 
+# 预览解析用到的前端函数，必须与后端 syncer_v2 的解析规则保持一致
+PREVIEW_FUNCTIONS = (
+    "mapTag",
+    "parseGradeTags",
+    "mergeGrade",
+    "parseSimpleFormat",
+    "parseJsonFormat",
+)
+
+
+def _preview_script(source):
+    return "\n".join(_function(source, name) for name in PREVIEW_FUNCTIONS)
+
+
 def test_import_preview_parses_real_world_mixed_formats():
     source = Path("app/templates/sync/import.html").read_text(encoding="utf-8")
-    script = "\n".join(
-        _function(source, name)
-        for name in ("mapTag", "parseSimpleFormat", "parseJsonFormat")
-    )
+    script = _preview_script(source)
     simple_text = """
 个，图@ihNoyCMM
 个，2\\@ihYfCafE
@@ -77,10 +90,7 @@ console.log(JSON.stringify({{
 
 def test_import_preview_merges_simple_and_json_in_one_paste():
     source = Path("app/templates/sync/import.html").read_text(encoding="utf-8")
-    script = "\n".join(
-        _function(source, name)
-        for name in ("mapTag", "parseSimpleFormat", "parseJsonFormat", "parseImport")
-    )
+    script = _preview_script(source) + "\n" + _function(source, "parseImport")
     text = """
 个，图@ihNoyCMM
 个，2\\@ihYfCafE
@@ -134,3 +144,43 @@ global.document = {{getElementById: function(id) {{ return elements[id]; }} }};
         "count": 13,
         "status": "解析完成: <b>13</b> 条",
     }
+
+
+def test_preview_grade_rules_match_backend():
+    """预览解析的等级/标签必须与后端 parse_grade_tags 完全一致。
+
+    规则：@ 前的数字是等级，同时充当标签分隔符（"2个"→等级2+标签"个"）。
+    """
+    source = Path("app/templates/sync/import.html").read_text(encoding="utf-8")
+    script = _preview_script(source)
+    grades = ["2个", "个2", "COS2", "酒吧3多", "个3，多", "2", "多", ""]
+    program = f"""
+global.TAGS_MAPPING = {{'个': '个人'}};
+var parsedData = [];
+{script}
+var out = [];
+{json.dumps(grades, ensure_ascii=False)}.forEach(function(g) {{
+    parseSimpleFormat(g + '@87X9S198AQY');
+    var item = parsedData[0] || {{rating: 1, tags: []}};
+    out.push({{grade: g, rating: item.rating, tags: item.tags}});
+}});
+console.log(JSON.stringify(out));
+"""
+    result = subprocess.run(
+        ["node", "-e", program],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert result.returncode == 0, result.stderr
+    rendered = json.loads(result.stdout)
+
+    mapping = {"个": "个人"}
+    expected = []
+    for grade in grades:
+        level, tags = Syncer.parse_grade_tags(grade)
+        expected.append(
+            {"grade": grade, "rating": level, "tags": [mapping.get(t, t) for t in tags]}
+        )
+    assert rendered == expected

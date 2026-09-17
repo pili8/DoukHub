@@ -44,16 +44,25 @@
 
 <div class="card">
     <h3><i class="ph ph-clock-counter-clockwise"></i> 备份记录</h3>
-    <p style="font-size:13px;color:var(--text-muted);margin:4px 0 12px;">
-        备份目录：<code id="backup-dir" style="font-family:var(--font-mono);">加载中...</code>
-        · 保留最近 7 份，更早的自动清理
-    </p>
+    <div class="field-group" style="margin-bottom:14px;">
+        <span class="field-label">备份目录</span>
+        <div class="path-pill">
+            <i data-lucide="archive"></i>
+            <span class="path-pill-text" id="backup-dir">加载中...</span>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openBackupDir()"><i class="ph ph-folder-open"></i> 打开目录</button>
+        </div>
+        <small class="field-hint">
+            保留最近 7 份，更早的自动清理 · 需更改目录请到
+            <a href="/settings" style="color:var(--dh-accent);">设置 → 应用数据目录</a>
+        </small>
+    </div>
     <div id="backup-list" style="font-size:13px;">
         <div style="text-align:center;color:var(--text-muted);padding:20px;"><i class="ph ph-spinner"></i> 加载中...</div>
     </div>
 </div>
 
 <style>
+/* 备份目录展示统一走全站 .path-pill / .field-hint（原 .backup-dir-row 三件套已并入） */
 .backup-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border:1px solid var(--border-default); border-radius:var(--radius); margin-bottom:8px; background:var(--bg-muted); }
 .backup-row .bk-info { display:flex; flex-direction:column; gap:3px; min-width:0; }
 .backup-row .bk-name { font-weight:600; color:var(--text-primary); word-break:break-all; }
@@ -62,7 +71,7 @@
 .db-stat-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; }
 .db-stat-grid .ds-item { padding:12px 14px; background:var(--bg-muted); border:1px solid var(--border-default); border-radius:var(--radius); }
 .db-stat-grid .ds-label { font-size:12px; color:var(--text-muted); margin-bottom:4px; }
-.db-stat-grid .ds-value { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
+.db-stat-grid .ds-value { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--dh-text); }
 .db-stat-grid .ds-value.warn { color:var(--warning); }
 @media (max-width:768px) { .db-stat-grid { grid-template-columns:repeat(2, 1fr); } .backup-row { flex-direction:column; align-items:flex-start; } }
 </style>

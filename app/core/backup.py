@@ -27,7 +27,15 @@ BACKUP_KEEP_COUNT = 7
 
 
 def get_backup_dir() -> Path:
-    """备份目录：与主库同目录下的 backups/ 子目录。"""
+    """备份目录：优先用设置里的自定义路径（backup.dir），留空则用主库同级的 backups/。
+
+    Config 采用局部导入：本模块被多处导入，局部导入可彻底避开模块级循环依赖。
+    """
+    from .config import Config
+
+    custom = str(Config().get("backup.dir", "") or "").strip()
+    if custom:
+        return Path(custom).expanduser()
     return db_path().parent / "backups"
 
 
@@ -49,7 +57,7 @@ def create_backup(reason: str = "手动备份") -> dict:
 
     try:
         conn = sqlite3.connect(str(db_path()), timeout=30.0)
-        conn.execute(f"VACUUM INTO '{backup_path}'")
+        conn.execute("VACUUM INTO '{}'".format(str(backup_path).replace("'", "''")))
         conn.close()
 
         size = backup_path.stat().st_size
@@ -289,7 +297,7 @@ def vacuum_database() -> dict:
     try:
         # 2. VACUUM INTO 到临时文件
         src_conn = sqlite3.connect(str(db_path()), timeout=30.0)
-        src_conn.execute(f"VACUUM INTO '{temp_path}'")
+        src_conn.execute("VACUUM INTO '{}'".format(str(temp_path).replace("'", "''")))
         src_conn.close()
 
         # 3. 校验记录数一致

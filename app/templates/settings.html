@@ -4,7 +4,7 @@
 <style>
 /* 设置页:折叠卡片。默认全部展开（open 态），用户可手动折叠。
    卡片用白色表面(--surface-raised)，与米色页面背景(--dh-background)形成层次 */
-.settings-card { background: var(--surface-raised, var(--bg-input)); border: 1px solid var(--border-default); border-radius: var(--radius-lg); margin-bottom: 14px; overflow: hidden; box-shadow: var(--shadow-sm); }
+.settings-card { background: var(--surface-raised); border: 1px solid var(--border-default); border-radius: var(--radius-lg); margin-bottom: 14px; overflow: hidden; box-shadow: var(--shadow-sm); }
 .settings-card-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 13px 18px; background: none; border: none;
@@ -12,7 +12,7 @@
   text-align: left; cursor: pointer; font-family: inherit;
   transition: background .12s;
 }
-.settings-card-head:hover { background: var(--menu-hover, var(--bg-hover)); }
+.settings-card-head:hover { background: var(--menu-hover); }
 .settings-card-head svg[data-lucide] { width: 16px; height: 16px; color: var(--accent); flex-shrink: 0; }
 .settings-card-head .card-title { flex: 1; }
 .settings-card-head .card-arrow { margin-left: auto; color: var(--text-muted); transition: transform .15s; }
@@ -26,15 +26,15 @@
 /* ===== 分组 Tab 导航（替代长滚动：点击切换，每组一张面板） ===== */
 .settings-tabs-wrap {
   position: sticky; top: 0; z-index: 50;
-  background: var(--dh-background, var(--bg-muted, #f5f5f0));
+  background: var(--dh-background);
   padding: 10px 0 8px; margin-bottom: 6px;
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  background: color-mix(in srgb, var(--dh-background, #f5f5f0) 88%, transparent);
+  background: color-mix(in srgb, var(--dh-background) 88%, transparent);
 }
 .settings-tabs {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px;
-  background: var(--surface-overlay, var(--bg-muted));
+  background: var(--surface-overlay);
   border: 1px solid var(--border-default);
   border-radius: 9999px;
   max-width: 100%; overflow-x: auto; scrollbar-width: none;
@@ -47,11 +47,11 @@
   border-radius: 9999px; cursor: pointer; white-space: nowrap;
   transition: all .15s; font-family: inherit;
 }
-.settings-tab:hover { color: var(--text-primary); background: var(--menu-hover, var(--bg-hover)); }
+.settings-tab:hover { color: var(--text-primary); background: var(--menu-hover); }
 .settings-tab.active {
-  background: var(--accent); color: var(--text-on-accent, #fff);
+  background: var(--accent); color: var(--text-on-accent);
 }
-.settings-tab.active svg[data-lucide] { color: var(--text-on-accent, #fff); }
+.settings-tab.active svg[data-lucide] { color: var(--text-on-accent); }
 .settings-tab svg[data-lucide] { width: 13px; height: 13px; flex-shrink: 0; }
 
 /* ===== 分组面板：只有当前组显示 ===== */
@@ -69,8 +69,7 @@
 
 /* ===== 影响范围标签 ===== */
 /* 单作品紫色为本页局部令牌（全局无 purple 语义），明暗各给一档 */
-:root { --dh-purple: #A855F7; --dh-purple-soft: rgba(168,85,247,.12); }
-:root[data-theme="dark"] { --dh-purple: #C084FC; --dh-purple-soft: rgba(192,132,252,.16); }
+/* 紫（单作品采集标识）直接用全局 --dh-purple，不再本页重复定义 */
 .scope-tag {
   display: inline-flex; align-items: center;
   font-size: 10px; font-weight: 600; padding: 1px 7px;
@@ -116,24 +115,24 @@
 .switch-item input[type="checkbox"] {
   appearance: none; -webkit-appearance: none; margin: 0;
   width: 44px; height: 24px; border-radius: 12px;
-  background: var(--border-strong, var(--border-default, #E0E0E0));
+  background: var(--border-strong);
   position: relative; cursor: pointer;
   transition: background .2s;
 }
 .switch-item input[type="checkbox"]:checked {
-  background: var(--dh-accent, #0061A4);
+  background: var(--dh-accent);
 }
 .switch-item input[type="checkbox"]::after {
   content: ""; position: absolute; top: 2px; left: 2px;
   width: 20px; height: 20px; border-radius: 50%;
-  background: var(--dh-surface, #fff);
+  background: var(--dh-surface);
   transition: transform .2s;
 }
 .switch-item input[type="checkbox"]:checked::after {
   transform: translateX(20px);
 }
 .switch-item input[type="checkbox"]:focus-visible {
-  outline: 2px solid var(--dh-accent-soft, #E7F0F8); outline-offset: 2px;
+  outline: 2px solid var(--dh-accent-soft); outline-offset: 2px;
 }
 
 /* ===== 设置页按钮配色分层 ===== */
@@ -142,16 +141,16 @@
 }
 .settings-actions .btn-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .settings-actions .btn-secondary {
-  background: var(--surface-raised, #fff); color: var(--text-secondary);
-  border: 1px solid var(--border-strong, var(--border-default));
+  background: var(--surface-raised); color: var(--text-secondary);
+  border: 1px solid var(--border-strong);
 }
 .settings-actions .btn-secondary:hover {
-  border-color: var(--accent); color: var(--accent); background: var(--dh-accent-soft, #E7F0F8);
+  border-color: var(--accent); color: var(--accent); background: var(--dh-accent-soft);
 }
 .settings-actions .btn-primary {
-  background: var(--accent); color: var(--text-on-accent, #fff); border: 1px solid var(--accent);
+  background: var(--accent); color: var(--text-on-accent); border: 1px solid var(--accent);
 }
-.settings-actions .btn-primary:hover { background: var(--accent-hover, #004F8A); }
+.settings-actions .btn-primary:hover { background: var(--accent-hover); }
 .size-settings { min-height: 30px; padding: 0 12px; font-size: 12px; }
 
 /* dh-major 旧分区卡样式已移除（被 Storage Deck 取代） */
@@ -190,30 +189,60 @@
             <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
         </button>
         <div class="settings-card-body">
-            <label style="display:block;margin-bottom:6px;">当前应用数据目录</label>
-            <div style="padding:10px;background:var(--bg-muted);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:13px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border-default);margin-bottom:12px;">
-                <span>{{ app_data_dir }}</span>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText('{{ app_data_dir }}');showToast('已复制')"><i data-lucide="copy"></i></button>
-            </div>
-            <div style="margin-bottom:16px;">
-                <small style="color:var(--text-muted);display:block;margin-bottom:4px;">兜底配置路径（仅导入旧配置或数据库异常时兜底；日常设置保存在应用数据目录的数据库中）</small>
-                <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);word-break:break-all;">{{ config_path }}</div>
-            </div>
-            <div class="settings-grid" style="grid-template-columns:minmax(240px,1fr) auto;">
-                <div>
-                    <label style="display:block;margin-bottom:6px;">新应用数据目录</label>
-                    <input id="migration-target" class="input" style="width:100%;" placeholder="例如 D:\DoukHubData">
-                    <small id="migration-check" style="color:var(--text-muted);display:block;margin-top:6px;">
-                        只迁移主库、历史库、备份和采集日志；媒体文件不会移动。
-                    </small>
+            <!-- ── 数据目录 ── -->
+            <div class="field-group">
+                <span class="field-label">当前应用数据目录</span>
+                <div class="path-pill">
+                    <i data-lucide="folder"></i>
+                    <span class="path-pill-text" title="{{ app_data_dir }}">{{ app_data_dir }}</span>
+                    <button type="button" class="icon-btn-soft" title="复制路径" aria-label="复制当前应用数据目录"
+                            data-path="{{ app_data_dir }}"
+                            onclick="navigator.clipboard.writeText(this.dataset.path);showToast('已复制')"><i data-lucide="copy"></i></button>
                 </div>
-                <div style="display:flex;flex-direction:column;gap:8px;justify-content:end;">
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="browseDataRoot(this)"><i data-lucide="folder-open"></i> 选择</button>
+                <small class="field-hint">
+                    兜底配置路径（仅导入旧配置或数据库异常时兜底；日常设置保存在应用数据目录的数据库中）：
+                    <span class="path-inline" title="{{ config_path }}">{{ config_path }}</span>
+                </small>
+
+                <span class="field-label" style="margin-top:16px;">新应用数据目录</span>
+                <div class="field-affix">
+                    <input id="migration-target" class="input" placeholder="例如 D:\DoukHubData">
+                    <button type="button" class="field-affix-btn" title="选择文件夹" aria-label="浏览选择数据目录"
+                            onclick="browseDataRoot()"><i data-lucide="folder-open"></i></button>
+                </div>
+                <small id="migration-check" class="field-hint">
+                    存放主数据库、历史记录、备份和采集日志；只迁移这些，媒体文件与兜底配置文件不动。
+                </small>
+                <div class="field-actions">
                     <button type="button" class="btn btn-secondary btn-sm" onclick="validateDataRoot()"><i data-lucide="check"></i> 检查</button>
                     <button type="button" id="migration-start" class="btn btn-primary btn-sm" onclick="startDataMigration()"><i data-lucide="move"></i> 开始迁移</button>
                 </div>
             </div>
-            <small style="color:var(--text-muted);margin-top:6px;display:block;">存放主数据库、历史记录、备份和采集日志；媒体文件不在这里。迁移不移动兜底配置文件和媒体文件。</small>
+
+            <!-- ── 备份目录（与数据目录同属「本地落盘位置」，归在同一卡片下） ── -->
+            <div class="field-group">
+                <span class="field-label">当前备份目录</span>
+                <div class="path-pill">
+                    <i data-lucide="archive"></i>
+                    <span class="path-pill-text" id="backup-dir-current">加载中...</span>
+                    <button type="button" class="icon-btn-soft" title="复制路径" aria-label="复制当前备份目录"
+                            onclick="copyBackupDir()"><i data-lucide="copy"></i></button>
+                </div>
+
+                <span class="field-label" style="margin-top:16px;">新备份目录</span>
+                <div class="field-affix">
+                    <input id="backup-dir-input" class="input" placeholder="例如 D:\DoukHubBackups">
+                    <button type="button" class="field-affix-btn" title="选择文件夹" aria-label="浏览选择备份目录"
+                            onclick="browseBackupDir()"><i data-lucide="folder-open"></i></button>
+                </div>
+                <small id="backup-dir-check" class="field-hint">
+                    默认在应用数据目录下的 backups/；切换后不会自动搬移旧备份。
+                </small>
+                <div class="field-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" id="backup-dir-reset" style="display:none;" onclick="resetBackupDir()"><i data-lucide="rotate-ccw"></i> 恢复默认</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="applyBackupDir()"><i data-lucide="check"></i> 应用</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -226,19 +255,19 @@
        编辑层 = 随主题的纸质「工单」。机器管状态，人管维护。 */
 #storage-bay {
   /* 跟随全站层级：页面底 → 调度台（卡片 surface）→ 机柜（内嵌 muted）→ 机位行（surface） */
-  --bay-bg: var(--dh-surface, #FFFFFF);
-  --bay-panel: var(--dh-surface-muted, #F5F2EC);
-  --bay-slot: var(--dh-surface, #FFFFFF);
-  --bay-line: var(--dh-border, #ECE7DF);
-  --bay-line-strong: var(--dh-border-strong, #D9D3C8);
-  --bay-text: var(--dh-text, #1F1B17);
-  --bay-text-2: var(--dh-text-secondary, #5C564E);
-  --bay-dim: var(--dh-text-muted, #A39E96);
-  --bay-accent: var(--dh-accent, #0061A4);
-  --bay-amber: var(--dh-warning, #D97706);
-  --bay-green: var(--dh-success, #16A34A);
-  --bay-red: var(--dh-danger, #DC2626);
-  --bay-violet: var(--dh-purple, #A855F7);
+  --bay-bg: var(--dh-surface);
+  --bay-panel: var(--dh-surface-muted);
+  --bay-slot: var(--dh-surface);
+  --bay-line: var(--dh-border);
+  --bay-line-strong: var(--dh-border-strong);
+  --bay-text: var(--dh-text);
+  --bay-text-2: var(--dh-text-secondary);
+  --bay-dim: var(--dh-text-muted);
+  --bay-accent: var(--dh-accent);
+  --bay-amber: var(--dh-warning);
+  --bay-green: var(--dh-success);
+  --bay-red: var(--dh-danger);
+  --bay-violet: var(--dh-purple);
   --bay-chip-bg: rgba(31,27,23,.05);
   --bay-hover-bg: rgba(31,27,23,.07);
   --bay-edit-bg: transparent;
@@ -332,7 +361,7 @@
 .bs-open-head .slot-arrow:focus-visible { outline:2px solid var(--bay-accent); outline-offset:1px; }
 
 /* 工单（编辑层）：主题化纸面，顶部 scope 色标签条 */
-.sheet { position:relative; margin:10px 10px 12px; background:var(--surface-raised, var(--bg-surface)); border:1px solid var(--border-default); border-radius:10px; padding:14px 16px; box-shadow:0 8px 22px -12px rgba(0,0,0,.35); color:var(--text-primary); animation:sheetIn .3s cubic-bezier(.16,1,.3,1); }
+.sheet { position:relative; margin:10px 10px 12px; background:var(--surface-raised); border:1px solid var(--border-default); border-radius:10px; padding:14px 16px; box-shadow:0 8px 22px -12px rgba(0,0,0,.35); color:var(--text-primary); animation:sheetIn .3s cubic-bezier(.16,1,.3,1); }
 @keyframes sheetIn { from { opacity:0; transform:translateY(-8px); } }
 .sheet-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:4px; }
 .sheet .btn:focus-visible, .sheet input:focus-visible, .sheet select:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
@@ -340,13 +369,13 @@
 /* 徽标（pill 基础款：工单纸面用） */
 .s-badge { display:inline-flex; align-items:center; gap:5px; flex-shrink:0; padding:1.5px 8px 1.5px 7px; border-radius:999px; font-size:10.5px; font-weight:600; letter-spacing:.01em; white-space:nowrap; border:none; }
 .s-badge::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; flex-shrink:0; }
-.s-badge.lead { background:var(--dh-accent-soft, rgba(0,97,164,.1)); color:var(--accent); }
-.s-badge.warn { background:var(--dh-warning-soft, rgba(217,119,6,.1)); color:var(--dh-warning, #D97706); }
-.s-badge.ok { background:var(--dh-success-soft, rgba(22,163,74,.1)); color:var(--dh-success, #16A34A); }
-.s-badge.fail { background:var(--dh-danger-soft, rgba(220,38,38,.1)); color:var(--dh-danger, #DC2626); }
+.s-badge.lead { background:var(--dh-accent-soft); color:var(--accent); }
+.s-badge.warn { background:var(--dh-warning-soft); color:var(--dh-warning); }
+.s-badge.ok { background:var(--dh-success-soft); color:var(--dh-success); }
+.s-badge.fail { background:var(--dh-danger-soft); color:var(--dh-danger); }
 .s-badge.none { background:var(--bg-muted); color:var(--text-muted); }
 .s-badge.none:empty { display:none; }
-.s-badge.draft { background:var(--dh-warning-soft, rgba(245,158,11,.08)); color:var(--dh-warning, #D97706); border:1px dashed color-mix(in srgb, var(--dh-warning, #D97706) 50%, transparent); }
+.s-badge.draft { background:var(--dh-warning-soft); color:var(--dh-warning); border:1px dashed color-mix(in srgb, var(--dh-warning) 50%, transparent); }
 
 /* —— 工单内排版（沿用属性面板范式） —— */
 .sheet .sf-title { margin-top:8px; }
@@ -356,13 +385,13 @@
 .sheet .sf-prop { display:grid; grid-template-columns:64px minmax(0,1fr); column-gap:12px; align-items:start; margin-top:13px; }
 .sheet .sf-k { font-size:11.5px; letter-spacing:.03em; color:var(--text-muted); padding-top:3px; white-space:nowrap; }
 .sheet .sf-v { min-width:0; }
-.sheet .sf-prop input[type=text] { border:none; background:none; outline:none; border-radius:0; padding:2px 0 4px; font-size:12.5px; color:var(--text-primary); font-family:var(--font-mono, monospace); min-width:0; width:100%; box-sizing:border-box; border-bottom:1px solid transparent; transition:border-color .12s ease; }
+.sheet .sf-prop input[type=text] { border:none; background:none; outline:none; border-radius:0; padding:2px 0 4px; font-size:12.5px; color:var(--text-primary); font-family:var(--font-mono); min-width:0; width:100%; box-sizing:border-box; border-bottom:1px solid transparent; transition:border-color .12s ease; }
 .sheet .sf-prop input[type=text]:hover { border-bottom-color:var(--border-default); }
 .sheet .sf-prop input[type=text]:focus { border-bottom-color:var(--accent); }
 .sheet .sf-prop input[type=text]::placeholder { color:var(--text-muted); opacity:.55; }
-.sheet .sf-eff { font-family:var(--font-mono, monospace); font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:1px 0 2px; }
+.sheet .sf-eff { font-family:var(--font-mono); font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:1px 0 2px; }
 .sheet .sf-code-row { display:flex; gap:14px; align-items:center; margin-top:3px; }
-.sheet .sf-code-row input { border:none; background:none; outline:none; border-radius:0; flex:1; min-width:0; padding:2px 0 4px; font-size:12px; color:var(--accent); font-family:var(--font-mono, monospace); border-bottom:1px solid transparent; transition:border-color .12s ease; }
+.sheet .sf-code-row input { border:none; background:none; outline:none; border-radius:0; flex:1; min-width:0; padding:2px 0 4px; font-size:12px; color:var(--accent); font-family:var(--font-mono); border-bottom:1px solid transparent; transition:border-color .12s ease; }
 .sheet .sf-code-row input:hover { border-bottom-color:var(--border-default); }
 .sheet .sf-code-row input:focus { border-bottom-color:var(--accent); }
 .sheet .sf-code-row input::placeholder { color:var(--text-muted); opacity:.55; }
@@ -383,7 +412,7 @@
 .eng-grid:first-child { margin-top:0; }
 .eng-grid-sw { grid-template-columns:repeat(4, minmax(0,1fr)); }
 .eng-grid-fld { grid-template-columns:1.25fr 1fr 1.45fr; }
-.eng-card { display:flex; align-items:center; gap:8px; min-width:0; background:var(--bg-muted, var(--surface-overlay)); border:1px solid var(--border-default); border-radius:8px; padding:6px 11px; box-sizing:border-box; }
+.eng-card { display:flex; align-items:center; gap:8px; min-width:0; background:var(--bg-muted); border:1px solid var(--border-default); border-radius:8px; padding:6px 11px; box-sizing:border-box; }
 .eng-name { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-primary); white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .eng-ic { width:12px; height:12px; color:var(--text-muted); flex-shrink:0; stroke-width:1.5; }
 .eng-ctl { margin-left:auto; display:inline-flex; align-items:center; gap:5px; flex-shrink:0; min-width:0; }
@@ -391,10 +420,10 @@
 .eng-card .switch-item input[type=checkbox] { width:34px; height:19px; border-radius:10px; }
 .eng-card .switch-item input[type=checkbox]::after { width:15px; height:15px; }
 .eng-card .switch-item input[type=checkbox]:checked::after { transform:translateX(15px); }
-.eng-card input[type=number], .eng-card select { border:1px solid var(--border-default); border-radius:6px; background:var(--bg-input, var(--surface-raised)); padding:3px 7px; font-size:12.5px; color:var(--text-primary); outline:none; font-family:inherit; min-width:0; width:100%; box-sizing:border-box; transition:border-color .12s ease; }
+.eng-card input[type=number], .eng-card select { border:1px solid var(--border-default); border-radius:6px; background:var(--bg-input); padding:3px 7px; font-size:12.5px; color:var(--text-primary); outline:none; font-family:inherit; min-width:0; width:100%; box-sizing:border-box; transition:border-color .12s ease; }
 .eng-card input[type=number] { width:64px; text-align:right; }
 .eng-card input[type=number]:focus, .eng-card select:focus { border-color:var(--accent); }
-.eng-card select option { background:var(--bg-surface, #fff); color:var(--text-primary); }
+.eng-card select option { background:var(--bg-surface); color:var(--text-primary); }
 @media (max-width: 720px) { .eng-grid-sw { grid-template-columns:1fr 1fr; } .eng-grid-fld { grid-template-columns:1fr; } }
 .sheet .sf-foot { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:14px; padding-top:11px; border-top:1px solid var(--border-default); }
 .sheet .sf-foot .spacer { margin-left:auto; }
@@ -409,7 +438,7 @@
 .slot-icon-btn:hover:not(:disabled) { background:var(--bg-muted); color:var(--text-primary); }
 .slot-icon-btn.danger:hover:not(:disabled) { color:var(--dh-danger); background:var(--dh-danger-soft); }
 .slot-icon-btn:disabled { opacity:.35; cursor:default; }
-.btn.on { background:var(--accent); color:var(--text-on-accent, #fff); border-color:var(--accent); }
+.btn.on { background:var(--accent); color:var(--text-on-accent); border-color:var(--accent); }
 .btn.danger { color:var(--dh-danger); border-color:color-mix(in srgb, var(--dh-danger) 35%, transparent); }
 .btn.danger:hover { background:var(--dh-danger-soft); }
 
@@ -1454,6 +1483,63 @@
         if (!result.success) { showToast(result.message || '开始迁移失败', 'error'); return; }
         refreshMigrationOverlay();
     }
+
+    // ===== 备份目录（归在「应用数据目录」卡片下）=====
+    async function loadBackupDir() {
+        const el = document.getElementById('backup-dir-current');
+        try {
+            const data = await apiCall('/api/backup/list');
+            el.textContent = data.backup_dir || '';
+            el.title = data.backup_dir || '';   // 胶囊内超长路径省略显示，悬停看全
+            // 只有自定义过才给「恢复默认」：默认目录下这个按钮没有意义
+            document.getElementById('backup-dir-reset').style.display = data.backup_dir_custom ? '' : 'none';
+        } catch (e) {
+            el.textContent = '读取失败';
+            el.title = '';
+        }
+    }
+
+    function copyBackupDir() {
+        const text = document.getElementById('backup-dir-current').textContent;
+        if (!text || text === '加载中...' || text === '读取失败') { showToast('暂无路径可复制', 'error'); return; }
+        navigator.clipboard.writeText(text).then(() => showToast('已复制'));
+    }
+
+    function browseBackupDir() {
+        openDirectoryPicker('backup-dir-input', applyBackupDir);
+    }
+
+    // 由「选择」目录触发时带参调用；由「应用」按钮触发时读输入框
+    async function applyBackupDir(picked) {
+        const input = document.getElementById('backup-dir-input');
+        const dir = (typeof picked === 'string' ? picked : input.value).trim();
+        if (!dir) { showToast('请填写备份目录，或点「恢复默认」', 'error'); return; }
+        await saveBackupDir(dir);
+    }
+
+    async function saveBackupDir(dir) {
+        const el = document.getElementById('backup-dir-check');
+        const data = await apiCall('/api/backup/set-dir', 'POST', { dir });
+        if (!data || !data.success) {
+            el.textContent = data && data.message || '设置失败';
+            el.style.color = 'var(--danger)';
+            showToast(el.textContent, 'error');
+            return;
+        }
+        el.textContent = data.message || '备份目录已更新';
+        el.style.color = 'var(--success)';
+        document.getElementById('backup-dir-input').value = '';
+        showToast(data.message || '备份目录已更新');
+        loadBackupDir();
+    }
+
+    async function resetBackupDir() {
+        const ok = await confirmDialog('恢复为默认备份目录（应用数据目录下的 backups/）？', { title: '恢复默认备份目录', confirmText: '恢复' });
+        if (!ok) return;
+        await saveBackupDir('');
+    }
+
+    loadBackupDir();
 
     async function testFeishu() {
         const status = document.getElementById('feishu-status');

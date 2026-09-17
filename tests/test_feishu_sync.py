@@ -758,39 +758,31 @@ def test_sync_to_feishu_merges_by_business_key_when_record_id_differs(syncer, db
 
 
 def test_sync_handles_local_delete_then_feishu_modify(syncer, db, monkeypatch):
-    """场景 13/28：本地软删除 + 飞书修改同条 → 删除优先（设计 A 方案）
+    """硬删除语义：本地删除 + 飞书修改同条 → 记录按飞书值复活
 
-    场景：本地软删 r1，飞书端用户同时修改 r1 等级
-    正确行为：删除优先，飞书的修改被删除覆盖
+    固化当前硬删除行为（原「删除优先」属软删除墓碑方案，已废弃）：
+    - 本地硬删除不推送 batch_delete_records
+    - 飞书端仍存在的记录在云端→本地拉取时重新写入本地，字段值以飞书为准
     """
     db.insert_account({"record_id": "r1", "sec_user_id": "sec1", "等级": 3, "synced": True})
-    db.delete_account("r1")  # 软删除
+    db.delete_account("r1")  # 硬删除
 
-    # 飞书动态返回（按表分别计数）
-    table_call_count = {"tblB": 0}
-
-    def mock_get_all_records(app_token, table_id):
-        if table_id == "tblB":
-            table_call_count["tblB"] += 1
-            # 第 1 次（_push_tombstones 检查）：返回 r1（飞书还有）
-            if table_call_count["tblB"] == 1:
-                return [{"record_id": "r1", "fields": {"sec_user_id": "sec1", "等级": 4}}]
-        # 后续（推送墓碑后）：返回空（已被删除）
-        return []
-
-    syncer.feishu.get_all_records.side_effect = mock_get_all_records
+    # 飞书端用户同时修改了 r1 等级
+    syncer.feishu.get_all_records.return_value = [
+        {"record_id": "r1", "fields": {"sec_user_id": "sec1", "等级": 4}}
+    ]
     syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
     syncer.feishu.batch_update_records.return_value = {"code": 0}
     syncer.feishu.batch_delete_records.return_value = {"code": 0}
 
     syncer.sync_incremental()
 
-    # r1 应该被飞书删除（墓碑推送）
-    syncer.feishu.batch_delete_records.assert_any_call(
-        syncer.app_token, "tblB", ["r1"]
-    )
-    # 本地 r1 应该被彻底清除（墓碑被 purge）
-    assert db.get_account_by_id("r1") is None
+    # 硬删除不推送飞书删除
+    syncer.feishu.batch_delete_records.assert_not_called()
+    # 飞书仍有的记录按飞书值复活到本地
+    r1 = db.get_account_by_id("r1")
+    assert r1 is not None
+    assert r1["等级"] == 4
 
 
 def test_sync_handles_dual_field_concurrent_modification(syncer, db, monkeypatch):
@@ -875,8 +867,8 @@ def test_sync_incremental_skips_unsynced_local_records(syncer, db, monkeypatch):
     assert db.get_collection_by_id("local1") is not None
 
 
-def test_sync_incremental_pushes_local_tombstones(syncer, db, monkeypatch):
-    """本地墓碑（is_deleted=1）应该被推送到飞书删除
+def test_sync_incremental_hard_delete_does_not_push_tombstone(syncer, db, monkeypatch):
+    """硬删除模式下本地删除不产生墓碑，也不推送飞书删除（固化硬删除语义）。
 
     注意：mock 飞书返回值需要反映「删除后」状态。
     - 第 1 次调用（_push_tombstones 检查飞书是否真有 r1）：返回 r1
@@ -884,31 +876,22 @@ def test_sync_incremental_pushes_local_tombstones(syncer, db, monkeypatch):
     - 后续调用（_sync_from_feishu）：返回空
     """
     db.insert_collection({"record_id": "r1", "share_code": "abc", "等级": 3, "synced": True})
-    db.delete_collection("r1")  # 软删除
+    db.delete_collection("r1")  # 硬删除
 
-    call_count = {"n": 0}
-
-    def mock_get_all_records(app_token, table_id):
-        call_count["n"] += 1
-        if table_id == "tblA" and call_count["n"] == 1:
-            # 第 1 次调用：_push_tombstones 检查飞书有 r1
-            return [{"record_id": "r1", "fields": {"分享码": "abc", "等级": 3}}]
-        # 后续调用：r1 已被删除
-        return []
-
-    syncer.feishu.get_all_records.side_effect = mock_get_all_records
+    # 飞书端仍有 r1
+    syncer.feishu.get_all_records.return_value = [
+        {"record_id": "r1", "fields": {"分享码": "abc", "等级": 3}}
+    ]
     syncer.feishu.batch_create_records.return_value = {"code": 0, "data": {"records": []}}
     syncer.feishu.batch_update_records.return_value = {"code": 0}
     syncer.feishu.batch_delete_records.return_value = {"code": 0}
 
     syncer.sync_incremental()
 
-    # 应该调用过 batch_delete_records 删除 r1
-    syncer.feishu.batch_delete_records.assert_any_call(
-        syncer.app_token, "tblA", ["r1"]
-    )
-    # 墓碑应该被清除（r1 真的从本地数据库消失）
-    assert db.get_collection_by_id("r1") is None
+    # 硬删除不推送飞书删除
+    syncer.feishu.batch_delete_records.assert_not_called()
+    # 云端仍有的记录会被拉回本地（复活语义）
+    assert db.get_collection_by_id("r1") is not None
 
 
 def test_sync_incremental_empty_feishu_skips_deletion(syncer, db, monkeypatch):

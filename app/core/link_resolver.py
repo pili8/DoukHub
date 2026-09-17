@@ -18,6 +18,15 @@ DOUYIN_DETAIL_PATTERNS = [
     re.compile(r"iesdouyin\.com/share/(?:video|note|slides)/(\d{19})"),
 ]
 
+# 正则：抖音「非主页」内容链接（作品 / 合集 / 直播）
+# 这类链接本身有效，但永远提不出 sec_user_id → 判终态，不该反复重试
+DOUYIN_CONTENT_PATTERNS = [
+    re.compile(r"douyin\.com/(?:share/)?(?:video|note|slides|collection)/"),
+    re.compile(r"douyin\.com/follow/live/"),
+    re.compile(r"live\.douyin\.com/"),
+    re.compile(r"webcast\.amemv\.com/"),
+]
+
 # 正则：小红书用户
 XHS_USER_PATTERNS = [
     re.compile(r"xiaohongshu\.com/user/profile/([A-Za-z0-9_-]+)"),
@@ -60,6 +69,23 @@ def extract_sec_user_id(resolved_url: str, platform: str = "") -> str:
                 return m.group(1)
 
     return ""
+
+
+def classify_douyin_url(url: str) -> str:
+    """判断抖音链接属于哪一类：user（主页）/ content（作品、合集或直播）/ other。
+
+    先判主页再判内容：像 `douyin.com/user/xx?modal_id=video` 这种既含用户
+    又含作品参数的链接，应当按主页处理。
+    """
+    if not url:
+        return "other"
+    for pattern in DOUYIN_USER_PATTERNS:
+        if pattern.search(url):
+            return "user"
+    for pattern in DOUYIN_CONTENT_PATTERNS:
+        if pattern.search(url):
+            return "content"
+    return "other"
 
 
 def build_profile_url(sec_user_id: str, platform: str) -> str:

@@ -6,8 +6,8 @@
         </div>
         <div class="dh-modal-body">
             <div class="directory-picker-toolbar">
-                <button type="button" id="directory-picker-up" class="btn btn-secondary btn-sm" title="上一级" onclick="directoryPickerUp()"><i data-lucide="arrow-up"></i></button>
-                <button type="button" class="btn btn-secondary btn-sm" title="此电脑" onclick="loadDataRootDirectories('', 1)"><i data-lucide="hard-drive"></i></button>
+                <button type="button" id="directory-picker-up" class="picker-icon-btn" title="上一级" aria-label="上一级" onclick="directoryPickerUp()"><i data-lucide="arrow-up"></i></button>
+                <button type="button" class="picker-icon-btn" title="此电脑" aria-label="此电脑" onclick="loadDataRootDirectories('', 1)"><i data-lucide="hard-drive"></i></button>
                 <input id="directory-picker-location" class="input" placeholder="此电脑 / 输入路径后按 Enter" spellcheck="false">
                 <button type="button" id="directory-picker-new" class="btn btn-secondary btn-sm" onclick="toggleCreateDirectory()"><i data-lucide="folder-plus"></i> 新建</button>
             </div>
@@ -27,20 +27,74 @@
 </div>
 
 <style>
+    /* 目录选择弹窗（2026-09-17 重做）：
+       工具栏图标按钮统一 34px，与 .input / .btn 同一基线；
+       列表由「表格行 + 分隔线」改为「圆角行 + 浅底 hover/选中」，更接近系统文件选择器。 */
     .directory-picker-box { display:flex; flex-direction:column; width:min(94vw,680px); max-width:680px; max-height:min(90vh,720px); }
     .directory-picker-toolbar { display:grid; grid-template-columns:auto auto minmax(0,1fr) auto; gap:8px; align-items:center; }
+
+    .picker-icon-btn {
+        display:inline-flex; align-items:center; justify-content:center;
+        width:34px; height:34px; padding:0; flex-shrink:0;
+        border:1px solid var(--dh-border); border-radius:var(--dh-radius-sm);
+        background:var(--dh-surface); color:var(--dh-text-secondary);
+        cursor:pointer;
+        transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+    }
+    .picker-icon-btn:hover { background:var(--dh-accent-soft); border-color:var(--dh-accent); color:var(--dh-accent); }
+    .picker-icon-btn:active { transform:scale(.95); }
+    .picker-icon-btn:focus-visible { outline:2px solid var(--dh-accent); outline-offset:1px; }
+    .picker-icon-btn:disabled { opacity:.38; cursor:not-allowed; pointer-events:none; }
+    .picker-icon-btn svg[data-lucide], .picker-icon-btn i { width:16px; height:16px; }
+
     .directory-picker-create { display:flex; gap:8px; margin-top:8px; }
     .directory-picker-create .input { min-width:0; }
-    .directory-picker-list { min-height:260px; max-height:min(48vh,430px); overflow:auto; margin-top:10px; border:1px solid var(--border-default); border-radius:var(--radius-sm); background:var(--bg-input); }
-    .directory-item { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; min-height:42px; padding:0 8px; border-bottom:1px solid var(--border-default); }
-    .directory-item:last-child { border-bottom:0; }
-    .directory-item.selected { background:var(--bg-hover); box-shadow:inset 2px 0 0 var(--accent); }
-    .directory-item-main { display:flex; align-items:center; gap:10px; min-width:0; padding:9px 6px; background:transparent; border:0; color:var(--text-primary); font:inherit; text-align:left; cursor:pointer; }
+
+    .directory-picker-list {
+        min-height:260px; max-height:min(48vh,430px); overflow:auto;
+        margin-top:10px; padding:5px;
+        border:1px solid var(--dh-border); border-radius:var(--dh-radius-sm);
+        background:var(--dh-surface);
+    }
+
+    .directory-item {
+        display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:6px;
+        min-height:38px; padding:0 4px;
+        border-radius:var(--dh-radius-sm);
+        transition: background var(--transition-fast);
+    }
+    .directory-item + .directory-item { margin-top:2px; }
+    .directory-item:hover { background:var(--dh-surface-muted); }
+    .directory-item.selected { background:var(--dh-accent-soft); }
+    .directory-item.selected .directory-item-name { color:var(--dh-accent); font-weight:600; }
+    .directory-item.selected > .directory-item-main > svg[data-lucide] { color:var(--dh-accent); }
+
+    .directory-item-main {
+        display:flex; align-items:center; gap:10px; min-width:0;
+        padding:8px 6px; background:transparent; border:0;
+        color:var(--dh-text); font:inherit; text-align:left; cursor:pointer;
+    }
+    .directory-item-main > svg[data-lucide] { flex-shrink:0; width:16px; height:16px; color:var(--dh-text-muted); }
+    .directory-item:hover .directory-item-main > svg[data-lucide] { color:var(--dh-text-secondary); }
     .directory-item-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .directory-item-open { width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:8px; background:transparent; color:var(--text-secondary); cursor:pointer; }
-    .directory-item-open:hover, .directory-item-main:hover { background:var(--bg-hover); color:var(--text-primary); }
-    .directory-picker-empty { padding:28px 12px; color:var(--text-muted); text-align:center; font-size:13px; }
-    #directory-picker-status { display:block; margin-top:8px; color:var(--text-muted); }
+
+    .directory-item-open {
+        width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center;
+        border:0; border-radius:var(--dh-radius-sm); background:transparent;
+        color:var(--dh-text-muted); cursor:pointer;
+        transition: background var(--transition-fast), color var(--transition-fast);
+    }
+    .directory-item-open:hover { background:var(--dh-surface); color:var(--dh-accent); }
+    .directory-item-open svg[data-lucide], .directory-item-open i { width:15px; height:15px; }
+
+    .directory-picker-empty {
+        display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px;
+        padding:36px 12px; color:var(--dh-text-muted); text-align:center; font-size:13px;
+    }
+    .directory-picker-empty svg[data-lucide], .directory-picker-empty i { width:26px; height:26px; opacity:.45; }
+
+    #directory-picker-status { display:block; margin-top:8px; color:var(--dh-text-muted); font-size:12px; word-break:break-all; }
+
     @media (max-width:560px) {
         .directory-picker-box { padding:16px; }
         .directory-picker-list { min-height:220px; }
@@ -76,8 +130,9 @@
         if (!directories.length) {
             const empty = document.createElement('div');
             empty.className = 'directory-picker-empty';
-            empty.textContent = '这里没有可进入的文件夹';
+            empty.innerHTML = '<i data-lucide="folder"></i><span>这里没有可进入的文件夹</span>';
             list.appendChild(empty);
+            if (window.lucide) lucide.createIcons();
             return;
         }
 

@@ -755,7 +755,7 @@ class Database:
             rows = conn.execute(
                 """
                 SELECT * FROM collection_batches
-                WHERE status IN ('pending', 'running', 'cancelling')
+                WHERE status IN ('pending', 'running', 'paused', 'cancelling')
                 ORDER BY created_at, id
                 """
             ).fetchall()

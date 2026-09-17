@@ -19,6 +19,7 @@ def test_env_override_is_used(tmp_path, monkeypatch):
 
 
 def test_missing_bootstrap_creates_default_once(tmp_path, monkeypatch):
+    monkeypatch.delenv("DOUKHUB_DATA_ROOT", raising=False)
     bootstrap = tmp_path / "data_root.json"
     default_root = tmp_path / ".doukhub-test"
     monkeypatch.setattr("app.core.data_root.BOOTSTRAP_PATH", bootstrap)
@@ -36,6 +37,7 @@ def test_missing_bootstrap_creates_default_once(tmp_path, monkeypatch):
 
 
 def test_unavailable_bootstrap_target_does_not_fall_back(tmp_path, monkeypatch):
+    monkeypatch.delenv("DOUKHUB_DATA_ROOT", raising=False)
     bootstrap = tmp_path / "data_root.json"
     missing = tmp_path / "missing-root"
     bootstrap.write_text(

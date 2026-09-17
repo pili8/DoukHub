@@ -57,17 +57,23 @@ def free_port() -> None:
     try:
         out = subprocess.run(
             ["netstat", "-aon"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
             timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
         ).stdout
     except Exception:
+        return
+    if not out:
         return
     for line in out.splitlines():
         if f":{PORT}" in line and "LISTENING" in line:
             pid = line.split()[-1]
             if pid.isdigit() and pid != "0":
-                subprocess.run(["taskkill", "/F", "/T", "/PID", pid],
-                               capture_output=True, timeout=10,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
+                try:
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", pid],
+                                   capture_output=True, timeout=10,
+                                   creationflags=subprocess.CREATE_NO_WINDOW)
+                except Exception:
+                    pass
 
 
 def start_server() -> bool:
@@ -126,13 +132,39 @@ def wait_ready(timeout: float = 20.0) -> bool:
     return False
 
 
+def _busy_reason() -> str:
+    """查询服务端是否有任务在跑；有则返回一句原因，没有（或问不到）返回空串。
+
+    托盘与 DoukHub 是两个进程，改代码触发的重启是 taskkill /F /T 强杀：
+    正在跑的解析/采集任务会被硬中断（进度能靠数据库续跑，但任务面板会清空、
+    被杀瞬间那条要重做）。所以有任务在跑时把重启推迟到任务结束。
+    问不到服务（没启动/正在重启）时按"没任务"处理，不阻塞重启。
+    """
+    try:
+        resp = httpx.get(f"{URL}/api/tasks", timeout=2, trust_env=False)
+        tasks = resp.json().get("tasks", [])
+    except Exception:
+        return ""
+    running = [t for t in tasks if t.get("status") in ("pending", "running")]
+    if not running:
+        return ""
+    kinds = "、".join(sorted({str(t.get("type") or "任务") for t in running}))
+    return f"有 {len(running)} 个任务在运行（{kinds}）"
+
+
 def _watch_files() -> None:
     """后台线程:轮询 app/ 目录 .py 文件 mtime,服务运行中检测到变化则自动重启。
 
     uvicorn --reload 依赖 Windows 控制台信号,与隐藏窗口互斥,故由托盘自实现。
     stop/start 不修改文件 mtime,且每次检测后重建快照,不会误触发。
+
+    发现改动时若服务端有任务在跑，则先挂起本次重启（pending_restart），
+    每 3 秒复查一次，任务一结束立即执行——既不打断任务，也不丢掉这次改动。
     """
     files = {p: p.stat().st_mtime for p in APP_DIR.rglob("*.py")}
+    pending_restart = False
+    last_hint = ""
+    idle_ticks = 0
     while True:
         time.sleep(1)
         if SERVER_PROC is None or SERVER_PROC.poll() is not None:
@@ -141,9 +173,25 @@ def _watch_files() -> None:
             snapshot = {p: p.stat().st_mtime for p in APP_DIR.rglob("*.py")}
         except OSError:
             continue  # 遍历期间文件被删,下轮再试
-        if snapshot == files:
+        if snapshot != files:
+            files = snapshot
+            pending_restart = True
+            last_hint = ""
+        if not pending_restart:
             continue
-        files = snapshot
+        # 挂起期间每 3 秒复查一次任务状态，不必每秒都问服务
+        idle_ticks += 1
+        if idle_ticks < 3 and last_hint:
+            continue
+        idle_ticks = 0
+        reason = _busy_reason()
+        if reason:
+            if reason != last_hint:
+                logger.info(f"检测到 app/ 代码变化，但{reason}，延后重启（任务结束后自动执行）")
+                last_hint = reason
+            continue
+        pending_restart = False
+        last_hint = ""
         logger.info("检测到 app/ 代码变化,自动重启服务")
         stop_server()
         start_server()

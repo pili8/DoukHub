@@ -10,8 +10,18 @@ import logging
 import httpx
 
 from .cookie_pool import CookiePool
+from .link_resolver import classify_douyin_url, extract_sec_user_id
 
 _logger = logging.getLogger("doukhub.collector")
+
+# 短码长度下限：抖音/TikTok 短码是 base62（如 iMJV5Ajw），低于此值必然是截断垃圾
+MIN_SHARE_CODE_LEN = 6
+SHARE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_.\-]+$")
+# 判「链接失效」前再确认一次的间隔。
+# 曾把「同一短码时而成功时而失败」解释为 TTD 抖动，实测真因是 httpx 继承了系统代理：
+# 同一条短码「走代理 404 / 不走代理 200」（见 __init__ 的 trust_env=False）。
+# 复认挡不住代理类故障（同一环境两次都会被拦），这里只作为对偶发抖动的廉价保险。
+BAD_LINK_RECHECK_DELAY_SECONDS = 1.5
 
 
 @dataclass
@@ -56,6 +66,55 @@ class CollectResult:
         return 0
 
 
+@dataclass
+class ResolveOutcome:
+    """短链解析结果：把笼统的「失败」拆成可判定的类型。
+
+    上层据此决定**跳过**还是**退避重试**（见 docs/账号解析健壮性修复方案.md）：
+        ok          拿到用户主页链接，可提取 sec_user_id
+        bad_link    链接永久失效（分享码残缺 / TTD 静默跳首页）→ 判终态，跳过，不退避
+        not_profile 链接有效但指向作品、合集或直播 → 判终态，跳过，不退避
+        unsupported 平台暂不支持（如小红书）→ 判终态，跳过，不退避
+        ttd_down    TTD 连不上、超时 → 服务层故障，退避后重试
+        ttd_http    TTD 返回 4xx/5xx、空 url → 服务层故障，退避后重试
+        bad_json    TTD 返回非 JSON → 服务层故障，退避后重试
+    """
+    url: str = ""
+    kind: str = "ok"
+    detail: str = ""
+
+    @property
+    def is_ok(self) -> bool:
+        return self.kind == "ok"
+
+    @property
+    def is_terminal(self) -> bool:
+        """True = 这条记录可以判死了，不该再被重试。"""
+        return self.kind in ("bad_link", "not_profile", "unsupported")
+
+    @property
+    def is_service_failure(self) -> bool:
+        """True = 是 TTD 这边的毛病，值得退避后重试。"""
+        return self.kind in ("ttd_down", "ttd_http", "bad_json")
+
+
+def is_cookie_failure(info: dict) -> bool:
+    """资料获取失败是否指向 Cookie 失效（决定要不要换 Cookie）。
+
+    TTD 拿不到 data 时基本只有两种可能：Cookie 过期，或封控；
+    两种都该换个 Cookie 再试，所以 no_data 一并归为 Cookie 类故障。
+    """
+    if not info:
+        return False
+    return info.get("_kind") in ("cookie", "no_data")
+
+
+def _looks_like_cookie_error(data: Any) -> bool:
+    """TTD 返回体里是否直接点明 Cookie 有问题。"""
+    blob = str(data).lower()
+    return "cookie" in blob or "登录" in blob or "验证" in blob
+
+
 TAB_MAP = {
     "发布": "post",
     "喜欢": "favorite",
@@ -77,7 +136,11 @@ class Collector:
         self.xhs_url = xhs_url.rstrip("/")
         self.cookie_mode = cookie_mode
         self.cookie_usage_limit = cookie_usage_limit
-        self._client = httpx.AsyncClient(timeout=300)
+        # trust_env=False：本机回环请求绝不能被系统代理接管。
+        # 实测（TTD access log）：一旦走代理，请求行会从 `POST /douyin/share`
+        # 变成 `POST http%3A//127.0.0.1%3A5555/douyin/share`，TTD 路由匹配不上直接 404。
+        # 上层会把 404 当成"服务故障"去退避重试，看起来就像链接失效、且"有时行有时不行"。
+        self._client = httpx.AsyncClient(timeout=300, trust_env=False)
 
     async def collect_account(self, account: Account, cookie: str = "") -> CollectResult:
         """采集单个账号的所有作品"""
@@ -232,35 +295,100 @@ class Collector:
         await asyncio.gather(*tasks)
         return results
 
+    @staticmethod
+    def is_valid_share_code(code: str) -> bool:
+        """本地格式预校验：明显残缺的短码直接判死链，连一次请求都不用发。
+
+        库里那些 `If` / `3` / `U` / `xo` 属于历史脏数据，永远解析不出来；
+        完整 URL 则放行，交给 TTD 判定。
+        """
+        code = (code or "").strip()
+        if not code:
+            return False
+        if code.startswith("http"):
+            return True
+        return len(code) >= MIN_SHARE_CODE_LEN and bool(SHARE_CODE_PATTERN.match(code))
+
     async def resolve_short_url(self, url: str, platform: str = "douyin", proxy: str = "") -> str:
-        """调用 TTD API 解析短链接"""
-        if platform == "douyin":
-            endpoint = f"{self.ttd_url}/douyin/share"
-        elif platform == "tiktok":
-            endpoint = f"{self.ttd_url}/tiktok/share"
-        else:
-            return ""
+        """调用 TTD API 解析短链接（兼容旧调用方，只返回 URL 字符串）。"""
+        outcome = await self.resolve_short_url_ex(url, platform, proxy)
+        return outcome.url
 
+    async def resolve_short_url_ex(self, url: str, platform: str = "douyin", proxy: str = "") -> ResolveOutcome:
+        """调用 TTD API 解析短链接，并给出可判定的失败类型。
+
+        TTD 对失效链接**没有业务错误码**，表现为「200 但 url 跳到平台首页」；
+        所以死链只能靠解析出来的 URL 反推，这也是本方法存在的理由。
+        """
+        if platform not in ("douyin", "tiktok"):
+            return ResolveOutcome(kind="unsupported", detail=f"暂不支持的平台: {platform or '未知'}")
+
+        code = (url or "").strip()
+        if not code:
+            return ResolveOutcome(kind="bad_link", detail="分享码为空")
+        if not self.is_valid_share_code(code):
+            return ResolveOutcome(kind="bad_link", detail=f"分享码残缺({len(code)} 字符): {code}")
+
+        endpoint = f"{self.ttd_url}/douyin/share" if platform == "douyin" else f"{self.ttd_url}/tiktok/share"
+        is_short_code = not code.startswith("http")
+        # 直接粘贴的完整作品/直播链接：本地正则就能判，不必发给 TTD
+        if not is_short_code and platform == "douyin" and classify_douyin_url(code) == "content":
+            return ResolveOutcome(kind="not_profile", detail=f"本身就是作品或直播链接: {code[:80]}")
         # 补全短链接前缀（TTD API 需要完整 URL）
-        if url and not url.startswith("http"):
-            if platform == "douyin":
-                url = f"https://v.douyin.com/{url}/"
-            elif platform == "tiktok":
-                url = f"https://vm.tiktok.com/{url}"
+        if is_short_code:
+            code = f"https://v.douyin.com/{code}/" if platform == "douyin" else f"https://vm.tiktok.com/{code}"
 
-        payload = {"text": url}
+        payload: dict[str, Any] = {"text": code}
         if proxy:
             payload["proxy"] = proxy
 
+        # 死链复认：短码在判死前多确认一次，避免把有效链接误杀成不可逆的终态。
+        # 局限：代理类故障下两次请求都会被拦，复认无效——那类问题的根治在 trust_env=False。
+        for attempt in range(2 if is_short_code else 1):
+            if attempt:
+                await asyncio.sleep(BAD_LINK_RECHECK_DELAY_SECONDS)
+            outcome = await self._request_share(endpoint, payload, platform)
+            if outcome.kind != "bad_link":
+                return outcome
+        return outcome
+
+    async def _request_share(self, endpoint: str, payload: dict, platform: str) -> ResolveOutcome:
+        """发一次短链解析请求，并按 TTD 的返回内容判定类型。"""
         try:
-            # 使用较短的超时时间（30秒）
             resp = await self._client.post(endpoint, json=payload, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("url", "")
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            return ResolveOutcome(kind="ttd_down", detail=f"TTD 连接失败: {e}")
+        except httpx.TimeoutException as e:
+            return ResolveOutcome(kind="ttd_down", detail=f"TTD 超时: {e}")
         except Exception as e:
-            _logger.warning(f"短链接解析失败: {url} - {e}")
-            return ""
+            return ResolveOutcome(kind="ttd_http", detail=f"{type(e).__name__}: {e}")
+
+        if resp.status_code >= 400:
+            return ResolveOutcome(kind="ttd_http", detail=f"TTD 返回 HTTP {resp.status_code}")
+        try:
+            data = resp.json()
+        except Exception:
+            return ResolveOutcome(kind="bad_json", detail=f"响应非 JSON: {resp.text[:120]}")
+
+        resolved = (data.get("url") or "").strip()
+        if not resolved:
+            # 空 url 更像 TTD 半死不活，而不是链接死了 → 归服务层，退避后还会再试
+            return ResolveOutcome(kind="ttd_http", detail="TTD 返回空 url")
+        platform_hint = payload.get("platform_hint", "") or self._platform_of(endpoint)
+        if not extract_sec_user_id(resolved, platform_hint):
+            if platform_hint == "douyin" and classify_douyin_url(resolved) == "content":
+                # 链接有效，只是指向作品/直播 → 提不出 sec_user_id，判终态
+                return ResolveOutcome(kind="not_profile", detail=f"指向作品或直播: {resolved[:80]}")
+            # 死链的真身：TTD 静默跳到平台首页，URL 里没有用户主页特征
+            return ResolveOutcome(kind="bad_link", detail=f"未跳到用户页: {resolved[:80]}")
+
+        _logger.info(f"短链解析成功: {payload.get('text', '')[:60]} → {resolved[:80]}")
+        return ResolveOutcome(url=resolved, kind="ok")
+
+    @staticmethod
+    def _platform_of(endpoint: str) -> str:
+        """从接口路径反推平台（douyin / tiktok）。"""
+        return "tiktok" if "/tiktok/" in endpoint else "douyin"
 
     async def get_account_info(self, sec_user_id: str, platform: str = "douyin", cookie: str = "") -> dict:
         """通过 sec_user_id 获取账号资料（账号名称、粉丝数、作品数等）"""
@@ -304,15 +432,21 @@ class Collector:
                     "uid": d.get("uid", ""),
                     "unique_id": d.get("unique_id", ""),
                 }
-            # TTD 返回了但 data 为空
-            return {"sec_user_id": sec_user_id, "_error": f"TTD 返回无 data 字段: {str(data)[:200]}"}
+            # TTD 返回了但 data 为空：绝大多数是 Cookie 失效/封控
+            return {
+                "sec_user_id": sec_user_id,
+                "_kind": "cookie" if _looks_like_cookie_error(data) else "no_data",
+                "_error": f"TTD 返回无 data 字段: {str(data)[:200]}",
+            }
 
         except httpx.ReadTimeout:
-            return {"sec_user_id": sec_user_id, "_error": "TTD 接口超时(30s)，可能服务负载高或网络慢"}
+            return {"sec_user_id": sec_user_id, "_kind": "ttd_down", "_error": "TTD 接口超时(30s)，可能服务负载高或网络慢"}
         except httpx.ConnectError as e:
-            return {"sec_user_id": sec_user_id, "_error": f"TTD 连接失败: {e}"}
+            return {"sec_user_id": sec_user_id, "_kind": "ttd_down", "_error": f"TTD 连接失败: {e}"}
+        except httpx.HTTPStatusError as e:
+            return {"sec_user_id": sec_user_id, "_kind": "ttd_http", "_error": f"TTD 返回 HTTP {e.response.status_code}"}
         except Exception as e:
-            return {"sec_user_id": sec_user_id, "_error": f"TTD 请求异常: {type(e).__name__}: {e}"}
+            return {"sec_user_id": sec_user_id, "_kind": "ttd_http", "_error": f"TTD 请求异常: {type(e).__name__}: {e}"}
 
     async def validate_cookie(self, cookie: str, platform: str = "douyin") -> dict:
         """验证 Cookie 是否有效，返回详细状态。

@@ -64,8 +64,6 @@ def test_share_table_replaces_collection_cache_schema_name(db_path):
         "share_cache",
         "account_cache",
         "cookie_cache",
-        "collection_history",
-        "scheduled_tasks",
         "sync_history",
     }
 

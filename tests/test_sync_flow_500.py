@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from app import main as main_module
+from app.core.collector import ResolveOutcome
 from app.core.database import Database
 from app.core import syncer_v2
 from app.core.syncer_v2 import Syncer
@@ -41,9 +42,9 @@ def test_account_flow_handles_500_records(tmp_path, monkeypatch):
     db = Database(tmp_path / "stress.db")
     total = 500
 
-    async def resolve_short_url(share, platform):
+    async def resolve_short_url_ex(share, platform):
         sec_user_id = f"sec-{share[-4:]}"
-        return f"https://www.douyin.com/user/{sec_user_id}"
+        return ResolveOutcome(url=f"https://www.douyin.com/user/{sec_user_id}")
 
     async def get_account_info(sec_user_id, platform, cookie):
         return {
@@ -59,7 +60,7 @@ def test_account_flow_handles_500_records(tmp_path, monkeypatch):
         feishu=None,
         collector=SimpleNamespace(
             ttd_url="http://ttd",
-            resolve_short_url=resolve_short_url,
+            resolve_short_url_ex=resolve_short_url_ex,
             get_account_info=get_account_info,
         ),
         config={},

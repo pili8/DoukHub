@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Config
+from app.core.database import Database
 from app.core.history import HistoryDB
 
 
@@ -19,6 +20,7 @@ def app_env(tmp_path):
 
     test_config = Config(config_file)
     test_history = HistoryDB(data_dir)
+    test_database = Database()   # 隔离数据根下的 tmp 库
 
     # 用 MagicMock 避免真实启动 Downloader 服务
     mock_services = MagicMock()
@@ -35,6 +37,7 @@ def app_env(tmp_path):
     orig = {
         "config": app_main.config,
         "history": app_main.history,
+        "database": app_main.database,
         "services": app_main.services,
         "feishu_client": app_main.feishu_client,
         "collector": app_main.collector,
@@ -45,6 +48,7 @@ def app_env(tmp_path):
     # 替换为测试对象
     app_main.config = test_config
     app_main.history = test_history
+    app_main.database = test_database
     app_main.services = mock_services
     app_main.feishu_client = None
     app_main.collector = None

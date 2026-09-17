@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from .core.config import Config
 from .core.feishu import FeishuClient
-from .core.collector import Collector, Account
+from .core.collector import Collector, Account, is_cookie_failure
 from .core.cookie_pool import CookiePool
 from .core.syncer import Syncer
 from .core.syncer_v2 import Syncer as SyncerV2
@@ -137,10 +137,13 @@ def get_download_worker() -> DownloadWorker:
 def get_single_work_client() -> httpx.AsyncClient:
     global single_work_client
     if single_work_client is None:
+        # trust_env=False：调 TTD 走的是本机回环，不能被系统代理改写路径（会 404）。
+        # 注：若将来要挂代理下载海外平台（TikTok），这一处需单独放开。
         single_work_client = httpx.AsyncClient(
             timeout=300,
             follow_redirects=True,
             headers={"User-Agent": "Mozilla/5.0"},
+            trust_env=False,
         )
     return single_work_client
 
@@ -275,7 +278,7 @@ async def lifespan(app: FastAPI):
         single_work_client = None
 
 
-app = FastAPI(title="DoukHub", version="2.2.7", lifespan=lifespan)
+app = FastAPI(title="DoukHub", version="2.2.11", lifespan=lifespan)
 
 
 
@@ -609,7 +612,12 @@ async def api_backup_create():
 @app.get("/api/backup/list")
 async def api_backup_list():
     """列出所有备份"""
-    return {"backups": backup.list_backups(), "backup_dir": str(backup.get_backup_dir())}
+    return {
+        "backups": backup.list_backups(),
+        "backup_dir": str(backup.get_backup_dir()),
+        # 供前端决定是否显示「恢复默认」：目录是自定义的才需要
+        "backup_dir_custom": bool(str(config.get("backup.dir", "") or "").strip()),
+    }
 
 
 @app.post("/api/backup/restore")
@@ -698,6 +706,49 @@ async def api_backup_open_dir():
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@app.post("/api/backup/set-dir")
+async def api_backup_set_dir(payload: dict):
+    """设置备份目录；dir 传空字符串 = 恢复默认（数据根目录下的 backups/）。
+
+    校验必须是绝对路径，并实际创建 + 试写，避免保存一个根本写不进去的目录，
+    等到自动备份时才失败。切换后旧目录里的备份不自动搬移（跨盘移动可能很慢），
+    但会在消息里说明旧目录还剩几份，避免用户以为备份丢了。
+    """
+    raw = str(payload.get("dir", "") or "").strip()
+    old_dir = backup.get_backup_dir()
+    old_count = len(backup.list_backups())  # 必须改配置前统计，它读的是"当前"目录
+
+    if raw:
+        target = Path(raw).expanduser()
+        if not target.is_absolute():
+            return {"success": False, "message": "请填写绝对路径，例如 D:\\Backups\\DoukHub"}
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return {"success": False, "message": f"目录无法创建：{e}"}
+        if not target.is_dir():
+            return {"success": False, "message": "该路径不是文件夹"}
+        probe = target / ".doukhub_write_probe"
+        try:
+            probe.write_text("ok", encoding="utf-8")
+        except Exception as e:
+            return {"success": False, "message": f"目录不可写：{e}"}
+        finally:
+            try:
+                probe.unlink()
+            except OSError:
+                pass
+
+    config.set("backup.dir", raw)
+    config.save()
+
+    new_dir = backup.get_backup_dir()
+    message = "已恢复默认备份目录" if not raw else "备份目录已更新"
+    if str(new_dir) != str(old_dir) and old_count:
+        message += f"；旧目录里还有 {old_count} 份备份（未自动搬移）：{old_dir}"
+    return {"success": True, "message": message, "backup_dir": str(new_dir)}
 
 
 @app.get("/dedup", response_class=HTMLResponse)
@@ -946,7 +997,7 @@ async def api_status():
     async def _check_service(url: str) -> dict:
         """探测单个 downloader 服务是否在线"""
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
                 resp = await client.get(url)
                 if resp.status_code in (200, 307, 404):
                     return {"connected": True, "message": "运行中"}
@@ -999,7 +1050,7 @@ async def api_test_ttd_status():
     collector = get_collector()
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
             resp = await client.get(f"{collector.ttd_url}/docs")
             if resp.status_code == 200:
                 return {"success": True, "message": "TTD API 可用"}
@@ -1014,7 +1065,7 @@ async def api_test_xhs_status():
     collector = get_collector()
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=5) as client:
+        async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
             resp = await client.get(f"{collector.xhs_url}/")
             if resp.status_code in (200, 307, 404):
                 return {"success": True, "message": "XHS API 可用"}
@@ -1329,18 +1380,104 @@ async def api_sync_fetch_info():
 
 # ========== 新同步器 API（使用数据库） ==========
 MAX_INLINE_SYNC_ITEMS = 100
-MAX_CONSECUTIVE_TTD_FAILURES = 20
+# 连续失败达到此值时触发一轮长冷却后自动重试（只统计服务层失败，死链不计入）
+MAX_CONSECUTIVE_TTD_FAILURES = 5
+# 长冷却后最多自动重试几轮（每轮重新从 0 开始计连续失败）
+MAX_TTD_RETRY_ROUNDS = 2
+# 长冷却基数：第 n 轮冷却 = 基数 × n，保持递增（15s → 30s）
+TTD_RETRY_COOLDOWN_BASE_SECONDS = 15
+# 每次失败后的线性退避基数（第 n 次失败等 n × 此值秒 → 2/4/6/8/10）
+TTD_BACKOFF_BASE_SECONDS = 2
+# 解析终态映射：解析结果类型 → 表里的「解析状态」取值
+# 终态 = 已退出流程，不再被重试（区别于循环态的「解析失败」）
+TERMINAL_STATUS = {
+    "bad_link": "链接失效",      # 分享码残缺 / 账号注销跳首页
+    "not_profile": "非主页链接",  # 有效链接，但指向作品或直播，提不出 sec_user_id
+    "unsupported": "暂不支持",    # 平台不在解析范围内（如小红书）
+}
 
 
-def _stop_after_ttd_failures(tm, task_id, failures, remaining):
-    error = f"TTD 连续失败 {failures} 次，已中止"
+def _ttd_backoff_seconds(consecutive_failures: int) -> float:
+    """线性退避：第 1 次失败等 5s，第 2 次等 10s，… 第 5 次等 25s。"""
+    return consecutive_failures * TTD_BACKOFF_BASE_SECONDS
+
+
+async def _handle_ttd_failures(tm, task_id, consecutive_failures, remaining, retry_round):
+    """处理连续失败：退避 → 判定是否进入长冷却自动重试 → 最终终止。
+
+    返回 True 表示应中止整个任务（已耗尽重试轮次），返回 False 表示继续循环。
+    """
+    backoff = _ttd_backoff_seconds(consecutive_failures)
     tm.add_log(
         task_id,
-        f"X 连续失败 {failures} 次，剩余 {remaining} 条暂缓；请检查 TTD 后重试",
+        f"… TTD 连续失败 {consecutive_failures} 次，退避 {backoff:.0f}s 后继续",
+        "warning",
+    )
+    await asyncio.sleep(backoff)
+
+    if consecutive_failures < MAX_CONSECUTIVE_TTD_FAILURES:
+        return False  # 还没到阈值，继续循环
+
+    # 达到阈值，看还有没有重试轮次
+    if retry_round < MAX_TTD_RETRY_ROUNDS and remaining > 0:
+        # 冷却递增：第 1 轮 15s、第 2 轮 30s……避免每次一刀切等同样久
+        cooldown = TTD_RETRY_COOLDOWN_BASE_SECONDS * (retry_round + 1)
+        tm.add_log(
+            task_id,
+            f"⚠ 连续失败 {consecutive_failures} 次，进入第 {retry_round + 1}/{MAX_TTD_RETRY_ROUNDS} 轮冷却 "
+            f"({cooldown}s)，剩余 {remaining} 条将自动重试",
+            "warning",
+        )
+        await asyncio.sleep(cooldown)
+        return False  # 交由调用方重置计数器并继续
+
+    # 重试轮次已耗尽或没有剩余记录，彻底终止
+    error = (
+        f"TTD 连续失败 {consecutive_failures} 次，已重试 {retry_round} 轮，已中止"
+        if retry_round > 0
+        else f"TTD 连续失败 {consecutive_failures} 次，已中止"
+    )
+    tm.add_log(
+        task_id,
+        f"X 连续失败 {consecutive_failures} 次，剩余 {remaining} 条暂缓；请检查 TTD 后重试",
         "error",
     )
     tm.update(task_id, status="failed", error=error)
     return True
+
+
+COOKIE_FAILURE_THRESHOLD = 2
+
+def _cookie_is_dead(cookie_failures: dict, cookie: str) -> bool:
+    """同一 Cookie 连续失败达到阈值即视为本轮失效，拉黑不再使用。"""
+    return cookie_failures.get(cookie, 0) >= COOKIE_FAILURE_THRESHOLD
+
+async def _fetch_account_info(col, sec_user_id, platform, cookie_list, cookie_failures, start_index, tm, task_id):
+    """获取账号资料；Cookie 失效就换下一个。
+
+    以前是 `cookie_list[i % len]` 硬轮换，一个过期 Cookie 照样被反复使用，
+    整批账号全挂还不换人。现在：
+
+    - 同一个 Cookie 连续失败 ``COOKIE_FAILURE_THRESHOLD`` 次才拉黑
+      （单个异常账号也会让所有 Cookie 返回空，一次失败就拉黑会误伤好 Cookie）
+    - 每次调用按 ``start_index`` 起轮换，保证不会只盯着一两个 Cookie 用
+    - 返回空 dict 表示「本轮可用 Cookie 都没取到资料」
+    """
+    n = len(cookie_list)
+    for step in range(n):
+        cookie = cookie_list[(start_index + step) % n]
+        if _cookie_is_dead(cookie_failures, cookie):
+            continue
+        info = await col.get_account_info(sec_user_id, platform, cookie)
+        if info and info.get("nickname"):
+            return info
+        if not is_cookie_failure(info):
+            return info  # 不是 Cookie 的毛病，换了也没用
+        cookie_failures[cookie] = cookie_failures.get(cookie, 0) + 1
+        if _cookie_is_dead(cookie_failures, cookie):
+            dead = sum(1 for c in cookie_list if _cookie_is_dead(cookie_failures, c))
+            tm.add_log(task_id, f"… Cookie 连续失效，已拉黑（{dead}/{n}）", "warning")
+    return {}
 
 
 @app.post("/api/sync/v2/import")
@@ -1421,7 +1558,7 @@ async def _run_update_collection(task):
     # TTD 预检(避免逐条等 30s 超时)
     ttd_available = False
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
+        async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
             resp = await client.get(f"{s.collector.ttd_url}/")
             if resp.status_code in (200, 307, 404):
                 ttd_available = True
@@ -1441,7 +1578,9 @@ async def _run_update_collection(task):
     tm.add_log(task.task_id, f"需要处理 {len(to_process)} 条记录", "info")
     success = 0
     failed = 0
+    skipped = 0
     consecutive_ttd_failures = 0
+    retry_round = 0
     for i, collection in enumerate(to_process):
         if tm.is_cancelled(task.task_id):
             tm.update(task.task_id, status="cancelled")
@@ -1450,29 +1589,37 @@ async def _run_update_collection(task):
         platform = collection.get("平台") or "douyin"
         tm.add_log(task.task_id, f"[{i+1}/{len(to_process)}] {share}", "info")
         try:
-            resolved_url = await s.collector.resolve_short_url(share, platform)
-            sec_user_id = extract_sec_user_id(resolved_url, platform)
-            if not sec_user_id:
-                failed += 1
-                if not resolved_url:
-                    reason = "TTD 返回空(服务不可用或超时)"
-                else:
-                    reason = f"URL 无法提取 sec_user_id: {resolved_url[:120]}"
-                s.db.update_collection(collection["record_id"], {"解析状态": "解析失败"})
-                tm.add_log(task.task_id, f"X {share}: {reason}", "error")
-                tm.update(task.task_id, success=success, failed=failed)
-                consecutive_ttd_failures += 1
-                if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES:
-                    remaining = len(to_process) - i - 1
-                    error = f"TTD 连续失败 {consecutive_ttd_failures} 次，已中止"
-                    tm.add_log(
-                        task.task_id,
-                        f"X 连续失败 {consecutive_ttd_failures} 次，剩余 {remaining} 条暂缓；请检查 TTD 后重试",
-                        "error",
-                    )
-                    tm.update(task.task_id, status="failed", error=error)
-                    return
+            outcome = await s.collector.resolve_short_url_ex(share, platform)
+
+            if outcome.is_terminal:
+                # 死链 / 平台不支持：一次判终态，之后永不重试（不进退避、不进冷却）
+                new_status = TERMINAL_STATUS.get(outcome.kind, "暂不支持")
+                s.db.update_collection(collection["record_id"], {"解析状态": new_status})
+                skipped += 1
+                # 终态不可逆，留一句回退提示：历史上「疑似死链」里有过被环境因素（代理继承）
+                # 误杀的先例，用户手动改回「待解析」即可重试，成本远低于重建记录
+                hint = "；若确认链接有效，可在表里改回「待解析」重试" if outcome.kind == "bad_link" else ""
+                tm.add_log(task.task_id, f"SKIP {share}: {new_status}（{outcome.detail}）{hint}", "warning")
+                tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
                 continue
+
+            if outcome.is_service_failure:
+                # 只有 TTD 这边的毛病才值得退避重试
+                failed += 1
+                s.db.update_collection(collection["record_id"], {"解析状态": "解析失败"})
+                tm.add_log(task.task_id, f"X {share}: TTD 服务异常（{outcome.detail}）", "error")
+                tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
+                consecutive_ttd_failures += 1
+                remaining = len(to_process) - i - 1
+                if await _handle_ttd_failures(tm, task.task_id, consecutive_ttd_failures, remaining, retry_round):
+                    return
+                # 达到阈值且仍有重试轮次 → 重置计数器，进入下一轮
+                if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES:
+                    retry_round += 1
+                    consecutive_ttd_failures = 0
+                continue
+
+            sec_user_id = extract_sec_user_id(outcome.url, platform)
             existing = s.db.get_collection_by_sec_user_id(sec_user_id)
             if existing and existing["record_id"] != collection["record_id"]:
                 new_level = s.merge_level(existing.get("等级"), collection.get("等级"))
@@ -1497,17 +1644,13 @@ async def _run_update_collection(task):
             tm.add_log(task.task_id, f"X {share}: {e}", "error")
             tm.update(task.task_id, success=success, failed=failed)
             consecutive_ttd_failures += 1
-            if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES:
-                remaining = len(to_process) - i - 1
-                error = f"TTD 连续失败 {consecutive_ttd_failures} 次，已中止"
-                tm.add_log(
-                    task.task_id,
-                    f"X 连续失败 {consecutive_ttd_failures} 次，剩余 {remaining} 条暂缓；请检查 TTD 后重试",
-                    "error",
-                )
-                tm.update(task.task_id, status="failed", error=error)
+            remaining = len(to_process) - i - 1
+            if await _handle_ttd_failures(tm, task.task_id, consecutive_ttd_failures, remaining, retry_round):
                 return
-    tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed}", "info")
+            if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES:
+                retry_round += 1
+                consecutive_ttd_failures = 0
+    tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed} 跳过 {skipped}（跳过=链接失效/暂不支持，已判终态，下轮不再重试）", "info")
 
 
 @app.post("/api/sync/v2/sync-account")
@@ -1547,10 +1690,10 @@ async def _run_sync_account(task):
         tm.add_log(task.task_id, "Cookie 表为空,仅生成账号基础数据,跳过详情获取", "warning")
     else:
         tm.add_log(task.task_id, f"已加载 {len(cookie_list)} 个 Cookie", "info")
-    # 预检 TTD 服务是否可用(避免逐条等 15s 超时)
-    ttd_available = False
+    cookie_failures: dict[str, int] = {}  # 本次任务内各 Cookie 的失效次数（≥2 次判失效）
+    # 预检 TTD 服务是否可用(避免逐条等 15s 超时)    ttd_available = False
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
+        async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
             resp = await client.get(f"{s.collector.ttd_url}/")
             if resp.status_code in (200, 307, 404):
                 ttd_available = True
@@ -1566,6 +1709,7 @@ async def _run_sync_account(task):
     failed = 0
     skipped = 0
     consecutive_ttd_failures = 0
+    retry_round = 0
     for i, collection in enumerate(to_process):
         if tm.is_cancelled(task.task_id):
             tm.update(task.task_id, status="cancelled")
@@ -1622,20 +1766,28 @@ async def _run_sync_account(task):
                 tm.add_log(task.task_id, f"SKIP {sec_user_id}: {reason}", "warning")
                 tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
                 continue
-            cookie = cookie_list[i % len(cookie_list)]
-            info = await s.collector.get_account_info(sec_user_id, platform, cookie)
-            if not info or not info.get("nickname"):
+            info = await _fetch_account_info(
+                s.collector, sec_user_id, platform, cookie_list, cookie_failures, i, tm, task.task_id
+            )
+            if not info and all(_cookie_is_dead(cookie_failures, c) for c in cookie_list):
+                tm.add_log(task.task_id, "所有 Cookie 均已失效，请更新 Cookie 表", "error")
+                tm.update(task.task_id, status="failed", error="所有 Cookie 均已失效")
+                return
+            if not info:
+                info = {"_error": "本轮可用 Cookie 均未取到资料（可能账号异常或 Cookie 失效）"}
+            if not info.get("nickname"):
                 failed += 1
-                reason = info.get("_error") if info else "TTD 返回空"
+                reason = info.get("_error") or "TTD 返回空"
                 s.db.update_account(account_id, {"获取状态": "获取失败"})
                 tm.add_log(task.task_id, f"X {sec_user_id}: {reason}", "error")
                 tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
                 consecutive_ttd_failures += 1
                 remaining = len(to_process) - i - 1
-                if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES and _stop_after_ttd_failures(
-                    tm, task.task_id, consecutive_ttd_failures, remaining
-                ):
+                if await _handle_ttd_failures(tm, task.task_id, consecutive_ttd_failures, remaining, retry_round):
                     return
+                if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES:
+                    retry_round += 1
+                    consecutive_ttd_failures = 0
                 continue
             s.db.update_account(account_id, {
                 "账号名称": info.get("nickname", ""),
@@ -1662,10 +1814,11 @@ async def _run_sync_account(task):
             tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
             consecutive_ttd_failures += 1
             remaining = len(to_process) - i - 1
-            if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES and _stop_after_ttd_failures(
-                tm, task.task_id, consecutive_ttd_failures, remaining
-            ):
+            if await _handle_ttd_failures(tm, task.task_id, consecutive_ttd_failures, remaining, retry_round):
                 return
+            if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES:
+                retry_round += 1
+                consecutive_ttd_failures = 0
     tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed} 跳过 {skipped}", "info")
 
 
@@ -1760,10 +1913,11 @@ async def _run_refresh_accounts(task):
         tm.update(task.task_id, status="failed", error="Cookie 表为空")
         return
     tm.add_log(task.task_id, f"已加载 {len(cookie_list)} 个 Cookie", "info")
+    cookie_failures: dict[str, int] = {}  # 本次任务内各 Cookie 的失效次数（≥2 次判失效）
     # 预检 TTD
     ttd_available = False
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
+        async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
             resp = await client.get(f"http://127.0.0.1:{config.ttd_port}/")
             if resp.status_code in (200, 307, 404):
                 ttd_available = True
@@ -1777,6 +1931,7 @@ async def _run_refresh_accounts(task):
     success = 0
     failed = 0
     consecutive_ttd_failures = 0
+    retry_round = 0
     for i, account in enumerate(to_fetch):
         if tm.is_cancelled(task.task_id):
             tm.update(task.task_id, status="cancelled")
@@ -1785,10 +1940,17 @@ async def _run_refresh_accounts(task):
         old_name = account.get("账号名称") or sec_user_id[:20]
         tm.add_log(task.task_id, f"[{i+1}/{len(to_fetch)}] {old_name}", "info")
         try:
-            cookie = cookie_list[i % len(cookie_list)]
             platform = account.get("平台") or "douyin"
-            info = await col.get_account_info(sec_user_id, platform, cookie)
-            nickname = info.get("nickname", "") if info else ""
+            info = await _fetch_account_info(
+                col, sec_user_id, platform, cookie_list, cookie_failures, i, tm, task.task_id
+            )
+            if not info and all(_cookie_is_dead(cookie_failures, c) for c in cookie_list):
+                tm.add_log(task.task_id, "所有 Cookie 均已失效，请更新 Cookie 表", "error")
+                tm.update(task.task_id, status="failed", error="所有 Cookie 均已失效")
+                return
+            if not info:
+                info = {"_error": "本轮可用 Cookie 均未取到资料（可能账号异常或 Cookie 失效）"}
+            nickname = info.get("nickname", "")
             if nickname:
                 db.update_account(account.get("record_id", ""), {
                     "账号名称": nickname,
@@ -1803,16 +1965,17 @@ async def _run_refresh_accounts(task):
                 tm.add_log(task.task_id, f"OK {nickname} | 粉丝 {info.get('follower_count', 0)} | 作品 {info.get('aweme_count', 0)}", "ok")
             else:
                 failed += 1
-                reason = info.get("_error", "无法获取资料") if info else "TTD 返回空"
+                reason = info.get("_error") or "无法获取资料"
                 db.update_account(account.get("record_id", ""), {"获取状态": "获取失败"})
                 tm.add_log(task.task_id, f"X {old_name}: {reason}", "error")
                 consecutive_ttd_failures += 1
                 remaining = len(to_fetch) - i - 1
                 tm.update(task.task_id, success=success, failed=failed)
-                if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES and _stop_after_ttd_failures(
-                    tm, task.task_id, consecutive_ttd_failures, remaining
-                ):
+                if await _handle_ttd_failures(tm, task.task_id, consecutive_ttd_failures, remaining, retry_round):
                     return
+                if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES:
+                    retry_round += 1
+                    consecutive_ttd_failures = 0
             tm.update(task.task_id, success=success, failed=failed)
             await asyncio.sleep(0.5)
         except Exception as e:
@@ -1821,10 +1984,11 @@ async def _run_refresh_accounts(task):
             tm.update(task.task_id, success=success, failed=failed)
             consecutive_ttd_failures += 1
             remaining = len(to_fetch) - i - 1
-            if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES and _stop_after_ttd_failures(
-                tm, task.task_id, consecutive_ttd_failures, remaining
-            ):
+            if await _handle_ttd_failures(tm, task.task_id, consecutive_ttd_failures, remaining, retry_round):
                 return
+            if consecutive_ttd_failures >= MAX_CONSECUTIVE_TTD_FAILURES:
+                retry_round += 1
+                consecutive_ttd_failures = 0
     tm.add_log(task.task_id, f"完成: 成功 {success} 失败 {failed}", "info")
 
 
@@ -4110,11 +4274,28 @@ async def api_get_settings():
     return config._data
 
 
+def _merge_settings_patch(base: dict, patch: dict) -> dict:
+    """设置补丁深合并：两侧同为 dict 才递归，其余类型整体覆盖。
+
+    为什么需要：设置表单只提供每个顶层键下的**部分**字段（如 api 只给 enabled），
+    若按整键替换，该键下没出现在表单里的字段（api_key / default_resolve_mode）会被抹掉。
+    """
+    out = dict(base)
+    for k, v in patch.items():
+        cur = out.get(k)
+        out[k] = _merge_settings_patch(cur, v) if isinstance(v, dict) and isinstance(cur, dict) else v
+    return out
+
+
 @app.post("/api/settings")
 async def api_save_settings(request: Request):
     global collector, syncer, feishu_client
     data = await request.json()
     for key, value in data.items():
+        cur = config.get(key)
+        # 补丁合并：只覆盖表单真正提供的字段，保住同键下未提交的字段
+        if isinstance(value, dict) and isinstance(cur, dict):
+            value = _merge_settings_patch(cur, value)
         config.set(key, value)
     config.save()
 

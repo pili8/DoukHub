@@ -5,24 +5,24 @@
 /* 批次历史:移动端卡片样式(仅 ≤768px 渲染时输出) */
 @media (max-width: 768px) {
   .batch-card {
-    background: var(--dh-surface, var(--bg-muted));
-    border: 1px solid var(--dh-border, var(--border-default));
+    background: var(--dh-surface);
+    border: 1px solid var(--dh-border);
     border-radius: var(--radius-sm);
     padding: 12px;
     margin-bottom: 10px;
   }
   .batch-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
   .batch-card-id { font-size: 12px; word-break: break-all; }
-  .batch-card-body { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 12px; color: var(--dh-text-secondary, var(--text-secondary)); margin-bottom: 8px; }
+  .batch-card-body { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 12px; color: var(--dh-text-secondary); margin-bottom: 8px; }
   .batch-card-cell { display: flex; justify-content: space-between; min-width: 0; }
   .batch-card-time { grid-column: 1 / -1; }
-  .batch-card-label { color: var(--dh-text-muted, var(--text-muted)); flex-shrink: 0; margin-right: 8px; }
+  .batch-card-label { color: var(--dh-text-muted); flex-shrink: 0; margin-right: 8px; }
   .batch-card-stats { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; margin-bottom: 8px; }
   .batch-card-ops { display: flex; gap: 8px; }
   .batch-card-ops .btn { flex: 1; justify-content: center; }
   /* 方案管理弹窗:左右分栏改上下布局 */
   .preset-modal-layout { flex-direction: column; gap: 12px; min-height: auto; }
-  .preset-modal-left { width: 100%; border-right: none; border-bottom: 1px solid var(--dh-border, var(--border-default)); padding-right: 0; padding-bottom: 12px; max-height: 180px; overflow-y: auto; }
+  .preset-modal-left { width: 100%; border-right: none; border-bottom: 1px solid var(--dh-border); padding-right: 0; padding-bottom: 12px; max-height: 180px; overflow-y: auto; }
   .preset-modal-right { width: 100%; }
   /* 预览统计条:窄屏缩小数字字号 */
   .preview-stats-bar { padding: 8px 10px; gap: 2px; }
@@ -33,7 +33,7 @@
   .stat-cards { display: flex; gap: 8px; }
   .stat-cards .stat-card { flex: 1; padding: 10px 8px; text-align: center; }
   .stat-cards .stat-card .stat-value { font-size: 18px; font-weight: 700; display: block; }
-  .stat-cards .stat-card .stat-label { font-size: 10px; color: var(--dh-text-muted, var(--text-muted)); }
+  .stat-cards .stat-card .stat-label { font-size: 10px; color: var(--dh-text-muted); }
   /* 筛选栏:触控目标加大 */
   .batch-filter-bar select { min-height: 36px; padding: 6px 10px; font-size: 13px; }
   /* 保存方案底部操作栏:窄屏紧凑 */
@@ -46,80 +46,80 @@
   .stat-cards .stat-card .stat-value { font-size: 16px; }
 }
 /* 批次详情弹窗 */
-.batch-detail-summary { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; font-size:13px; color:var(--dh-text-secondary, var(--text-secondary)); padding:12px 0 14px; border-bottom:1px solid var(--dh-border, var(--border-default)); margin-bottom:12px; }
+.batch-detail-summary { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; font-size:13px; color:var(--dh-text-secondary); padding:12px 0 14px; border-bottom:1px solid var(--dh-border); margin-bottom:12px; }
 .batch-detail-summary span { white-space:nowrap; }
 .batch-detail-table td { font-size:12.5px; }
 .batch-detail-sec { margin-top:14px; }
-.batch-detail-sec-title { display:flex; align-items:baseline; gap:8px; font-size:12.5px; font-weight:600; color:var(--dh-text, var(--text-strong)); padding-bottom:8px; border-bottom:1px solid var(--dh-border, var(--border-default)); }
-.batch-detail-sec-note { font-size:11px; font-weight:400; color:var(--dh-text-muted, var(--text-muted)); }
+.batch-detail-sec-title { display:flex; align-items:baseline; gap:8px; font-size:12.5px; font-weight:600; color:var(--dh-text); padding-bottom:8px; border-bottom:1px solid var(--dh-border); }
+.batch-detail-sec-note { font-size:11px; font-weight:400; color:var(--dh-text-muted); }
 /* ===== 批次详情弹窗：入库作品行 ===== */
 .bdw-table { display:flex; flex-direction:column; gap:6px; }
-.bdw-row { position:relative; display:flex; align-items:center; gap:8px; padding:7px 10px; border:1px solid var(--dh-border, #eee9e2); border-radius:8px; background:var(--dh-surface-muted, #faf8f5); padding-right:64px; }
-.bdw-row.is-fail { border-color: color-mix(in srgb, var(--dh-danger, #C2410C) 30%, transparent); }
-.bdw-dot { width:7px; height:7px; border-radius:50%; background:var(--dh-success, #16A34A); flex-shrink:0; }
-.bdw-row.is-fail .bdw-dot { background:var(--dh-danger, #C2410C); }
-.bdw-title { flex:1; min-width:0; font-size:12.5px; color:var(--dh-text, var(--text-strong)); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.bdw-kind { font-size:11px; padding:1px 7px; border-radius:20px; background:var(--dh-surface, #fff); border:1px solid var(--dh-border, #eee9e2); color:var(--dh-text-secondary); flex-shrink:0; }
-.bdw-reason { font-size:11px; color:var(--dh-danger, #C2410C); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0; }
+.bdw-row { position:relative; display:flex; align-items:center; gap:8px; padding:7px 10px; border:1px solid var(--dh-border); border-radius:8px; background:var(--dh-surface-muted); padding-right:64px; }
+.bdw-row.is-fail { border-color: color-mix(in srgb, var(--dh-danger) 30%, transparent); }
+.bdw-dot { width:7px; height:7px; border-radius:50%; background:var(--dh-success); flex-shrink:0; }
+.bdw-row.is-fail .bdw-dot { background:var(--dh-danger); }
+.bdw-title { flex:1; min-width:0; font-size:12.5px; color:var(--dh-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bdw-kind { font-size:11px; padding:1px 7px; border-radius:20px; background:var(--dh-surface); border:1px solid var(--dh-border); color:var(--dh-text-secondary); flex-shrink:0; }
+.bdw-reason { font-size:11px; color:var(--dh-danger); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0; }
 .bdw-ops { display:flex; gap:4px; flex-shrink:0; }
 .bdw-ops a { display:inline-flex; padding:3px; border-radius:6px; color:var(--dh-text-secondary); cursor:pointer; }
-.bdw-ops a:hover { background:var(--dh-surface, #fff); color:var(--dh-text, var(--text-strong)); }
+.bdw-ops a:hover { background:var(--dh-surface); color:var(--dh-text); }
 .bdw-ops svg, .bdw-ops i { width:14px; height:14px; }
-.bdw-sub { position:absolute; left:10px; right:64px; bottom:-2px; transform:translateY(100%); font-size:10.5px; color:var(--dh-text-muted); background:var(--dh-surface-muted, #faf8f5); padding:2px 4px; border-radius:0 0 6px 6px; display:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; z-index:2; }
+.bdw-sub { position:absolute; left:10px; right:64px; bottom:-2px; transform:translateY(100%); font-size:10.5px; color:var(--dh-text-muted); background:var(--dh-surface-muted); padding:2px 4px; border-radius:0 0 6px 6px; display:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; z-index:2; }
 .bdw-row:hover .bdw-sub { display:block; }
 /* ===== 批次详情弹窗（重设计） ===== */
 #batch-detail-modal { animation: bdFadeIn 0.18s ease; }
-#batch-detail-modal .dh-modal-box { animation: bdSlideUp 0.22s cubic-bezier(0.16,1,0.3,1); background: var(--dh-surface, #fff); border: 1px solid var(--dh-border); box-shadow: 0 24px 64px rgba(31,27,23,.20), 0 2px 8px rgba(31,27,23,.08); }
+#batch-detail-modal .dh-modal-box { animation: bdSlideUp 0.22s cubic-bezier(0.16,1,0.3,1); background: var(--dh-surface); border: 1px solid var(--dh-border); box-shadow: 0 24px 64px rgba(31,27,23,.20), 0 2px 8px rgba(31,27,23,.08); }
 @keyframes bdFadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes bdSlideUp { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 #batch-detail-body { max-height: 74vh; overflow-y: auto; }
 /* 状态横幅 */
-.bd-banner { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; padding:12px 16px; border-radius: var(--dh-radius-lg, 12px); border:1px solid transparent; margin-top:12px; }
+.bd-banner { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; padding:12px 16px; border-radius: var(--dh-radius-lg); border:1px solid transparent; margin-top:12px; }
 .bd-banner .bd-banner-status { font-size:13px; font-weight:700; display:inline-flex; align-items:center; gap:7px; }
 .bd-banner .bd-banner-status svg, .bd-banner .bd-banner-status i { width:16px; height:16px; }
 .bd-banner .bd-banner-meta { font-size:12px; color: var(--dh-text-secondary); white-space:nowrap; }
-.bd-banner.is-success { background: var(--dh-success-soft, #ECFDF3); border-color: color-mix(in srgb, var(--dh-success, #16A34A) 22%, transparent); }
-.bd-banner.is-success .bd-banner-status { color: var(--dh-success, #16A34A); }
-.bd-banner.is-failed { background: var(--dh-danger-soft, #FEF1EB); border-color: color-mix(in srgb, var(--dh-danger, #C2410C) 22%, transparent); }
-.bd-banner.is-failed .bd-banner-status { color: var(--dh-danger, #C2410C); }
-.bd-banner.is-warning { background: var(--dh-warning-soft, #FEF3C7); border-color: color-mix(in srgb, var(--dh-warning, #B45309) 22%, transparent); }
-.bd-banner.is-warning .bd-banner-status { color: var(--dh-warning, #B45309); }
+.bd-banner.is-success { background: var(--dh-success-soft); border-color: color-mix(in srgb, var(--dh-success) 22%, transparent); }
+.bd-banner.is-success .bd-banner-status { color: var(--dh-success); }
+.bd-banner.is-failed { background: var(--dh-danger-soft); border-color: color-mix(in srgb, var(--dh-danger) 22%, transparent); }
+.bd-banner.is-failed .bd-banner-status { color: var(--dh-danger); }
+.bd-banner.is-warning { background: var(--dh-warning-soft); border-color: color-mix(in srgb, var(--dh-warning) 22%, transparent); }
+.bd-banner.is-warning .bd-banner-status { color: var(--dh-warning); }
 /* 左边条指标卡 */
 .bd-metrics { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:8px; margin-top:10px; }
 @media (max-width: 640px) { .bd-metrics { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-.bd-metric { background: var(--dh-surface, #fff); border:1px solid var(--dh-border); border-left-width:3px; border-radius: var(--dh-radius, 8px); padding:10px 12px; min-width:0; }
+.bd-metric { background: var(--dh-surface); border:1px solid var(--dh-border); border-left-width:3px; border-radius: var(--dh-radius); padding:10px 12px; min-width:0; }
 .bd-metric .bd-metric-val { display:block; font-size:19px; font-weight:700; line-height:1.2; font-variant-numeric: tabular-nums; color: var(--dh-text); }
 .bd-metric .bd-metric-label { display:block; font-size:11px; color: var(--dh-text-muted); margin-top:2px; }
-.bd-metric.m-succ { border-left-color: var(--dh-success, #16A34A); } .bd-metric.m-succ .bd-metric-val { color: var(--dh-success, #16A34A); }
-.bd-metric.m-fail { border-left-color: var(--dh-danger, #C2410C); } .bd-metric.m-fail .bd-metric-val { color: var(--dh-danger, #C2410C); }
+.bd-metric.m-succ { border-left-color: var(--dh-success); } .bd-metric.m-succ .bd-metric-val { color: var(--dh-success); }
+.bd-metric.m-fail { border-left-color: var(--dh-danger); } .bd-metric.m-fail .bd-metric-val { color: var(--dh-danger); }
 .bd-metric.m-skip { border-left-color: var(--dh-text-muted); } .bd-metric.m-skip .bd-metric-val { color: var(--dh-text-secondary); }
 .bd-metric.m-works { border-left-color: var(--dh-accent); } .bd-metric.m-works .bd-metric-val { color: var(--dh-accent); }
 /* 失败原因卡 */
-.bd-fail-card { margin-top:10px; background: var(--dh-danger-soft, #FEF1EB); border:1px solid color-mix(in srgb, var(--dh-danger, #C2410C) 22%, transparent); border-radius: var(--dh-radius, 8px); padding:9px 12px; display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; }
-.bd-fail-card .bd-fail-title { font-size:11.5px; font-weight:700; color: var(--dh-danger, #C2410C); }
-.bd-fail-card .bd-fail-chip { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color: var(--dh-danger, #C2410C); max-width:100%; }
+.bd-fail-card { margin-top:10px; background: var(--dh-danger-soft); border:1px solid color-mix(in srgb, var(--dh-danger) 22%, transparent); border-radius: var(--dh-radius); padding:9px 12px; display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; }
+.bd-fail-card .bd-fail-title { font-size:11.5px; font-weight:700; color: var(--dh-danger); }
+.bd-fail-card .bd-fail-chip { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color: var(--dh-danger); max-width:100%; }
 .bd-fail-card .bd-fail-chip b { flex-shrink:0; }
 .bd-fail-card .bd-fail-chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* 账号明细列表卡 */
-.bd-list-card { margin-top:10px; border:1px solid var(--dh-border); border-radius: var(--dh-radius-lg, 12px); background: var(--dh-surface, #fff); }
+.bd-list-card { margin-top:10px; border:1px solid var(--dh-border); border-radius: var(--dh-radius-lg); background: var(--dh-surface); }
 .bd-list-head { display:flex; align-items:center; gap:8px; padding:9px 14px; border-bottom:1px solid var(--dh-border); }
 .bd-list-title { font-size:12.5px; font-weight:600; color: var(--dh-text); flex-shrink:0; }
-.bd-list-head input[type="text"] { flex:1 1 120px; min-width:100px; max-width:200px; padding:5px 10px; font-size:12.5px; border:1px solid transparent; border-radius:999px; background: var(--dh-surface-muted, var(--bg-muted)); color: var(--dh-text); outline:none; transition: border-color .12s, background .12s; }
-.bd-list-head input[type="text"]:focus { background: var(--dh-surface, #fff); border-color: var(--dh-accent); }
-.bd-list-head select { padding:5px 8px; font-size:12.5px; border:1px solid transparent; border-radius:999px; background: var(--dh-surface-muted, var(--bg-muted)); color: var(--dh-text); outline:none; }
+.bd-list-head input[type="text"] { flex:1 1 120px; min-width:100px; max-width:200px; padding:5px 10px; font-size:12.5px; border:1px solid transparent; border-radius:999px; background: var(--dh-surface-muted); color: var(--dh-text); outline:none; transition: border-color .12s, background .12s; }
+.bd-list-head input[type="text"]:focus { background: var(--dh-surface); border-color: var(--dh-accent); }
+.bd-list-head select { padding:5px 8px; font-size:12.5px; border:1px solid transparent; border-radius:999px; background: var(--dh-surface-muted); color: var(--dh-text); outline:none; }
 .bd-list-count { margin-left:auto; font-size:11.5px; color: var(--dh-text-muted); white-space:nowrap; }
 .bd-list-body { max-height: 44vh; overflow-y:auto; }
 .bd-row { padding:9px 14px; border-bottom:1px solid color-mix(in srgb, var(--dh-border) 60%, transparent); transition: background .12s; }
-.bd-row:hover { background: color-mix(in srgb, var(--dh-accent, var(--accent)) 4%, transparent); }
+.bd-row:hover { background: color-mix(in srgb, var(--dh-accent) 4%, transparent); }
 .bd-row:last-child { border-bottom:none; }
 .bd-row-main { display:flex; align-items:center; gap:10px; min-width:0; }
 .bd-row-name { display:flex; align-items:center; gap:6px; font-weight:600; font-size:13px; color: var(--dh-text); min-width:0; white-space:nowrap; overflow:hidden; }
 .bd-row-name > span.nm { overflow:hidden; text-overflow:ellipsis; }
 .bd-row-status { flex-shrink:0; }
 .bd-row-msg { margin-left:auto; font-size:12px; color: var(--dh-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:46%; text-align:right; }
-.bd-row-msg.is-fail { color: var(--dh-danger, #C2410C); }
+.bd-row-msg.is-fail { color: var(--dh-danger); }
 .bd-works-row { display:none; margin:8px 0 2px 34px; }
-.bd-works-panel { background: var(--dh-surface-muted, var(--bg-muted)); border-radius: var(--dh-radius, 8px); padding:8px 12px; }
+.bd-works-panel { background: var(--dh-surface-muted); border-radius: var(--dh-radius); padding:8px 12px; }
 .bd-works-row.open { display:block; animation: bdSlideUp 0.16s ease; }
 .bd-log-note { font-size:11.5px; color: var(--dh-text-muted); }
 .load-more-row { text-align:center; padding:10px 0 2px; }
@@ -285,7 +285,7 @@
             <option value="failed">失败</option>
             <option value="cancelled">已取消</option>
         </select>
-        <input type="text" id="history-kw-filter" placeholder="搜索批次ID / 方案名" oninput="onHistoryKwInput()" style="flex:1 1 150px; max-width:220px; padding:5px 10px; font-size:12.5px; border:1px solid var(--dh-border, var(--border-default)); border-radius:8px; background:var(--dh-bg, transparent); color:var(--dh-text, var(--text-strong)); outline:none;">
+        <input type="text" id="history-kw-filter" placeholder="搜索批次ID / 方案名" oninput="onHistoryKwInput()" style="flex:1 1 150px; max-width:220px; padding:5px 10px; font-size:12.5px; border:1px solid var(--dh-border); border-radius:8px; background:var(--dh-background); color:var(--dh-text); outline:none;">
     </div>
 
     <!-- 批次列表 -->
@@ -659,8 +659,19 @@ async function showRunningDetail(batchId) {
         document.getElementById('running-panel').style.display = 'block';
         document.getElementById('running-platform-tag').textContent = formatPlatform(batch.platform);
         var isPaused = batch.status === 'paused';
-        document.getElementById('running-pause-btn').style.display = isPaused ? 'none' : '';
+        var isCancelling = batch.status === 'cancelling';
+        document.getElementById('running-pause-btn').style.display = (isPaused || isCancelling) ? 'none' : '';
         document.getElementById('running-resume-btn').style.display = isPaused ? '' : 'none';
+        var cancelBtnEl = document.getElementById('running-cancel-btn');
+        if (cancelBtnEl && showRunningDetail._cancelState !== isCancelling) {
+            // 仅在状态翻转时改写，避免轮询期间反复重建图标
+            showRunningDetail._cancelState = isCancelling;
+            cancelBtnEl.disabled = isCancelling;
+            cancelBtnEl.innerHTML = isCancelling
+                ? '<i data-lucide="loader-circle"></i> 取消中…'
+                : '<i data-lucide="square"></i> 取消批次';
+            if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+        }
         // 面板首次显示时重置展开状态
         var toggleEl = document.getElementById('run-detail-toggle');
         if (toggleEl && !toggleEl.dataset.batchId) {
@@ -842,22 +853,25 @@ async function cancelRunningBatch() {
     if (!activeBatchId) return;
     var ok = await confirmDialog('将停止当前 TTD 批量进程，未完成账号会标记为取消。', { title: '取消批次', confirmText: '取消批次' });
     if (!ok) return;
-    await apiCall('/api/collection/batches/' + activeBatchId + '/cancel', 'POST');
-    showToast('已请求取消');
+    var resp = await apiCall('/api/collection/batches/' + activeBatchId + '/cancel', 'POST');
+    if (!resp || resp.success === false) showToast((resp && resp.message) || '取消失败', 'error');
+    else showToast('已请求取消');
     await refreshCollectionBatches();
 }
 
 async function pauseRunningBatch() {
     if (!activeBatchId) return;
-    await apiCall('/api/collection/batches/' + activeBatchId + '/pause', 'POST');
-    showToast('已暂停，可稍后继续');
+    var resp = await apiCall('/api/collection/batches/' + activeBatchId + '/pause', 'POST');
+    if (!resp || resp.success === false) showToast((resp && resp.message) || '暂停失败', 'error');
+    else showToast('已暂停，可稍后继续');
     await refreshCollectionBatches();
 }
 
 async function resumeRunningBatch() {
     if (!activeBatchId) return;
-    await apiCall('/api/collection/batches/' + activeBatchId + '/resume', 'POST');
-    showToast('已继续采集');
+    var resp = await apiCall('/api/collection/batches/' + activeBatchId + '/resume', 'POST');
+    if (!resp || resp.success === false) showToast((resp && resp.message) || '继续失败', 'error');
+    else showToast('已继续采集');
     await refreshCollectionBatches();
 }
 
@@ -897,13 +911,14 @@ function renderBatchHistory() {
             var hasFailed = (batch.failed_accounts || 0) > 0;
             var ops = '<div class="batch-card-ops">' +
                 '<button class="btn btn-secondary btn-sm" onclick="showBatchDetail(\'' + batch.id + '\')">详情</button>';
-            if (isActive) ops += ' <button class="btn btn-danger btn-sm" onclick="cancelBatch(\'' + batch.id + '\')">取消</button>';
-            if (hasFailed && !isActive) ops += ' <button class="btn btn-primary btn-sm" onclick="retryBatch(\'' + batch.id + '\')">重试</button>';
+            if (batch.status === 'cancelling') ops += ' <button class="btn btn-danger btn-sm" disabled>取消中…</button>';
+            else if (isActive) ops += ' <button class="btn btn-danger btn-sm" onclick="cancelBatch(\'' + batch.id + '\')">取消</button>';
+            if (hasFailed && !isActive) ops += ' <button class="btn btn-secondary btn-sm" onclick="retryBatch(\'' + batch.id + '\')">重试</button>';
             ops += '</div>';
             var stats =
-                '<span class="batch-card-num" style="color:var(--dh-success, var(--success-text, #16A34A));">成功 ' + (batch.success_accounts || 0) + '</span>' +
-                '<span class="batch-card-num" style="color:var(--dh-danger, var(--danger-text, #C2410C));">失败 ' + (batch.failed_accounts || 0) + '</span>' +
-                '<span class="batch-card-num" style="color:var(--dh-text-muted, var(--text-muted));">跳过 ' + (batch.skipped_accounts || 0) + '</span>';
+                '<span class="batch-card-num" style="color:var(--dh-success);">成功 ' + (batch.success_accounts || 0) + '</span>' +
+                '<span class="batch-card-num" style="color:var(--dh-danger);">失败 ' + (batch.failed_accounts || 0) + '</span>' +
+                '<span class="batch-card-num" style="color:var(--dh-text-muted);">跳过 ' + (batch.skipped_accounts || 0) + '</span>';
             return '<tr><td colspan="11" style="padding:8px 0;border:none;">' +
                 '<div class="batch-card">' +
                     '<div class="batch-card-head">' +
@@ -934,17 +949,18 @@ function renderBatchHistory() {
         var isActive = ['pending', 'running', 'paused', 'cancelling'].includes(batch.status);
         var hasFailed = (batch.failed_accounts || 0) > 0;
         var ops = '<button class="btn btn-secondary btn-sm" onclick="showBatchDetail(\'' + batch.id + '\')">详情</button>';
-        if (isActive) ops += ' <button class="btn btn-danger btn-sm" onclick="cancelBatch(\'' + batch.id + '\')">取消</button>';
-        if (hasFailed && !isActive) ops += ' <button class="btn btn-primary btn-sm" onclick="retryBatch(\'' + batch.id + '\')">重试</button>';
+        if (batch.status === 'cancelling') ops += ' <button class="btn btn-danger btn-sm" disabled>取消中…</button>';
+        else if (isActive) ops += ' <button class="btn btn-danger btn-sm" onclick="cancelBatch(\'' + batch.id + '\')">取消</button>';
+        if (hasFailed && !isActive) ops += ' <button class="btn btn-secondary btn-sm" onclick="retryBatch(\'' + batch.id + '\')">重试</button>';
         return '<tr>' +
             '<td><code title="' + escapeHtml(batch.id) + '">' + escapeHtml(batch.id.slice(0, 17)) + '</code></td>' +
             '<td>' + escapeHtml(batch.preset_name || '-') + '</td>' +
             '<td>' + formatPlatform(batch.platform) + '</td>' +
             '<td><span class="workflow-status ' + batch.status + '">' + formatBatchStatus(batch.status) + '</span></td>' +
             '<td><b style="font-size:13px;">' + (batch.total_accounts || 0) + '</b></td>' +
-            '<td><b style="font-size:13px;color:var(--dh-success, var(--success-text, #16A34A));">' + (batch.success_accounts || 0) + '</b></td>' +
-            '<td><b style="font-size:13px;color:var(--dh-danger, var(--danger-text, #C2410C));">' + (batch.failed_accounts || 0) + '</b></td>' +
-            '<td><b style="font-size:13px;color:var(--dh-text-muted, var(--text-muted));">' + (batch.skipped_accounts || 0) + '</b></td>' +
+            '<td><b style="font-size:13px;color:var(--dh-success);">' + (batch.success_accounts || 0) + '</b></td>' +
+            '<td><b style="font-size:13px;color:var(--dh-danger);">' + (batch.failed_accounts || 0) + '</b></td>' +
+            '<td><b style="font-size:13px;color:var(--dh-text-muted);">' + (batch.skipped_accounts || 0) + '</b></td>' +
             '<td class="text-muted" style="font-size:12px;">' + formatDuration(elapsed) + '</td>' +
             '<td class="text-muted">' + formatShortDateTime(batch.started_at) + '</td>' +
             '<td>' + ops + '</td>' +
@@ -1226,7 +1242,7 @@ function renderBatchDetailBody() {
             if (pathKw.some(function(k) { return lm.indexOf(k.toLowerCase()) >= 0; })) pathFails += failMsgs[m];
         });
         var pathHint = pathFails >= 3
-            ? '<span class="bd-fail-chip" style="color:var(--dh-danger,#C2410C);font-weight:700;"><b>!</b><span>多个失败疑似与下载目录有关，请检查存储方案路径是否有效</span></span>'
+            ? '<span class="bd-fail-chip" style="color:var(--dh-danger);font-weight:700;"><b>!</b><span>多个失败疑似与下载目录有关，请检查存储方案路径是否有效</span></span>'
             : '';
         failHtml = '<div class="bd-fail-card"><span class="bd-fail-title">失败 ' + failCount + ' 个</span>' + pathHint + chips + '</div>';
     }
@@ -1257,13 +1273,18 @@ function closeBatchDetail() {
 async function cancelBatch(batchId) {
     var ok = await confirmDialog('将停止当前 TTD 批量进程，未完成账号会标记为取消。', { title: '取消批次', confirmText: '取消批次' });
     if (!ok) return;
-    await apiCall('/api/collection/batches/' + batchId + '/cancel', 'POST');
-    showToast('已请求取消');
+    var resp = await apiCall('/api/collection/batches/' + batchId + '/cancel', 'POST');
+    if (!resp || resp.success === false) showToast((resp && resp.message) || '取消失败', 'error');
+    else showToast('已请求取消');
     await refreshCollectionBatches();
 }
 
 async function retryBatch(batchId) {
     var data = await apiCall('/api/collection/batches/' + batchId + '/retry', 'POST', { mode: 'incremental' });
+    if (!data || data.success === false) {
+        showToast((data && data.message) || '重试失败', 'error');
+        return;
+    }
     showToast('已创建 ' + (data.batches || []).length + ' 个重试批次', 'success');
     await refreshCollectionBatches();
 }

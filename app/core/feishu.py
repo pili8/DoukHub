@@ -265,7 +265,7 @@ class FeishuClient:
                 ("等级", 2, None),             # 数字 1-4
                 ("标签", 4, None),             # 多选标签
                 ("sec_user_id", 1, None),      # 自动回填
-                ("解析状态", 3, {"options": [{"name": "待解析"}, {"name": "已就绪"}, {"name": "已生成"}, {"name": "已删除"}, {"name": "解析失败"}]}),  # 单选：状态枚举
+                ("解析状态", 3, {"options": [{"name": "待解析"}, {"name": "已就绪"}, {"name": "已生成"}, {"name": "已删除"}, {"name": "解析失败"}, {"name": "链接失效"}, {"name": "非主页链接"}, {"name": "暂不支持"}]}),  # 单选：状态枚举
                 ("备注", 1, None),             # 用户备注 + 合并信息
                 ("粉丝数", 2, None),           # 自动回填
                 ("作品数", 2, None),           # 自动回填
@@ -348,10 +348,23 @@ class FeishuClient:
         # 创建缺失字段
         created = []
         skipped = []
+        options_added = []
         lww_field_warning = ""
         for name, ftype, opts in required_fields:
             if name in existing_names:
                 skipped.append(name)
+                # 已存在的单选/多选字段：把期望里多出来的枚举值补进去。
+                # 之前只建字段、不改选项，导致「解析状态」新增的取值在飞书侧写不进去。
+                if opts and ftype in (3, 4):
+                    try:
+                        added = self._sync_field_options(
+                            app_token, table_id, existing_names[name], opts
+                        )
+                        if added:
+                            options_added.append(f"{name}(+{'/'.join(added)})")
+                    except Exception as e:
+                        # 补选项失败不阻断同步：老选项仍可用，只是新状态值会写失败
+                        logger.warning(f"补齐字段「{name}」选项失败（不影响同步）: {e}")
             else:
                 try:
                     self.create_field(app_token, table_id, name, ftype, opts)
@@ -377,6 +390,8 @@ class FeishuClient:
             msg_parts.append(f"跳过 {len(skipped)} 个已存在")
         if renamed:
             msg_parts.append(f"重命名 {len(renamed)} 个")
+        if options_added:
+            msg_parts.append(f"补充选项：{'、'.join(options_added)}")
         if lww_field_warning:
             msg_parts.append(lww_field_warning)
 
@@ -386,4 +401,33 @@ class FeishuClient:
             "created": created,
             "skipped": skipped,
             "renamed": renamed,
+            "options_added": options_added,
         }
+
+    def _sync_field_options(
+        self, app_token: str, table_id: str, field: dict, options: dict
+    ) -> list[str]:
+        """把缺失的单选项补进已有字段，返回本次新增的选项名列表。
+
+        飞书更新 property.options 是**整体替换**：必须把现有选项（连同 id）原样回传，
+        只有新选项才只给 name。若不带 id，飞书会把旧选项当成新选项重建，
+        引用这些选项的单元格数据就会错位——所以这里用 dict(o) 原样保留，
+        既保住 id，也保住 color 等属性。
+        """
+        wanted = [o.get("name") for o in (options.get("options") or []) if o.get("name")]
+        if not wanted:
+            return []
+
+        current = (field.get("property") or {}).get("options") or []
+        have = {o.get("name") for o in current if o.get("name")}
+        missing = [name for name in wanted if name not in have]
+        if not missing:
+            return []
+
+        prop = dict(field.get("property") or {})
+        prop["options"] = [dict(o) for o in current if o.get("name")] + [
+            {"name": name} for name in missing
+        ]
+        self.update_field(app_token, table_id, field["field_id"], {"property": prop})
+        logger.info(f"字段「{field.get('field_name')}」补充选项: {missing}")
+        return missing

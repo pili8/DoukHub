@@ -6,6 +6,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 import app.main as main_module
+from app.core.collector import ResolveOutcome
 from app.core.database import Database
 from app.core.syncer_v2 import Syncer
 from app.core.tasks import Task
@@ -70,6 +71,11 @@ def test_sync_v2_all_rejects_large_inline_batches(monkeypatch):
     assert response.body.decode("utf-8").find("分批") >= 0
 
 
+def _expected_total_calls():
+    """3 轮重试 × 每轮 MAX_CONSECUTIVE_TTD_FAILURES 次 = 总调用次数。"""
+    return main_module.MAX_CONSECUTIVE_TTD_FAILURES * (main_module.MAX_TTD_RETRY_ROUNDS + 1)
+
+
 def test_update_collection_stops_after_repeated_ttd_failures(monkeypatch):
     db = SimpleNamespace(
         get_all_collections=lambda: [
@@ -80,16 +86,17 @@ def test_update_collection_stops_after_repeated_ttd_failures(monkeypatch):
     )
     calls = []
 
-    async def resolve_short_url(share, platform):
+    async def resolve_short_url_ex(share, platform):
         calls.append(share)
-        return ""
+        return ResolveOutcome(kind="ttd_http", detail="模拟 TTD 服务故障")
 
     syncer = SimpleNamespace(
         db=db,
-        collector=SimpleNamespace(ttd_url="http://ttd", resolve_short_url=resolve_short_url),
+        collector=SimpleNamespace(ttd_url="http://ttd", resolve_short_url_ex=resolve_short_url_ex),
     )
     tm = RecordingTaskManager()
     monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeHttpClient)
+    monkeypatch.setattr(main_module.asyncio, "sleep", _async_noop)
     monkeypatch.setattr(main_module, "get_syncer_v2", lambda: syncer)
     monkeypatch.setattr(main_module, "get_task_manager", lambda: tm)
 
@@ -97,8 +104,10 @@ def test_update_collection_stops_after_repeated_ttd_failures(monkeypatch):
     task.type = "update_collection"
     asyncio.run(main_module._run_update_collection(task))
 
-    assert len(calls) == main_module.MAX_CONSECUTIVE_TTD_FAILURES
-    assert task.failed == main_module.MAX_CONSECUTIVE_TTD_FAILURES
+    expected = _expected_total_calls()
+    assert len(calls) == expected, f"expected {expected} calls, got {len(calls)}"
+    assert task.failed == expected
+    assert task.status == "failed"
 
 
 def test_sync_account_stops_after_repeated_ttd_failures(tmp_path, monkeypatch):
@@ -114,9 +123,6 @@ def test_sync_account_stops_after_repeated_ttd_failures(tmp_path, monkeypatch):
         calls.append(sec_user_id)
         return {}
 
-    async def no_sleep(_seconds):
-        return None
-
     syncer = SimpleNamespace(
         db=db,
         collector=SimpleNamespace(ttd_url="http://ttd", get_account_info=get_account_info),
@@ -127,16 +133,17 @@ def test_sync_account_stops_after_repeated_ttd_failures(tmp_path, monkeypatch):
     tm = RecordingTaskManager()
     tm.task.type = "sync_account"
     monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeHttpClient)
-    monkeypatch.setattr(main_module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(main_module.asyncio, "sleep", _async_noop)
     monkeypatch.setattr(main_module, "get_syncer_v2", lambda: syncer)
     monkeypatch.setattr(main_module, "get_database", lambda: db)
     monkeypatch.setattr(main_module, "get_task_manager", lambda: tm)
 
     asyncio.run(main_module._run_sync_account(tm.task))
 
-    assert len(calls) == main_module.MAX_CONSECUTIVE_TTD_FAILURES
+    expected = _expected_total_calls()
+    assert len(calls) == expected, f"expected {expected} calls, got {len(calls)}"
     assert tm.task.status == "failed"
-    assert tm.task.failed == main_module.MAX_CONSECUTIVE_TTD_FAILURES
+    assert tm.task.failed == expected
 
 
 def test_refresh_accounts_stops_after_repeated_ttd_failures(tmp_path, monkeypatch):
@@ -152,13 +159,10 @@ def test_refresh_accounts_stops_after_repeated_ttd_failures(tmp_path, monkeypatc
         calls.append(sec_user_id)
         return {}
 
-    async def no_sleep(_seconds):
-        return None
-
     tm = RecordingTaskManager()
     tm.task.type = "refresh_accounts"
     monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeHttpClient)
-    monkeypatch.setattr(main_module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(main_module.asyncio, "sleep", _async_noop)
     monkeypatch.setattr(main_module, "get_database", lambda: db)
     monkeypatch.setattr(main_module, "get_task_manager", lambda: tm)
     monkeypatch.setattr(
@@ -169,6 +173,11 @@ def test_refresh_accounts_stops_after_repeated_ttd_failures(tmp_path, monkeypatc
 
     asyncio.run(main_module._run_refresh_accounts(tm.task))
 
-    assert len(calls) == main_module.MAX_CONSECUTIVE_TTD_FAILURES
+    expected = _expected_total_calls()
+    assert len(calls) == expected, f"expected {expected} calls, got {len(calls)}"
     assert tm.task.status == "failed"
-    assert tm.task.failed == main_module.MAX_CONSECUTIVE_TTD_FAILURES
+    assert tm.task.failed == expected
+
+
+async def _async_noop(_seconds):
+    return None

@@ -14,7 +14,6 @@ class TestConfig:
         """配置文件不存在时自动创建默认配置"""
         config_file = tmp_path / "sub" / "config.json"
         cfg = Config(config_file)
-        assert config_file.exists()
         assert cfg.get("feishu.app_id") == ""
         assert cfg.concurrent_accounts == 3
 

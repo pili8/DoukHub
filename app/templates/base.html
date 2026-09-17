@@ -8,13 +8,14 @@
     <link rel="manifest" href="/static/manifest.webmanifest">
     <meta name="theme-color" content="#0061A4" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#1A1C1E" media="(prefers-color-scheme: dark)">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/images/icon-192.png">
     <link rel="apple-touch-icon" href="/static/images/apple-touch-icon.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="DoukHub">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <script src="/static/js/lucide.min.js"></script>
     <link rel="stylesheet" href="/static/vendor/phosphor/regular/style.css">
-    <link id="theme-css" rel="stylesheet" href="/static/css/style.css?v=50">
+    <link id="theme-css" rel="stylesheet" href="/static/css/style.css?v=53">
     <script>
       // 明暗模式:localStorage 优先,否则跟随系统,首屏设定避免闪烁
       (function() {
@@ -105,7 +106,7 @@
                 <span id="task-badge-count" class="footer-badge">0</span>
               </button>
               <div id="global-collect-progress" class="global-progress-chip" style="display:none;" onclick="openTaskPanel()">
-                <i class="ph ph-pulse"></i>
+                <i data-lucide="activity"></i>
                 <span id="global-collect-label">采集 0%</span>
                 <div class="gpc-bar"><div id="global-collect-bar"></div></div>
               </div>
@@ -203,7 +204,7 @@
     .dh-modal-box-preset {
         max-width: 800px !important;
         width: min(92vw, 800px) !important;
-        background: var(--surface-raised, var(--bg-muted));
+        background: var(--surface-raised);
         display: flex; flex-direction: column;
         max-height: 88vh; padding: 20px;
     }
@@ -232,7 +233,7 @@
     .dh-modal-body { font-size: 14px; color: var(--text-secondary); line-height: 1.6; word-break: break-all; }
     .task-tabs {
         display: flex; gap: 6px; margin-bottom: 12px;
-        background: var(--bg-input, var(--bg-muted));
+        background: var(--bg-input);
         border-radius: var(--radius-sm); padding: 3px;
     }
     .task-tab {
@@ -242,7 +243,7 @@
         transition: all var(--transition-fast);
     }
     .task-tab:hover { color: var(--text-primary); }
-    .task-tab.active { background: var(--accent); color: var(--text-on-accent, #fff); }
+    .task-tab.active { background: var(--accent); color: var(--text-on-accent); }
     .dh-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
     .dh-btn {
         padding: 8px 18px; border: none; border-radius: var(--radius-sm);
@@ -298,10 +299,10 @@
         right: 0; top: 50%;
         transform: translateY(-50%);
         width: 15px; height: 60px;
-        border: 1px solid var(--md-outline-variant, var(--border-default));
+        border: 1px solid var(--md-outline-variant);
         border-right: none;
         border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-        background: var(--md-surface-container-low, var(--bg-muted));
+        background: var(--md-surface-container-low);
         color: var(--text-muted);
         cursor: pointer;
         display: flex; align-items: center; justify-content: center;
@@ -313,7 +314,7 @@
 
     .sidebar-brand > svg[data-lucide] {
         width: 28px; height: 28px;
-        color: var(--md-primary, var(--accent));
+        color: var(--md-primary);
     }
 
     /* ===== 侧边栏导航项(统一四套主题:40px 扁平) ===== */
@@ -340,18 +341,18 @@
     .sidebar-nav a:hover svg[data-lucide] { transform: scale(1.1); color: var(--accent); }
     .sidebar-nav a.active {
         background: var(--accent-active);
-        color: var(--text-on-accent, #fff);
+        color: var(--text-on-accent);
         font-weight: 600;
     }
-    .sidebar-nav a.active i { color: var(--text-on-accent, #fff); }
-    .sidebar-nav a.active svg[data-lucide] { color: var(--text-on-accent, #fff); }
+    .sidebar-nav a.active i { color: var(--text-on-accent); }
+    .sidebar-nav a.active svg[data-lucide] { color: var(--text-on-accent); }
     .sidebar-nav a.active::before {
         content: ""; position: absolute;
         left: 0; top: 50%; transform: translateY(-50%);
         width: 3px; height: 60%;
-        background: var(--text-on-accent, #fff);
+        background: var(--text-on-accent);
         border-radius: 0 3px 3px 0;
-        box-shadow: var(--glow-primary, none);
+        box-shadow: var(--glow-primary);
     }
 
     /* ===== 嵌套子菜单(手风琴式) ===== */
@@ -376,10 +377,10 @@
     .nav-group.expanded .nav-arrow { transform: rotate(90deg); }
     .nav-group .nav-group-toggle:hover { background: var(--bg-hover); color: var(--text-primary); }
     .nav-group .nav-group-toggle.active {
-        background: var(--accent-active); color: var(--text-on-accent, #fff); font-weight: 600;
+        background: var(--accent-active); color: var(--text-on-accent); font-weight: 600;
     }
-    .nav-group .nav-group-toggle.active i { color: var(--text-on-accent, #fff); }
-    .nav-group .nav-group-toggle.active svg[data-lucide] { color: var(--text-on-accent, #fff); }
+    .nav-group .nav-group-toggle.active i { color: var(--text-on-accent); }
+    .nav-group .nav-group-toggle.active svg[data-lucide] { color: var(--text-on-accent); }
     .nav-group .nav-submenu {
         max-height: 0; overflow: hidden;
         transition: max-height 0.25s ease-out;
@@ -399,10 +400,10 @@
     .nav-group .nav-submenu a svg[data-lucide] { width: 16px; height: 16px; flex-shrink: 0; }
     .nav-group .nav-submenu a:hover { background: var(--bg-hover); color: var(--text-primary); }
     .nav-group .nav-submenu a.active {
-        background: var(--accent-active); color: var(--text-on-accent, #fff); font-weight: 600;
+        background: var(--accent-active); color: var(--text-on-accent); font-weight: 600;
     }
-    .nav-group .nav-submenu a.active i { color: var(--text-on-accent, #fff); }
-    .nav-group .nav-submenu a.active svg[data-lucide] { color: var(--text-on-accent, #fff); }
+    .nav-group .nav-submenu a.active i { color: var(--text-on-accent); }
+    .nav-group .nav-submenu a.active svg[data-lucide] { color: var(--text-on-accent); }
     /* ===== 折叠态悬浮菜单（flyout 子菜单 + tooltip 统一视觉） ===== */
     .sb-collapsed .nav-group { position: relative; }
     .sb-collapsed .nav-submenu {
@@ -413,8 +414,8 @@
         min-width: 176px;
         max-height: none !important;
         overflow: visible;
-        background: var(--md-surface-container-high, var(--bg-muted));
-        border: 1px solid var(--md-outline-variant, var(--border-default));
+        background: var(--md-surface-container-high);
+        border: 1px solid var(--md-outline-variant);
         border-radius: 12px;
         box-shadow: 0 16px 40px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.08);
         padding: 6px;
@@ -432,7 +433,7 @@
         left: -7px;
         top: 18px;
         border: 7px solid transparent;
-        border-right-color: var(--md-outline-variant, var(--border-default));
+        border-right-color: var(--md-outline-variant);
     }
     .sb-collapsed .nav-submenu::after {
         content: '';
@@ -440,7 +441,7 @@
         left: -5px;
         top: 19px;
         border: 5px solid transparent;
-        border-right-color: var(--md-surface-container-high, var(--bg-muted));
+        border-right-color: var(--md-surface-container-high);
     }
     .sb-collapsed .nav-arrow { display: none; }
     .sb-collapsed .nav-group-toggle { justify-content: center; padding: 0; gap: 0; }
@@ -465,9 +466,9 @@
         left: calc(100% + 8px);
         top: 50%;
         transform: translateY(-50%) translateX(-4px);
-        background: var(--md-surface-container-high, var(--bg-muted));
+        background: var(--md-surface-container-high);
         color: var(--text-primary);
-        border: 1px solid var(--md-outline-variant, var(--border-default));
+        border: 1px solid var(--md-outline-variant);
         border-radius: 12px;
         box-shadow: 0 8px 24px rgba(0,0,0,0.16);
         padding: 8px 14px;
@@ -486,7 +487,7 @@
     .sidebar-footer {
         display: flex; flex-direction: row; gap: 8px;
         padding: 12px 16px;
-        border-top: 1px solid var(--md-outline-variant, var(--border-default));
+        border-top: 1px solid var(--md-outline-variant);
     }
     .footer-btn {
         position: relative;
@@ -506,7 +507,7 @@
     .footer-btn .footer-badge {
         position: absolute;
         top: -6px; right: -6px;
-        background: var(--accent); color: var(--text-on-accent, #fff);
+        background: var(--accent); color: var(--text-on-accent);
         font-size: 10px; font-weight: 700; min-width: 16px; height: 16px;
         border-radius: 8px; display: flex; align-items: center; justify-content: center;
         padding: 0 4px; line-height: 1;
@@ -525,9 +526,9 @@
       .hamburger-btn {
         display: flex; position: fixed; top: 12px; left: 12px; z-index: 30002;
         width: 44px; height: 44px; align-items: center; justify-content: center;
-        background: var(--md-surface-container, var(--bg-muted));
-        border: 1px solid var(--md-outline-variant, var(--border-default));
-        border-radius: 12px; color: var(--md-on-surface, var(--text-primary));
+        background: var(--md-surface-container);
+        border: 1px solid var(--md-outline-variant);
+        border-radius: 12px; color: var(--md-on-surface);
         cursor: pointer; -webkit-tap-highlight-color: transparent;
       }
       .hamburger-btn svg[data-lucide] { width: 22px; height: 22px; }
@@ -547,7 +548,7 @@
         z-index: 30003;
         box-shadow: none;
       }
-      body.sidebar-open .sidebar { transform: translateX(0); box-shadow: var(--shadow-xl, 0 8px 30px rgba(0,0,0,0.3)); }
+      body.sidebar-open .sidebar { transform: translateX(0); box-shadow: var(--shadow-xl); }
       /* 抽屉模式下隐藏桌面端折叠按钮,避免状态污染 */
       .sidebar-collapse-edge { display: none !important; }
       /* 触控目标≥44px:导航项及子菜单 */
@@ -564,7 +565,7 @@
     .global-progress-chip {
         position: fixed; left: 68px; bottom: 16px; z-index: 9999;
         display: none; align-items: center; gap: 8px;
-        background: var(--dh-surface, #fff);
+        background: var(--dh-surface);
         border: 1px solid var(--dh-border);
         border-radius: 9999px;
         padding: 7px 14px 7px 11px;
@@ -574,11 +575,11 @@
         transition: box-shadow .15s, transform .15s;
     }
     .global-progress-chip:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(31,27,23,.22), 0 2px 6px rgba(31,27,23,.1); }
-    .global-progress-chip > i { font-size: 14px; color: var(--dh-accent); animation: gpc-pulse 1.6s ease-in-out infinite; }
-    .global-progress-chip.is-paused > i { color: var(--dh-warning); animation: none; }
+    .global-progress-chip > i, .global-progress-chip > svg { font-size: 14px; color: var(--dh-accent); animation: gpc-pulse 1.6s ease-in-out infinite; }
+    .global-progress-chip.is-paused > i, .global-progress-chip.is-paused > svg { color: var(--dh-warning); animation: none; }
     .global-progress-chip.is-paused .gpc-bar > div { background: var(--dh-warning); }
     @keyframes gpc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
-    .global-progress-chip .gpc-bar { width: 90px; height: 4px; background: var(--dh-surface-muted, var(--bg-hover)); border-radius: 2px; overflow: hidden; }
+    .global-progress-chip .gpc-bar { width: 90px; height: 4px; background: var(--dh-surface-muted); border-radius: 2px; overflow: hidden; }
     .global-progress-chip .gpc-bar > div { width: 0%; height: 100%; background: var(--dh-accent); border-radius: 2px; transition: width .5s; }
     </style>
 
@@ -757,6 +758,15 @@
         const _sidebarMask = document.getElementById('sidebar-mask');
         if (_hamburgerBtn) _hamburgerBtn.addEventListener('click', toggleSidebarDrawer);
         if (_sidebarMask) _sidebarMask.addEventListener('click', () => setSidebarDrawer(false));
+        // ESC 关闭抽屉:与全站其它浮层(确认框/任务面板/目录选择器)保持一致。
+        // 用捕获阶段:在其它浮层的冒泡处理器改动 DOM 之前先读状态,
+        // 若此刻已有更上层浮层打开(.dh-show)就放行,让那层的 ESC 逻辑处理,抽屉保持不动。
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Escape') return;
+            if (!document.body.classList.contains('sidebar-open')) return;
+            if (document.querySelector('.dh-show')) return;
+            setSidebarDrawer(false);
+        }, true);
 
         // ===== 嵌套子菜单:手风琴式展开/收起 =====
         function toggleNavGroup(e, el) {
@@ -1016,8 +1026,8 @@
             const active = tasks.filter(function (t) { return t.status === 'pending' || t.status === 'running' || t.status === 'cancelling'; });
             const html = active.length
                 ? active.map(_taskCardHtml).join('')
-                : '<div class="empty-state compact"><i class="ph ph-tray"></i><div class="es-title">暂无进行中的任务</div><div class="es-desc">采集任务开始后会在这里实时显示</div></div>';
-            if (body.innerHTML !== html) body.innerHTML = html;
+                : '<div class="empty-state compact"><i data-lucide="inbox"></i><div class="es-title">暂无进行中的任务</div><div class="es-desc">采集任务开始后会在这里实时显示</div></div>';
+            if (body.innerHTML !== html) { body.innerHTML = html; if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(body); }
         }
         var _historyOffset = 0;
         var _historyList = [];
@@ -1031,7 +1041,7 @@
             if (reset) {
                 _historyOffset = 0;
                 _historyList = [];
-                body.innerHTML = '<div class="empty-state compact"><i class="ph ph-spinner"></i><div class="es-title">加载中...</div></div>';
+                body.innerHTML = '<div class="empty-state compact"><i data-lucide="loader-circle"></i><div class="es-title">加载中...</div></div>';
             }
             try {
                 const data = await apiCall('/api/tasks/history?limit=20&offset=' + _historyOffset, 'GET');
@@ -1041,12 +1051,12 @@
                 _historyOffset += list.length;
                 drawHistoryList(body);
             } catch (e) {
-                body.innerHTML = '<div class="empty-state compact"><i class="ph ph-warning-circle"></i><div class="es-title">加载失败</div><div class="es-desc">' + (e && e.message ? e.message : '请稍后重试') + '</div></div>';
+                body.innerHTML = '<div class="empty-state compact"><i data-lucide="triangle-alert"></i><div class="es-title">加载失败</div><div class="es-desc">' + (e && e.message ? e.message : '请稍后重试') + '</div></div>';
             }
         }
         function drawHistoryList(body) {
             if (!_historyList.length) {
-                body.innerHTML = '<div class="empty-state compact"><i class="ph ph-clock-counter-clockwise"></i><div class="es-title">暂无历史记录</div><div class="es-desc">采集完成的任务会归档在这里</div></div>';
+                body.innerHTML = '<div class="empty-state compact"><i data-lucide="history"></i><div class="es-title">暂无历史记录</div><div class="es-desc">采集完成的任务会归档在这里</div></div>';
                 return;
             }
             const statusColors = { pending: 'var(--dh-warning)', running: 'var(--dh-accent)', done: 'var(--dh-success)', failed: 'var(--dh-danger)', cancelled: 'var(--dh-text-muted)' };
@@ -1084,20 +1094,24 @@
             btn.textContent = open ? '展开日志' : '收起日志';
         }
         async function cancelTask(taskId) {
+            let resp;
             if (taskId.startsWith('batch_')) {
-                await apiCall('/api/collection/batches/' + batchId(taskId) + '/cancel', 'POST');
+                resp = await apiCall('/api/collection/batches/' + batchId(taskId) + '/cancel', 'POST');
             } else {
-                await apiCall('/api/tasks/' + taskId + '/cancel', 'POST');
+                resp = await apiCall('/api/tasks/' + taskId + '/cancel', 'POST');
             }
+            if (!resp || resp.success === false) showToast((resp && resp.message) || '取消失败', 'error');
             pollTasks();
         }
         function batchId(taskId) { return taskId.replace(/^batch_/, ''); }
         async function pauseTask(taskId) {
-            await apiCall('/api/collection/batches/' + batchId(taskId) + '/pause', 'POST');
+            const resp = await apiCall('/api/collection/batches/' + batchId(taskId) + '/pause', 'POST');
+            if (!resp || resp.success === false) showToast((resp && resp.message) || '暂停失败', 'error');
             pollTasks();
         }
         async function resumeTask(taskId) {
-            await apiCall('/api/collection/batches/' + batchId(taskId) + '/resume', 'POST');
+            const resp = await apiCall('/api/collection/batches/' + batchId(taskId) + '/resume', 'POST');
+            if (!resp || resp.success === false) showToast((resp && resp.message) || '继续失败', 'error');
             pollTasks();
         }
 
@@ -1137,7 +1151,7 @@
         });
     </script>
     <div id="page-scripts" style="display:none">{% block scripts %}{% endblock %}</div>
-    <script src="/static/js/account-works.js?v=1"></script>
+    <script src="/static/js/account-works.js?v=2"></script>
     <script>
         // 注册首屏已加载的外部脚本,防止 SPA 首次切换时重复执行
         document.querySelectorAll('script[src]').forEach(function(s) {

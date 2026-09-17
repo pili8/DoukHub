@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Optional
 
 import httpx
 
@@ -465,6 +466,7 @@ async def download_work(
     include_static_cover: bool = False,
     include_dynamic_cover: bool = False,
     folder_mode: bool = False,
+    dl_client: Optional[httpx.AsyncClient] = None,
 ) -> list[Path]:
     assets = work.get("assets") or []
     if not assets and not work.get("downloads"):
@@ -495,11 +497,14 @@ async def download_work(
 
     # Use a standalone client with proper headers for CDN downloads
     # (the shared single_work_client lacks Referer/UA needed by Douyin CDN)
-    async with httpx.AsyncClient(
-        timeout=300,
-        follow_redirects=True,
-        headers=_DOWNLOAD_HEADERS,
-    ) as dl_client:
+    standalone = dl_client is None
+    if standalone:
+        dl_client = await httpx.AsyncClient(
+            timeout=300,
+            follow_redirects=True,
+            headers=_DOWNLOAD_HEADERS,
+        ).__aenter__()
+    try:
         for offset, asset in enumerate(selected, start=1):
             url = asset["url"]
             async with dl_client.stream("GET", url) as response:
@@ -525,4 +530,7 @@ async def download_work(
                     if temporary.exists():
                         temporary.unlink()
                 saved.append(final_path)
+    finally:
+        if standalone:
+            await dl_client.__aexit__(None, None, None)
     return saved

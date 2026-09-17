@@ -22,7 +22,7 @@ class TestCollector:
         """Account 自定义值"""
         acc = Account(
             name="测试",
-            platform="抖音",
+            platform="douyin",
             rating=5,
             tags=["a", "b"],
         )
@@ -39,20 +39,20 @@ class TestCollector:
     def test_detect_platform_douyin(self):
         """抖音链接识别"""
         c = Collector()
-        assert c.detect_platform("https://www.douyin.com/user/abc") == "抖音"
-        assert c.detect_platform("https://www.iesdouyin.com/share/user/abc") == "抖音"
+        assert c.detect_platform("https://www.douyin.com/user/abc") == "douyin"
+        assert c.detect_platform("https://www.iesdouyin.com/share/user/abc") == "douyin"
 
     def test_detect_platform_tiktok(self):
         """TikTok 链接识别"""
         c = Collector()
-        assert c.detect_platform("https://www.tiktok.com/@user") == "TikTok"
+        assert c.detect_platform("https://www.tiktok.com/@user") == "tiktok"
 
     def test_detect_platform_xhs(self):
         """小红书链接识别"""
         c = Collector()
-        assert c.detect_platform("https://www.xiaohongshu.com/user/123") == "小红书"
-        assert c.detect_platform("https://xhslink.com/abc") == "小红书"
-        assert c.detect_platform("https://www.rednote.com/user/123") == "小红书"
+        assert c.detect_platform("https://www.xiaohongshu.com/user/123") == "xhs"
+        assert c.detect_platform("https://xhslink.com/abc") == "xhs"
+        assert c.detect_platform("https://www.rednote.com/user/123") == "xhs"
 
     def test_detect_platform_unknown(self):
         """未知平台"""

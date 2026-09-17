@@ -38,6 +38,9 @@ DEFAULT_CONFIG = {
         "storage_format": "xlsx",
         "data_dir": "./data",
     },
+    "backup": {
+        "dir": "",  # 备份目录；留空 = 默认（数据根目录下的 backups/）
+    },
     "cookie": {
         "rotation_mode": "random",
         "usage_limit": 10,

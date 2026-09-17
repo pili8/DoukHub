@@ -129,6 +129,15 @@ def test_account_processing_forces_post_tab(tmp_path, monkeypatch):
     async def fake_suspend(index, console):
         return None
 
+    download_module = ModuleType("src.downloader.download")
+
+    class FakeHookDownloader:
+        @staticmethod
+        async def download_file(*args, **kwargs):
+            return True
+
+    download_module.Downloader = FakeHookDownloader
+
     src_module = ModuleType("src")
     application_module = ModuleType("src.application")
     main_terminal_module = ModuleType("src.application.main_terminal")
@@ -142,6 +151,8 @@ def test_account_processing_forces_post_tab(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "src.application", application_module)
     monkeypatch.setitem(sys.modules, "src.application.main_terminal", main_terminal_module)
     monkeypatch.setitem(sys.modules, "src.custom", custom_module)
+    monkeypatch.setitem(sys.modules, "src.downloader", ModuleType("src.downloader"))
+    monkeypatch.setitem(sys.modules, "src.downloader.download", download_module)
     monkeypatch.chdir(tmp_path)
 
     old_path = sys.path[:]

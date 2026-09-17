@@ -5,17 +5,15 @@
 <style>
 .sync-textarea { width: 100%; min-height: 120px; resize: vertical; padding: 9px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font-mono); background: var(--bg-input); color: var(--text-primary); }
 .sync-textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.sync-textarea[readonly] { opacity: .6; }
+.import-ops-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+.import-ops-btns { display: flex; gap: 8px; }
 </style>
 
 <div class="page-head">
     <div>
         <h1 class="page-title">导入分享表</h1>
         <div class="page-sub">粘贴或拖入分享数据，预览后写入本地库</div>
-    </div>
-    <div class="page-actions">
-        <button class="btn btn-secondary" onclick="parseImport()">
-            <i data-lucide="search"></i> 解析预览
-        </button>
     </div>
 </div>
 
@@ -24,17 +22,22 @@
 <div class="workflow-panel">
     <div class="workflow-header">
         <div class="workflow-title">
-            <i data-lucide="download"></i>
+            <i data-lucide="clipboard-paste"></i>
             <span>数据导入</span>
         </div>
-        <div class="workflow-actions">
+    </div>
+    <textarea id="import-text" rows="8" class="sync-textarea" placeholder="格式1: 个2@iMLuCKjq&#10;格式2: {&quot;地址&quot;:&quot;xxx&quot;,&quot;等级&quot;:&quot;个2，图&quot;}" ondrop="handleDrop(event)" ondragover="event.preventDefault()" ondragenter="this.style.borderColor='var(--accent)'" ondragleave="this.style.borderColor=''"></textarea>
+    <div class="import-ops-row">
+        <div id="import-status" class="text-muted" style="font-size:13px;"></div>
+        <div class="import-ops-btns">
+            <button class="btn btn-secondary" id="parse-btn" onclick="parseImport()">
+                <i data-lucide="list-filter"></i> 解析预览
+            </button>
             <button class="btn btn-primary" onclick="doImport()" id="exec-btn">
                 <i data-lucide="download"></i> 执行导入
             </button>
         </div>
     </div>
-    <textarea id="import-text" rows="8" class="sync-textarea" placeholder="格式1: 个2@iMLuCKjq&#10;格式2: {&quot;地址&quot;:&quot;xxx&quot;,&quot;等级&quot;:&quot;个2，图&quot;}" ondrop="handleDrop(event)" ondragover="event.preventDefault()" ondragenter="this.style.borderColor='var(--accent)'" ondragleave="this.style.borderColor=''"></textarea>
-    <div id="import-status" class="text-muted" style="margin-top:8px;font-size:13px;"></div>
     <div class="workflow-panel" id="import-preview" style="display:none;">
         <div class="table-scroll">
             <table>
@@ -176,24 +179,38 @@
         document.getElementById('import-preview').style.display = 'block';
         document.getElementById('import-status').innerHTML = '解析完成: <b>'+parsedData.length+'</b> 条' + (duplicateCount ? '，重复 <b>'+duplicateCount+'</b> 条' : '');
     }
+    // 与后端 syncer_v2.parse_grade_tags 保持一致的解析规则：
+    // 数字同时作为等级和标签分隔符 —— "2个"→等级2/标签[个]，"酒吧3多"→等级3/标签[酒吧,多]
+    function parseGradeTags(text) {
+        var level = 0, tags = [];
+        String(text == null ? '' : text).trim().split(/[,，]/).forEach(function(part) {
+            part = part.trim();
+            if (!part) return;
+            part.split(/(\d+)/).forEach(function(seg) {
+                seg = seg.trim();
+                if (!seg) return;
+                if (/^\d+$/.test(seg)) level = Math.max(level, Math.min(4, parseInt(seg, 10)));
+                else if (tags.indexOf(seg) === -1) tags.push(seg);
+            });
+        });
+        return { level: level > 0 ? level : 1, tags: tags };
+    }
+    function mergeGrade(target, parsed) {
+        target.rating = Math.max(target.rating, parsed.level);
+        parsed.tags.forEach(function(t) { if (target.tags.indexOf(t) === -1) target.tags.push(t); });
+        return target;
+    }
     function parseSimpleFormat(text) {
         var lines = text.split('\n').filter(function(l){return l.trim();});
         parsedData = [];
         for (var i=0; i<lines.length; i++) {
-            lines[i] = lines[i].replace(/\\+@/, '@');
-            var match = lines[i].match(/^(.+?)@(.+)$/);
-            if (match) {
-                var prefix = match[1].trim(), link = match[2].trim();
-                var parts = prefix.split(/[,，]/).map(function(s){return s.trim();}).filter(function(s){return s;});
-                var rating = 1, tags = [];
-                for (var j=0; j<parts.length; j++) {
-                    var numMatch = parts[j].match(/(\d+)$/);
-                    if (numMatch) { rating = Math.max(1, Math.min(4, parseInt(numMatch[1]))); var tagPart = parts[j].slice(0, -numMatch[1].length).trim(); if (tagPart) tags.push(mapTag(tagPart)); }
-                    else if (/^\d+$/.test(parts[j])) { rating = Math.max(1, Math.min(4, parseInt(parts[j]))); }
-                    else { tags.push(mapTag(parts[j])); }
-                }
-                parsedData.push({link:link, rating:rating, tags:tags, name:'', raw:lines[i].trim()});
-            }
+            lines[i] = lines[i].replace(/\\+@/g, '@');
+            var atIdx = lines[i].lastIndexOf('@');
+            if (atIdx < 0) continue;
+            var prefix = lines[i].slice(0, atIdx).trim(), link = lines[i].slice(atIdx + 1).trim();
+            if (!link) continue;
+            var grade = mergeGrade({ rating: 1, tags: [] }, parseGradeTags(prefix));
+            parsedData.push({link:link, rating:grade.rating, tags:grade.tags.map(mapTag), name:'', raw:lines[i].trim()});
         }
     }
     function parseJsonFormat(text) {
@@ -202,19 +219,12 @@
         for (var i=0; i<items.length; i++) {
             try {
                 var data = JSON.parse(items[i]);
-                var link = data['地址'] || '';
+                var link = data['地址'] || data['Share'] || '';
                 if (!link) continue;
-                var grade = data['等级'] || '';
-                var name = data['用户'] || '';
-                var parts = grade.split(/[,，]/).map(function(s){return s.trim();}).filter(function(s){return s;});
-                var rating = 1, tags = [];
-                for (var j=0; j<parts.length; j++) {
-                    var numMatch = parts[j].match(/(\d+)$/);
-                    if (numMatch) { rating = Math.max(1, Math.min(4, parseInt(numMatch[1]))); var tagPart = parts[j].slice(0, -numMatch[1].length).trim(); if (tagPart) tags.push(mapTag(tagPart)); }
-                    else if (/^\d+$/.test(parts[j])) { rating = Math.max(1, Math.min(4, parseInt(parts[j]))); }
-                    else { tags.push(mapTag(parts[j])); }
-                }
-                parsedData.push({link:link, rating:rating, tags:tags, name:name, raw:items[i].trim()});
+                var grade = data['等级'] || data['等級'] || '';
+                var name = data['用户'] || data['名称'] || '';
+                var parsed = mergeGrade({ rating: 1, tags: [] }, parseGradeTags(grade));
+                parsedData.push({link:link, rating:parsed.rating, tags:parsed.tags.map(mapTag), name:name, raw:items[i].trim()});
             } catch(e) {}
         }
     }
@@ -223,7 +233,11 @@
         var text = document.getElementById('import-text').value;
         if (!text.trim()) { showToast('请先输入要导入的文本', 'error'); return; }
         var btn = document.getElementById('exec-btn');
+        var parseBtn = document.getElementById('parse-btn');
+        var ta = document.getElementById('import-text');
         btn.disabled = true;
+        parseBtn.disabled = true;
+        ta.readOnly = true;
         btn.innerHTML = '<i data-lucide="loader-circle"></i> 导入中...';
         if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         document.getElementById('result-card').style.display = 'block';
@@ -267,6 +281,8 @@
             showToast('导入请求失败', 'error');
         } finally {
             btn.disabled = false;
+            parseBtn.disabled = false;
+            ta.readOnly = false;
             btn.innerHTML = '<i data-lucide="download"></i> 执行导入';
             if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
         }

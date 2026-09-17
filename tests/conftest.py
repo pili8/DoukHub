@@ -11,6 +11,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 
+@pytest.fixture(autouse=True)
+def isolated_data_root(tmp_path, monkeypatch):
+    """所有测试默认使用临时数据根，禁止触碰真实 ~/.doukhub"""
+    monkeypatch.setenv("DOUKHUB_DATA_ROOT", str(tmp_path))
+
 @pytest.fixture
 def tmp_dir(tmp_path):
     """提供临时目录"""

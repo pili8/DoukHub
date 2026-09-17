@@ -22,7 +22,7 @@
   --dh-danger-soft: #FEF1EB;
   --dh-warning: #B45309;
   --dh-warning-soft: #FEF3C7;
-  --dh-success: #16A34A;
+  --dh-success: #15803D;
   --dh-success-soft: #ECFDF3;
   --dh-purple: #A855F7;
   --dh-purple-soft: rgba(168, 85, 247, 0.12);
@@ -116,7 +116,8 @@
   --text-secondary: var(--dh-text-secondary);
   --text-muted: var(--dh-text-muted);
   --text-tertiary: var(--dh-text-muted);
-  --text-on-accent: #FFFFFF;
+  /* 实心强调面上的前景色：浅色=白字、深色=深字（跟随 --md-on-primary，保证对比度达标） */
+  --text-on-accent: var(--md-on-primary);
   --text-on-dark: var(--md-on-surface);
   --text-on-dark-muted: var(--md-on-surface-variant);
   --text-on-dark-dim: var(--md-outline);
@@ -127,7 +128,7 @@
 
   --accent: var(--dh-accent);
   --accent-hover: var(--dh-accent-hover);
-  --accent-active: #0061A4;
+  --accent-active: var(--dh-accent);
   --accent-light: var(--dh-accent-soft);
   --accent-text: var(--md-primary);
 
@@ -236,9 +237,7 @@
   --md-surface-variant: #3D352C;
   --md-shadow-color: rgb(0 0 0);
   --md-scrim: rgb(0 0 0 / 0.6);
-
-  --accent-active: #0061A4;
-  --text-on-accent: #FFFFFF;
+  /* --accent-active / --text-on-accent 均从 :root 继承（都走 token，自动跟随主题） */
 }
 
 /* ===== 2. Reset & Base ===== */
@@ -253,6 +252,14 @@ body {
   background: var(--dh-background);
   line-height: 1.5;
 }
+
+/* 表单控件默认不继承文字色（浏览器用 ButtonText/FieldText 系统色），
+   深色模式下会残留黑字导致看不见 —— 统一继承，自动跟随主题。
+   （显式设色的 .btn-primary / .dh-btn-* 等优先级更高，不受影响） */
+button, input, select, textarea { color: inherit; }
+
+/* 工具类：弱化辅助文字（时间戳 / 计数 / 占位）—— 模板中已在用，此处补齐定义 */
+.text-muted { color: var(--dh-text-muted); }
 
 a { color: var(--md-primary); text-decoration: none; transition: color var(--transition-fast); }
 a:hover { color: var(--accent-hover); }
@@ -609,51 +616,62 @@ code, pre { font-family: var(--font-mono); }
   flex-wrap: wrap;
 }
 
-/* ===== 7. M3 Filled Text Fields ===== */
+/* ===== 7. M3 Filled Text Fields =====
+   2026-09-17 基线统一：
+   ① 控件高度/字号统一为 34px + 13px，与 .btn(34px) 严格等高，输入框与按钮并排不再错位；
+   ② 补上 .input 的定义 —— 此前该类全项目无任何 CSS，设置页「新应用数据目录 / 新备份目录」
+      和目录选择弹窗的两处输入框一直掉到浏览器默认样式（2px 灰边框、直角、仅 19px 高，
+      高度只有旁边控件的一半），是全站控件风格不统一的根源；
+   ③ hover 从 --md-on-surface（近黑，过重）收敛到 --dh-border-strong，焦点环加宽到 3px。 */
 .form-group {
   margin-bottom: 14px;
 }
 
-.form-group label {
+.form-group label,
+.field-label {
   display: block;
-  margin-bottom: 5px;
-  font-weight: 500;
+  margin-bottom: 6px;
+  font-weight: 600;
   font-size: 12px;
   color: var(--dh-text-secondary);
 }
 
 .form-group input,
 .form-group select,
-.form-group textarea {
+.form-group textarea,
+.input {
   width: 100%;
-  min-height: 32px;
-  padding: 6px 9px;
+  min-height: 34px;
+  padding: 7px 11px;
   border: 1px solid var(--dh-border);
   border-radius: var(--dh-radius-sm);
   background: var(--dh-surface);
   color: var(--dh-text);
-  font-size: 12px;
+  font-size: 13px;
   font-family: inherit;
+  box-sizing: border-box;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
 }
 
 .form-group input:hover,
 .form-group select:hover,
-.form-group textarea:hover {
-  border-color: var(--md-on-surface);
+.form-group textarea:hover,
+.input:hover {
+  border-color: var(--dh-border-strong);
 }
 
 .form-group input:focus,
 .form-group select:focus,
-.form-group textarea:focus {
+.form-group textarea:focus,
+.input:focus {
   outline: none;
   border-color: var(--dh-accent);
-  box-shadow: 0 0 0 2px var(--dh-accent-soft);
-  padding: 6px 9px;
+  box-shadow: 0 0 0 3px var(--dh-accent-soft);
 }
 
 .form-group input::placeholder,
-.form-group textarea::placeholder {
+.form-group textarea::placeholder,
+.input::placeholder {
   color: var(--md-outline);
 }
 
@@ -662,9 +680,145 @@ code, pre { font-family: var(--font-mono); }
   resize: vertical;
 }
 
-.form-group small {
+.form-group small,
+.field-hint {
+  display: block;
   color: var(--md-outline);
   font-size: 12px;
+}
+
+.input:disabled,
+.form-group input:disabled,
+.form-group select:disabled,
+.form-group textarea:disabled {
+  background: var(--dh-surface-muted);
+  color: var(--dh-text-muted);
+  cursor: not-allowed;
+}
+
+/* 勾选框 / 单选框统一着色（:where 零特异性，AG Grid 等自带主题仍可覆盖） */
+:where(input[type="checkbox"], input[type="radio"]) {
+  accent-color: var(--dh-accent);
+}
+
+/* ===== 7b. 路径 / 目录字段组件（2026-09-17 新增） =====
+   统一「当前目录展示」与「目标目录选择」两类交互，设置页与目录选择弹窗共用。
+   全部走 --dh-* 令牌，明暗自动跟随；hover 用 color-mix 保证深色下同样自然。 */
+.path-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 5px 5px 5px 11px;
+  border: 1px solid var(--dh-border);
+  border-radius: var(--dh-radius-sm);
+  background: var(--dh-surface-muted);
+  box-sizing: border-box;
+}
+
+.path-pill > svg[data-lucide],
+.path-pill > i,
+.path-pill-icon {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  color: var(--dh-accent);
+}
+
+/* 胶囊内可放一个操作按钮（如「打开目录」），不参与压缩 */
+.path-pill > .btn { flex-shrink: 0; }
+
+.path-pill-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--dh-text);
+}
+
+/* 行内等宽路径（提示小字里的兜底配置路径） */
+.path-inline {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+/* 柔和图标按钮：无边框，hover 才浮出底色（复制路径等轻量操作） */
+.icon-btn-soft {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dh-radius-sm);
+  background: transparent;
+  color: var(--dh-text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.icon-btn-soft:hover {
+  background: color-mix(in srgb, var(--dh-text) 10%, transparent);
+  color: var(--dh-text);
+}
+
+.icon-btn-soft:active { transform: scale(0.94); }
+.icon-btn-soft:focus-visible { outline: 2px solid var(--dh-accent); outline-offset: 1px; }
+.icon-btn-soft svg[data-lucide], .icon-btn-soft i { width: 15px; height: 15px; }
+
+/* 输入框内嵌操作按钮（如「选择文件夹」）：与输入框合成一个控件，替代旁挂竖排按钮 */
+.field-affix {
+  position: relative;
+  display: block;
+}
+
+.field-affix .input,
+.field-affix input { padding-right: 40px; }
+
+.field-affix-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dh-radius-sm);
+  background: transparent;
+  color: var(--dh-text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.field-affix-btn:hover { background: var(--dh-accent-soft); color: var(--dh-accent); }
+.field-affix-btn:active { transform: translateY(-50%) scale(0.94); }
+.field-affix-btn:focus-visible { outline: 2px solid var(--dh-accent); outline-offset: 1px; }
+.field-affix-btn svg[data-lucide], .field-affix-btn i { width: 15px; height: 15px; }
+
+/* 字段操作行：右对齐；与输入框保持同一视觉列 */
+.field-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+/* 同卡片内的次级分组（数据目录 / 备份目录）：虚线分隔比实线更轻 */
+.field-group + .field-group {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--dh-border);
 }
 
 /* ===== 8. M3 Data Table ===== */
@@ -3048,10 +3202,14 @@ td a.health-link:hover { border-bottom-color: var(--accent, #4f8cff); }
 .preview-stat-num { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
 .preview-stat-label { font-size: 11px; color: var(--dh-text-muted, var(--text-muted)); }
 .preview-stat-divider { width: 1px; height: 28px; background: var(--dh-border, var(--border-default)); flex-shrink: 0; }
+/* 统计条颜色语义:只有「可采」是主指标(实心强调色的文字形态),其余为分类计数。
+   分类计数不用语义色,否则「首次=橙 / 增量=绿」会与「橙=警告 / 绿=成功」的状态语义撞车。 */
 .preview-stat-item.total .preview-stat-num { color: var(--dh-accent, var(--accent)); }
-.preview-stat-item.first .preview-stat-num { color: var(--dh-warning, var(--warning-text, #B45309)); }
-.preview-stat-item.incr .preview-stat-num { color: var(--dh-success, var(--success-text, #16A34A)); }
-.preview-stat-item.skip .preview-stat-num { color: var(--dh-text-muted, var(--text-muted)); }
+.preview-stat-item.first .preview-stat-num,
+.preview-stat-item.incr .preview-stat-num { color: var(--dh-text, var(--text-primary)); }
+/* 跳过:用次级文字色而非 --dh-text-muted —— 这枚数字是 20px 加粗(属 WCAG「大字号」,下限 3:1),
+   而 --dh-text-muted 在浅色底上仅 2.38:1,是「辅助小字」专用色,用在大数字上不合规。 */
+.preview-stat-item.skip .preview-stat-num { color: var(--dh-text-secondary, var(--text-secondary)); }
 
 /* rating-segmented: 分段选择器 */
 .rating-segmented { display: inline-flex; border: 1px solid var(--dh-border-strong, var(--border-default)); border-radius: var(--dh-radius-sm, var(--radius-sm)); overflow: hidden; }
@@ -3304,7 +3462,7 @@ button.preset-role-tag:active { transform: scale(.96); }
 .run-stats-bar .preview-stat-item.remain .preview-stat-num { color: var(--dh-text, var(--text-primary)); }
 .run-stats-bar .preview-stat-item.succ .preview-stat-num { color: var(--dh-success, var(--success-text, #16A34A)); }
 .run-stats-bar .preview-stat-item.fail .preview-stat-num { color: var(--dh-danger, var(--danger-text, #C2410C)); }
-.run-stats-bar .preview-stat-item.skip .preview-stat-num { color: var(--dh-text-muted, var(--text-muted)); }
+.run-stats-bar .preview-stat-item.skip .preview-stat-num { color: var(--dh-text-secondary, var(--text-secondary)); }
 .run-stats-bar .preview-stat-item.run-time .preview-stat-num { color: var(--dh-accent, var(--accent)); }
 
 /* 运行中表格:当前账号行高亮 */

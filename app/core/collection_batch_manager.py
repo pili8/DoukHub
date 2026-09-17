@@ -148,7 +148,15 @@ class CollectionBatchManager:
 
     def cancel(self, batch_id: str) -> bool:
         batch = self.db.get_collection_batch(batch_id)
-        if not batch or batch["status"] not in ("pending", "running", "paused"):
+        if not batch:
+            return False
+        if batch["status"] == "cancelling":
+            # 幂等收尾：取消中但已无本进程认领的活跃批次（如重启后的孤儿批次），
+            # 直接结算为已取消，而不是拒绝请求让前端永远停在"取消中"
+            if batch_id != self._active_batch_id:
+                self._finalize(batch_id, "cancelled", -1, "批次已取消")
+            return True
+        if batch["status"] not in ("pending", "running", "paused"):
             return False
         if batch["status"] == "paused":
             self._set_paused(False)
@@ -463,6 +471,10 @@ class CollectionBatchManager:
                 )
                 conn.commit()
             self.db.refresh_collection_batch_counts(batch["id"])
+            if batch["status"] == "paused":
+                # 暂停中的批次重启后进程已死，重置为 pending 由 kick_resume 续跑，
+                # 避免残留成"既不能暂停/继续也不能取消"的孤儿批次
+                self.db.update_collection_batch(batch["id"], status="pending")
             self._append_batch_log(
                 batch, "[DoukHub] DoukHub 重启，批次将从中断处续跑（已完成账号不重复采集）\n"
             )
@@ -732,7 +744,7 @@ class CollectionBatchManager:
                     被处决的批次按失败结算，未完成账号走既有的自动补采兜底。
                     阈值远大于 TTD suspend 的 5 分钟静默，不会误杀健康批次。
                     """
-                    nonlocal watchdog_killed
+                    nonlocal watchdog_killed, last_output
                     warned = False
                     while process.returncode is None:
                         await asyncio.sleep(self._WATCHDOG_INTERVAL)
