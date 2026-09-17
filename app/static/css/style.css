@@ -3514,3 +3514,49 @@ button.preset-role-tag:active { transform: scale(.96); }
 .run-log-view .log-err { color: var(--dh-danger, var(--danger-text, #C2410C)); }
 .run-log-view .log-info { color: var(--dh-accent, var(--accent)); }
 
+/* ===== 15. 移动端适配基线（≤768px）
+   实测（375px）发现三类真实缺陷，修复全部限定在窄屏，桌面样式一字不改：
+   ① 汉堡按钮是 position:fixed 的 (12,12,44×44)，而 .main 的首行内容也从 (12,12) 开始，
+      两者完全重叠 → 每个页面的标题首字都被盖住（实测 h2 左边界 = 汉堡右边 -44px）。
+   ② 多处辅助小字只有 9~11px，低于移动端可读下限。
+   ③ 常用触控目标偏矮（表页 tab 29px、图标按钮 30px），低于 36px 舒适线。 */
+@media (max-width: 768px) {
+  /* ① 为汉堡让出左上角安全区：标题容器左缩 56px、高度对齐 44px，与汉堡同处一行。
+     只缩「标题容器」而不缩整块 header，操作按钮行仍是通栏，不浪费宽度。
+     覆盖两种页头写法：.page-header（h2 直挂 / .page-title-wrap 包裹）与
+     .page-head（首个 div 内是 .page-title + .page-sub）。 */
+  .page-header > h2,
+  .page-header > .page-title-wrap,
+  .page-head > div:first-child {
+    padding-left: 56px;
+    min-height: 44px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  /* ② 辅助小字抬到移动端可读下限。
+     注意：.tbl-tag / .scan-badge / .settings-group-label 的字号在各模板自己的
+     <style> 里定义，文档顺序在本文件之后，同优先级会覆盖本文件 → 那几处已直接改在模板内。
+     这里只保留本文件自己定义的那些。 */
+  .preview-stat-label { font-size: 11px; }
+
+  /* ③ 触控目标：只抬最常用、且不会牵动表格行高的几类 */
+  .icon-btn { min-width: 36px; min-height: 36px; }
+  .scope-checkall { min-height: 32px; padding: 4px 10px; }
+  /* 卡片内的搜索/筛选输入框；排除 AG Grid 内联编辑器，避免影响表格编辑 */
+  .card input:not([type="checkbox"]):not([type="radio"]):not(.ag-input-field-input),
+  .card select,
+  .card textarea { min-height: 36px; }
+
+  /* ④ 页头在窄屏改为上下堆叠：
+     .page-head 桌面是「标题 | 操作」左右并排，375px 下会把副标题和一个按钮
+     都挤成断词换行（实测「TTD、XHS 与后台任务健康状 / 态」「刷新状 / 态」）。
+     .page-header 在 theme-material.css 已有同样的堆叠处理，这里补齐 .page-head。 */
+  .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .page-actions .btn { flex: 1; justify-content: center; }
+  /* 主操作在窄屏独占一行并撑满，主次更清楚 */
+  .page-actions > .btn-primary,
+  .page-header-actions > .btn-primary { flex: 1 1 100%; }
+}
+

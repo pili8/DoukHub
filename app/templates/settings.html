@@ -66,6 +66,10 @@
   content: ''; flex: 1; height: 1px; background: var(--border-default);
 }
 .settings-group-label svg[data-lucide] { width: 13px; height: 13px; }
+/* 窄屏：分组标签 11px 偏小（桌面值不变） */
+@media (max-width: 768px) {
+  .settings-group-label { font-size: 12px; }
+}
 
 /* ===== 影响范围标签 ===== */
 /* 单作品紫色为本页局部令牌（全局无 purple 语义），明暗各给一档 */

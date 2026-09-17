@@ -1295,6 +1295,12 @@ input[type="checkbox"]:disabled {
     /* 条件胶囊收窄，避免一行一条撑高工具栏 */
     .tbl-fb-chip { max-width: 180px; }
     .tbl-fb-clear { margin-left: 0; }
+    /* 窄屏可读性/触控（桌面值不变）：状态徽章 10.5px 与计数徽章 11px 偏小，
+       表选择 tab 仅 29px 高低于 36px 触控舒适线，加载状态条三块并排会挤成两行小字 */
+    .tbl-tag { font-size: 11.5px; line-height: 18px; }
+    .tbl-count-badge { font-size: 12px; }
+    .tab-btn { min-height: 38px; }
+    .tbl-load-status { flex-wrap: wrap; gap: 8px; }
 }
 /* 存为方案弹窗：整体容器 */
 .sp-body { display: flex; flex-direction: column; gap: 14px; }

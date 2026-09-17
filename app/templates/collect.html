@@ -20,6 +20,14 @@
   .batch-card-stats { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; margin-bottom: 8px; }
   .batch-card-ops { display: flex; gap: 8px; }
   .batch-card-ops .btn { flex: 1; justify-content: center; }
+  /* 卡片是塞在 <tr><td colspan="11"> 里渲染的,表格宽度会被桌面 11 列的表头撑到 533px
+     (视口仅 375),导致卡片右侧被裁、表头文字互相挤压。改为固定表格布局并隐藏表头
+     (卡片自带字段标签,表头无意义),让卡片真正贴合屏宽。 */
+  #batch-table { table-layout: fixed; width: 100%; }
+  #batch-table thead { display: none; }
+  /* grid 用 minmax(0,1fr):默认 1fr 的 min-content 下限会让长值把列撑爆 */
+  .batch-card-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .batch-card-cell > span:last-child { min-width: 0; overflow-wrap: anywhere; text-align: right; }
   /* 方案管理弹窗:左右分栏改上下布局 */
   .preset-modal-layout { flex-direction: column; gap: 12px; min-height: auto; }
   .preset-modal-left { width: 100%; border-right: none; border-bottom: 1px solid var(--dh-border); padding-right: 0; padding-bottom: 12px; max-height: 180px; overflow-y: auto; }
@@ -27,13 +35,13 @@
   /* 预览统计条:窄屏缩小数字字号 */
   .preview-stats-bar { padding: 8px 10px; gap: 2px; }
   .preview-stat-num { font-size: 16px; }
-  .preview-stat-label { font-size: 10px; }
+  .preview-stat-label { font-size: 11px; }
   .preview-stat-divider { height: 22px; }
   /* 运行状态统计卡片:窄屏横排3个稍小 */
   .stat-cards { display: flex; gap: 8px; }
   .stat-cards .stat-card { flex: 1; padding: 10px 8px; text-align: center; }
   .stat-cards .stat-card .stat-value { font-size: 18px; font-weight: 700; display: block; }
-  .stat-cards .stat-card .stat-label { font-size: 10px; color: var(--dh-text-muted); }
+  .stat-cards .stat-card .stat-label { font-size: 11px; color: var(--dh-text-muted); }
   /* 筛选栏:触控目标加大 */
   .batch-filter-bar select { min-height: 36px; padding: 6px 10px; font-size: 13px; }
   /* 保存方案底部操作栏:窄屏紧凑 */
@@ -42,7 +50,7 @@
 }
 @media (max-width: 420px) {
   .preview-stat-num { font-size: 14px; }
-  .preview-stat-label { font-size: 9px; }
+  .preview-stat-label { font-size: 11px; }
   .stat-cards .stat-card .stat-value { font-size: 16px; }
 }
 /* 批次详情弹窗 */
@@ -290,7 +298,7 @@
 
     <!-- 批次列表 -->
     <div class="table-scroll">
-        <table>
+        <table id="batch-table">
             <thead>
                 <tr>
                     <th>批次</th>
