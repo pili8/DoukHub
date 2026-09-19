@@ -1,5 +1,78 @@
 # DoukHub 更新日志
 
+## 2026-09-19 v2.3.0 抖音接口直连化 + 采集 Fail Fast
+
+> 主题：把「什么都丢给 TTD 内核」改成**能直连就直连、直连失败才回退 TTD**。
+> 解析与资料获取从 ~6s 降到 ~0.4~1s，并顺带解决新版抖音风控导致的采集失败。
+
+### 1. 短链接解析：直连重定向替代 TTD
+
+`v.douyin.com` 分享码会 302 跳到完整用户页 URL。新增 `_direct_redirect()` 直连跟随重定向
+（**~0.4s**），失败才回退 TTD `/share`（~6s，含内置 wait）。失效链接仍会被正确判定：
+
+- 跳到作品/直播页 → `not_profile`（本身是作品链接，不算失效）
+- 跳到平台首页 → `bad_link`（短码已失效），**不再多发一次 TTD 请求**
+
+### 2. 账号资料获取：抖音 API 直连（ABogus 签名）
+
+新增 `fetch_user_profile_direct()`，直连 `aweme/v1/web/user/profile/other/`（**~1s**），
+回退 TTD `/douyin/account`。账号资料优先直连，使得「同步账号 / 刷新账号」不再受 TTD 波动影响。
+
+直连技术要点（本轮踩坑沉淀）：
+
+| 问题 | 现象 | 解法 |
+|---|---|---|
+| TLS 指纹 | httpx 请求被 **403** | 改用 `curl_cffi` 模拟 Chrome（`impersonate="chrome146"`） |
+| Argus 风控 | `403 Blocked by ArgusSecurityPlugin Uifid Not Found` | 从 Cookie 提取 `uifid`，**URL 参数 + Header 都要带**，并加 `x-tt-argus: 1` |
+| ABogus 签名 | 新版构造函数签名变化 | `ABogus(user_agent)`，`get_value(params_str)` 单参调用 |
+| 接口版本 | 参数过旧 | `version_code/version_name` 跟随抖音升到 290100 / 29.1.0 |
+
+顺带修正：TTD `/douyin/account` 返回的是**作品列表**（账号资料藏在 `data[0].author`），
+原先按单个对象解析会拿到空资料 —— 现在兼容 list / dict 两种形态。
+
+### 3. Cookie 验证：直连优先 + 失败原因可见
+
+- `validate_cookie()` 抖音优先走直连 API 验证（快且不依赖 TTD Server），TikTok 回退 TTD。
+- 返回值由 `bool` 改为 **dict**（`{status, message, nickname}`），调用方同步适配。
+- `cookie_cache` 表新增 **`验证说明`** 列：记录失效原因（如「登录态已过期」），
+  在表浏览里以红色徽章展示。**该列不覆盖用户手填的「备注」**，验证通过时自动清空。
+- 统一新增 `get_cookie_list()`：库中启用的 Cookie 为空时，**回退读取 TTD `Volume/settings.json`
+  的 `cookie` / `cookie_tiktok`**（此前 8 处各自读库的逻辑已收敛到这一处）。
+- 单作品下载的 Cookie 选择改为 **LRU 轮换**（最久未使用优先），并回写使用记录。
+
+### 4. 增量采集：Fail Fast 自动止损
+
+此前 Cookie 失效后，批次会**把剩下所有账号逐个跑完才报错**，白等几十轮。现在：
+
+- 连续 **5 个**账号返回登录态类错误 → **立即终止 TTD 进程**中止批次，并把该 Cookie 标记为失效。
+- 若还有**其他可用 Cookie** → 自动换 Cookie 重跑失败/未完成的账号（只自动换一次），
+  不用人工重新建批次。
+- 计数只针对**登录态类错误**，API 偶发风控的临时失败不会误触发；
+  且计数发生在账号匹配**之前**，避免 sec_user_id 不匹配时漏计。
+- 批次终止原因写入 `collection_batches.message`，在批次列表可见。
+
+### 5. TTD 内核：适配 5.8 风控 + 一键更新
+
+- TTD 5.8 的 `im/user/info` 接口被风控（**Cookie 有效也返回空**），导致批量采集匹配不到作品而中断。
+  现已 patch `Extractor.__select_item`：匹配 `sec_uid` 失败时**返回第一个作品继续**而非抛错
+  （应对共创作品场景）。
+- `source=True` 取原始 API 数据，避开新版 TTD `source=False` 对 Volume 目录配置的依赖（会 500）。
+- 采集节流：每个账号处理完都暂停（不管成功失败），降低风控概率。
+- 新增 **内核一键更新**：`POST /api/kernels/{name}/update`（状态页与内核卡片均有按钮），
+  自动 stash → pull → stash pop，冲突时丢弃本地修改；同时显示内核版本号。
+  ⚠️ 注意：此处的 stash 作用于 **TTD 内核仓库**，与 DoukHub 主仓库无关。
+- 所有内核 subprocess 调用加 `CREATE_NO_WINDOW`，**不再弹 CMD 黑框**。
+
+### 6. 其他
+
+- 表浏览：`验证说明` 列加入只读字段、列宽、权限映射与专用渲染器。
+- 移除采集流程中多余的固定 `sleep`（0.3/0.5s），改由 TTD 侧节流统一控制。
+
+### 升级提示
+
+- `cookie_cache` 与 `collection_batches` 表会自动补列（`验证说明` / `message`），无需手动迁移。
+- 直连 API 依赖新增的 `curl_cffi`，请确保依赖已安装（`pip install -r requirements.txt`）。
+
 ## 2026-09-17 v2.2.12 移动端适配修复（375px 实测）
 
 > 方法：此前所有 UI 审计都在 1440px 宽做，本轮首次把视口压到 375 / 768px，

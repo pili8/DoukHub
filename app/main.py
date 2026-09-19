@@ -148,6 +148,32 @@ def get_single_work_client() -> httpx.AsyncClient:
     return single_work_client
 
 
+def get_cookie_list() -> list[str]:
+    """获取可用 Cookie 列表，优先从数据库读取，回退到 TTD settings.json。
+
+    数据库中启用的 Cookie 可能为空（用户未启用或批量采集误标记失效），
+    此时会回退到 TTD settings.json 中的 cookie / cookie_tiktok 字段。
+    """
+    db = get_database()
+    cookies = db.get_enabled_cookies()
+    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+    if cookie_list:
+        return cookie_list
+    # Fallback: TTD settings.json
+    try:
+        ttd_root = Path(config.ttd_path)
+        settings_file = ttd_root / "Volume" / "settings.json"
+        if settings_file.exists():
+            with settings_file.open("r", encoding="utf-8-sig") as f:
+                settings = json.load(f)
+            cookie = settings.get("cookie", "")
+            if cookie:
+                return [cookie]
+    except Exception:
+        pass
+    return []
+
+
 def get_feishu_syncer() -> FeishuSyncer | None:
     """获取飞书同步器"""
     f = get_feishu()
@@ -278,7 +304,7 @@ async def lifespan(app: FastAPI):
         single_work_client = None
 
 
-app = FastAPI(title="DoukHub", version="2.2.12", lifespan=lifespan)
+app = FastAPI(title="DoukHub", version="2.3.0", lifespan=lifespan)
 
 
 
@@ -1022,8 +1048,8 @@ async def api_status():
         "services": svc.status_all(),
         "stats": h.get_stats(),
         "kernels": {
-            "ttd": {"installed": ttd_kernel, "path": str(svc.ttd.path)},
-            "xhs": {"installed": xhs_kernel, "path": str(svc.xhs.path)},
+            "ttd": {"installed": ttd_kernel, "path": str(svc.ttd.path), "version": svc.ttd.get_version()},
+            "xhs": {"installed": xhs_kernel, "path": str(svc.xhs.path), "version": svc.xhs.get_version()},
         },
     }
 
@@ -1107,6 +1133,23 @@ async def api_kernel_install(name: str):
     result = svc.install(name)
     return result
 
+@app.post("/api/kernels/{name}/update")
+async def api_kernel_update(name: str):
+    """通过 git pull 更新内核源码"""
+    svc = get_services()
+    result = svc.update(name)
+    return result
+
+@app.get("/api/kernels/{name}/version")
+async def api_kernel_version(name: str):
+    """获取内核版本信息"""
+    svc = get_services()
+    s = svc.get_service(name)
+    if not s:
+        return {"success": False, "message": f"未找到内核: {name}"}
+    version = s.get_version()
+    return {"success": True, "name": s.name, "version": version, "path": str(s.path)}
+
 # --- Cookie 验证 ---
 
 @app.post("/api/cookies/validate")
@@ -1137,7 +1180,8 @@ async def api_validate_cookies():
 
                 yield f"data: {json.dumps({'type': 'progress', 'message': f'验证 [{i+1}/{total}]: {label}'})}\n\n"
 
-                valid = await c.validate_cookie(cookie_str, ck.get("平台", "douyin"))
+                result = await c.validate_cookie(cookie_str, ck.get("平台", "douyin"))
+                valid = isinstance(result, dict) and result.get("status") == "valid"
 
                 from datetime import datetime
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1147,6 +1191,13 @@ async def api_validate_cookies():
                 }
                 if not valid:
                     update_data["启用"] = 0
+                    # 验证原因写入"验证说明"字段，不覆盖用户的"备注"
+                    reason = result.get("message", "") if isinstance(result, dict) else ""
+                    if reason:
+                        update_data["验证说明"] = reason[:80]
+                else:
+                    # 验证通过时清空验证说明
+                    update_data["验证说明"] = ""
                 db.update_cookie(record_id, update_data)
 
                 if valid:
@@ -1156,8 +1207,11 @@ async def api_validate_cookies():
 
                 level = "ok" if valid else "error"
                 icon = "✅" if valid else "❌"
+                detail_msg = ""
+                if not valid and isinstance(result, dict) and result.get("message"):
+                    detail_msg = f" ({result['message']})"
                 status = "有效" if valid else "已过期"
-                msg = f"{icon} {label}: {status}"
+                msg = f"{icon} {label}: {status}{detail_msg}"
                 yield f"data: {json.dumps({'type': 'log', 'level': level, 'message': msg})}\n\n"
 
                 yield f"data: {json.dumps({'type': 'stats', 'total': total, 'valid': valid_count, 'invalid': invalid_count})}\n\n"
@@ -1637,7 +1691,6 @@ async def _run_update_collection(task):
                 consecutive_ttd_failures = 0
                 tm.add_log(task.task_id, f"OK {share}: {sec_user_id}", "ok")
             tm.update(task.task_id, success=success, failed=failed)
-            await asyncio.sleep(0.3)
         except Exception as e:
             failed += 1
             s.db.update_collection(collection["record_id"], {"解析状态": "解析失败"})
@@ -1684,8 +1737,7 @@ async def _run_sync_account(task):
         return
     tm.add_log(task.task_id, f"需要处理 {len(to_process)} 条记录", "info")
     db = get_database()
-    cookies = db.get_enabled_cookies()
-    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+    cookie_list = get_cookie_list()
     if not cookie_list:
         tm.add_log(task.task_id, "Cookie 表为空,仅生成账号基础数据,跳过详情获取", "warning")
     else:
@@ -1807,7 +1859,6 @@ async def _run_sync_account(task):
             success += 1
             tm.add_log(task.task_id, f"OK 新增/更新账号: {info.get('nickname')}", "ok")
             tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
-            await asyncio.sleep(0.5)
         except Exception as e:
             failed += 1
             tm.add_log(task.task_id, f"X {sec_user_id}: {e}", "error")
@@ -1906,8 +1957,7 @@ async def _run_refresh_accounts(task):
         return
     tm.add_log(task.task_id, f"共 {len(to_fetch)} 个账号需要刷新", "info")
     # 加载 Cookie
-    cookies = db.get_enabled_cookies()
-    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+    cookie_list = get_cookie_list()
     if not cookie_list:
         tm.add_log(task.task_id, "Cookie 表为空,无法获取账号详情", "error")
         tm.update(task.task_id, status="failed", error="Cookie 表为空")
@@ -1977,7 +2027,6 @@ async def _run_refresh_accounts(task):
                     retry_round += 1
                     consecutive_ttd_failures = 0
             tm.update(task.task_id, success=success, failed=failed)
-            await asyncio.sleep(0.5)
         except Exception as e:
             failed += 1
             tm.add_log(task.task_id, f"X {old_name}: {e}", "error")
@@ -3044,8 +3093,7 @@ async def api_resolve_single_works(request: SingleWorkResolveRequest):
     client = get_single_work_client()
     ttd_url = f"http://127.0.0.1:{config.ttd_port}"
     db = get_database()
-    cookies = db.get_enabled_cookies()
-    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+    cookie_list = get_cookie_list()
     works = []
     errors = []
     for i, (link, platform) in enumerate(links):
@@ -3074,8 +3122,7 @@ async def api_resolve_single_works_stream(request: SingleWorkResolveRequest):
     total = len(links)
     # 从数据库获取 Cookie
     db = get_database()
-    cookies = db.get_enabled_cookies()
-    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+    cookie_list = get_cookie_list()
 
     async def resolve_stream():
         import asyncio as _aio
@@ -3200,8 +3247,7 @@ async def api_download_single_works(request: SingleWorkDownloadRequest):
     db = get_database()
     client = get_single_work_client()
     ttd_url = f"http://127.0.0.1:{config.ttd_port}"
-    cookies = db.get_enabled_cookies()
-    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+    cookie_list = get_cookie_list()
     results = []
     for i, (link, platform) in enumerate(links):
         work = request.work  # 如果前端传入了已解析的 work，直接使用
@@ -3335,8 +3381,7 @@ async def api_download_single_works_stream(request: SingleWorkDownloadRequest):
     ttd_url = f"http://127.0.0.1:{config.ttd_port}"
     total = len(links)
     # 从数据库获取 Cookie
-    cookies = db.get_enabled_cookies()
-    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+    cookie_list = get_cookie_list()
 
     async def download_stream():
         try:
@@ -4720,8 +4765,7 @@ async def api_v1_resolve_works(request: Request, body: ApiV1ResolveRequest):
     client = get_single_work_client()
     ttd_url = f"http://127.0.0.1:{config.ttd_port}"
     db = get_database()
-    cookies = db.get_enabled_cookies()
-    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+    cookie_list = get_cookie_list()
 
     results = []
     for i, (link, platform) in enumerate(links):
@@ -4791,8 +4835,7 @@ async def api_v1_download_works(request: Request, body: ApiV1DownloadRequest):
     db = get_database()
     client = get_single_work_client()
     ttd_url = f"http://127.0.0.1:{config.ttd_port}"
-    cookies = db.get_enabled_cookies()
-    cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
+    cookie_list = get_cookie_list()
 
     results = []
     for i, (link, platform) in enumerate(links):

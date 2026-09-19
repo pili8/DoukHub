@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import signal
@@ -16,6 +17,8 @@ from typing import Optional
 
 import httpx
 import psutil
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_date(value: str) -> date | None:
@@ -62,6 +65,9 @@ class CollectionBatchManager:
         self._WATCHDOG_INTERVAL = 60
         # 首轮失败自动补采前的降温间隔
         self._RETRY_COOLDOWN_SECONDS = 20
+        # Fail Fast：连续 N 个账号返回 403 / 登录态错误时立即中止批次
+        self._CONSECUTIVE_403_THRESHOLD = 5
+        self._consecutive_403 = 0
 
     async def start(
         self,
@@ -630,6 +636,7 @@ class CollectionBatchManager:
         self._cancel_requested = False
         self._batch_login_fail = 0
         self._batch_cookie_rid = ""
+        self._consecutive_403 = 0
         batch = self.db.get_collection_batch(batch_id)
         items = self.db.get_collection_batch_items(batch_id)
         # 从 filter_json 中解析采集设置
@@ -802,6 +809,38 @@ class CollectionBatchManager:
         if self._cancel_requested or current_status == "cancelling":
             final_status = "cancelled"
             message = "批次已取消"
+        elif self._consecutive_403 >= self._CONSECUTIVE_403_THRESHOLD:
+            # Fail Fast：标记当前 Cookie 失效
+            if self._batch_cookie_rid:
+                self.db.update_cookie(self._batch_cookie_rid, {
+                    "状态": "失效", "启用": 0,
+                    "验证说明": f"连续 {self._consecutive_403} 个账号失败，Fail Fast 自动标记失效",
+                })
+            # 检查是否还有其他可用 Cookie
+            remaining = self.db.get_enabled_cookies()
+            remaining_for_platform = [c for c in remaining if c.get("平台") == batch["platform"]]
+            if remaining_for_platform and not filter_data.get("retried"):
+                # 有其他 Cookie 可用 → 换 Cookie 重试
+                logger.info(f"[Fail Fast] 当前 Cookie 已标记失效，发现 {len(remaining_for_platform)} 个可用 Cookie，自动换 Cookie 重试")
+                failed_items = [
+                    it for it in self.db.get_collection_batch_items(batch_id)
+                    if it["status"] in ("failed", "pending", "running")
+                ]
+                if failed_items:
+                    filter_data["retried"] = True
+                    self.db.update_collection_batch(
+                        batch_id,
+                        filter_json=json.dumps(filter_data, ensure_ascii=False),
+                    )
+                    for it in failed_items:
+                        self.db.update_collection_batch_item(
+                            it["id"], status="pending", message="Fail Fast 自动换 Cookie 重试中"
+                        )
+                    self._clear_active_batch()
+                    await asyncio.sleep(self._RETRY_COOLDOWN_SECONDS)
+                    return await self._run_batch(batch_id)
+            final_status = "failed"
+            message = f"连续 {self._consecutive_403} 个账号采集失败，已自动中止（Fail Fast），所有 Cookie 均已失效"
         elif watchdog_killed:
             final_status = "failed"
             message = "引擎长时间无输出，已被看门狗自动终止"
@@ -813,10 +852,12 @@ class CollectionBatchManager:
 
         # 失败账号自动重试一轮（仅一次）：网络抖动/瞬时风控/看门狗处决当场补上，
         # 不留给下一轮
+        # Fail Fast 触发时不重试——Cookie 已失效，重试只会再 403
         if (
             (final_status == "completed" or watchdog_killed)
             and not filter_data.get("retried")
             and not self._cancel_requested
+            and self._consecutive_403 < self._CONSECUTIVE_403_THRESHOLD
         ):
             # 看门狗处决/进程异常退出时，未完成账号还停在 pending/running，
             # 也一并纳入补采（_finalize 要到补采判定之后才结算）
@@ -863,6 +904,34 @@ class CollectionBatchManager:
                 ),
                 None,
             )
+        if not item and marker.get("account_name"):
+            item = next(
+                (
+                    current
+                    for current in self.db.get_collection_batch_items(batch_id)
+                    if current.get("account_name") == marker.get("account_name")
+                ),
+                None,
+            )
+        # Fail Fast：在 item 查找之前计数，避免 sec_user_id 不匹配时漏计
+        # 只对疑似 Cookie/登录态失效的错误计数，避免 API 风控导致的临时失败误触发
+        status = "success" if marker.get("status") == "success" else "failed"
+        if marker_type == "account_result":
+            msg_text = str(marker.get("message") or "")
+            is_cookie_error = any(
+                k in msg_text for k in self._LOGIN_FAIL_KEYWORDS
+            )
+            if status != "success" and is_cookie_error:
+                self._consecutive_403 += 1
+            else:
+                self._consecutive_403 = 0
+            # 达到阈值 → 终止 TTD 进程
+            if self._consecutive_403 >= self._CONSECUTIVE_403_THRESHOLD:
+                logger.warning(
+                    f"[Fail Fast] 连续 {self._consecutive_403} 个账号失败，终止 TTD 进程"
+                )
+                if self._active_process and self._active_process.returncode is None:
+                    self._active_process.terminate()
         if not item:
             return False
         batch = self.db.get_collection_batch(batch_id)
@@ -874,7 +943,6 @@ class CollectionBatchManager:
             self.db.refresh_collection_batch_counts(batch_id)
             return True
 
-        status = "success" if marker.get("status") == "success" else "failed"
         message = str(marker.get("message") or "")
         if status != "success":
             self._note_account_failure(message)
@@ -1009,5 +1077,5 @@ class CollectionBatchManager:
                 (terminal_status, message or "批次结束前未收到账号结果", now, batch_id),
             )
             conn.commit()
-        self.db.update_collection_batch(batch_id, status=status, finished_at=now)
+        self.db.update_collection_batch(batch_id, status=status, finished_at=now, message=message)
         return self.db.refresh_collection_batch_counts(batch_id)

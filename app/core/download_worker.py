@@ -114,5 +114,29 @@ class DownloadWorker:
 
     def _pick_cookie(self) -> str:
         cookies = self.db.get_enabled_cookies()
-        cookie_list = [ck.get("Cookie", "") for ck in cookies if ck.get("Cookie")]
-        return cookie_list[0] if cookie_list else ""
+        cookie_list = [ck for ck in cookies if ck.get("Cookie")]
+        if not cookie_list:
+            # Fallback: TTD settings.json
+            try:
+                import json
+                from pathlib import Path
+                # ttd_url is like "http://127.0.0.1:5555", derive ttd_path from config
+                from .config import Config
+                cfg = Config()
+                ttd_root = Path(cfg.ttd_path)
+                settings_file = ttd_root / "Volume" / "settings.json"
+                if settings_file.exists():
+                    with settings_file.open("r", encoding="utf-8-sig") as f:
+                        settings = json.load(f)
+                    cookie = settings.get("cookie", "")
+                    if cookie:
+                        return cookie
+            except Exception:
+                pass
+            return ""
+        # LRU 轮换：最久未使用的优先
+        cookie_list.sort(key=lambda c: str(c.get("last_used_at") or ""))
+        chosen = cookie_list[0]
+        if chosen.get("record_id"):
+            self.db.record_cookie_usage(chosen["record_id"])
+        return chosen.get("Cookie", "")

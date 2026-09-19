@@ -80,6 +80,33 @@ async def run_platform(platform: str) -> int:
     from src.application.main_terminal import TikTok
     from src.custom import suspend
 
+    # TTD 5.8 的 im/user/info 接口被抖音风控，即使 Cookie 有效也返回空。
+    # deal_account_detail 调用 Info 获取用户资料失败后（info=None），
+    # 会继续执行获取作品列表并下载文件。
+    # 但 _batch_process_detail → preprocessing_data → __select_item
+    # 会检查作品 author.sec_uid 是否匹配请求的 sec_user_id，
+    # 当作品列表含共创作品时匹配失败抛 DownloaderError。
+    # 这里 patch __select_item 使其在匹配失败时返回第一个作品而非报错。
+    def _patch_select_item():
+        from src.extract.extractor import Extractor, DownloaderError
+
+        def patched(self, data, id_, key):
+            for item in data:
+                obj = self.generate_data_object(item)
+                if id_ == self.safe_extract(obj, key):
+                    return obj
+            # 匹配失败时返回第一个作品而非报错
+            if data:
+                self.log.warning(
+                    f"未找到 sec_uid={id_} 的作品，使用第一个作品继续"
+                )
+                return self.generate_data_object(data[0])
+            raise DownloaderError("作品列表为空")
+
+        Extractor._Extractor__select_item = patched
+
+    _patch_select_item()
+
     # 当前账号上下文：download 挂钩上报作品事件时携带归属
     work_ctx = {"sec_user_id": "", "account_name": ""}
 
@@ -121,6 +148,8 @@ async def run_platform(platform: str) -> int:
     with (root / "Volume" / "settings.json").open("r", encoding="utf-8-sig") as file:
         settings = json.load(file)
     key = "accounts_urls" if platform == "douyin" else "accounts_urls_tiktok"
+    cookie_key = "cookie" if platform == "douyin" else "cookie_tiktok"
+    settings_cookie = settings.get(cookie_key, "")
     accounts = [
         SimpleNamespace(**item)
         for item in settings.get(key, [])
@@ -160,6 +189,11 @@ async def run_platform(platform: str) -> int:
                     raise RuntimeError("无法从账号链接提取 sec_user_id")
                 work_ctx["sec_user_id"] = str(resolved or "")
                 work_ctx["account_name"] = str(name or "")
+                # 不传 api（默认 False）：让 TTD 正常下载文件。
+                #   TTD 5.8 的 im/user/info 接口被风控会返回空，
+                #   deal_account_detail 内部 info=None 后会继续执行获取作品列表。
+                #   __select_item 已被 patch，匹配失败不会报错。
+                # cookie=settings_cookie：显式传入 settings.json 中的 cookie。
                 result = bool(
                     await terminal.deal_account_detail(
                         index,
@@ -168,6 +202,7 @@ async def run_platform(platform: str) -> int:
                         tab="post",
                         earliest=getattr(item, "earliest", "") or "",
                         latest=getattr(item, "latest", "") or "",
+                        cookie=settings_cookie or None,
                         tiktok=tiktok,
                     )
                 )
@@ -194,7 +229,8 @@ async def run_platform(platform: str) -> int:
             )
             work_ctx["sec_user_id"] = ""
             work_ctx["account_name"] = ""
-            if index != total and result:
+            # 每个账号处理完后都暂停（不管成功失败），降低风控概率
+            if index != total:
                 await suspend(index, terminal.console)
 
         emit_marker(

@@ -74,6 +74,7 @@
             </div>
             <div class="status-actions">
                 <button class="btn btn-primary btn-sm" id="kernel-ttd-btn" onclick="installKernel('TikTokDownloader')"><i data-lucide="download"></i> 从 GitHub 下载</button>
+                <button class="btn btn-secondary btn-sm" id="kernel-ttd-update-btn" onclick="updateKernel('TikTokDownloader')" style="display:none"><i data-lucide="refresh-cw"></i> 检查更新</button>
             </div>
         </div>
         <div id="kernel-xhs" class="status-card">
@@ -84,6 +85,7 @@
             </div>
             <div class="status-actions">
                 <button class="btn btn-primary btn-sm" id="kernel-xhs-btn" onclick="installKernel('XHS-Downloader')"><i data-lucide="download"></i> 从 GitHub 下载</button>
+                <button class="btn btn-secondary btn-sm" id="kernel-xhs-update-btn" onclick="updateKernel('XHS-Downloader')" style="display:none"><i data-lucide="refresh-cw"></i> 检查更新</button>
             </div>
         </div>
     </div>
@@ -113,6 +115,7 @@
             <button class="btn btn-success btn-sm" onclick="controlService('TikTokDownloader', 'start')"><i data-lucide="play"></i> 启动</button>
             <button class="btn btn-danger btn-sm" onclick="controlService('TikTokDownloader', 'stop')"><i data-lucide="square"></i> 停止</button>
             <button class="btn btn-secondary btn-sm" onclick="testTTD()"><i data-lucide="plug-zap"></i> 测试</button>
+            <button class="btn btn-primary btn-sm" onclick="updateKernel('TikTokDownloader')"><i data-lucide="refresh-cw"></i> 更新</button>
         </div>
     </div>
 
@@ -126,6 +129,7 @@
             <button class="btn btn-success btn-sm" onclick="controlService('XHS-Downloader', 'start')"><i data-lucide="play"></i> 启动</button>
             <button class="btn btn-danger btn-sm" onclick="controlService('XHS-Downloader', 'stop')"><i data-lucide="square"></i> 停止</button>
             <button class="btn btn-secondary btn-sm" onclick="testXHS()"><i data-lucide="plug-zap"></i> 测试</button>
+            <button class="btn btn-primary btn-sm" onclick="updateKernel('XHS-Downloader')"><i data-lucide="refresh-cw"></i> 更新</button>
         </div>
     </div>
 </div>
@@ -173,18 +177,22 @@
         const icon = document.getElementById(`kernel-${name}-icon`);
         const msg = document.getElementById(`kernel-${name}-msg`);
         const btn = document.getElementById(`kernel-${name}-btn`);
+        const updateBtn = document.getElementById(`kernel-${name}-update-btn`);
         if (!icon || !msg) return;
 
         if (kernel.installed) {
             icon.className = 'status-icon connected';
             icon.innerHTML = '<i data-lucide="check"></i>';
-            msg.textContent = '已安装: ' + kernel.path;
+            const ver = kernel.version ? ` (${kernel.version})` : '';
+            msg.textContent = '已安装' + ver + ': ' + kernel.path;
             if (btn) btn.style.display = 'none';
+            if (updateBtn) updateBtn.style.display = '';
         } else {
             icon.className = 'status-icon missing';
             icon.innerHTML = '<i data-lucide="triangle-alert"></i>';
             msg.textContent = '未安装, 请点击右侧按钮从 GitHub 下载';
             if (btn) btn.style.display = '';
+            if (updateBtn) updateBtn.style.display = 'none';
         }
         if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     }
@@ -222,6 +230,22 @@
                 btnEl.innerHTML = '<i data-lucide="download"></i> 从 GitHub 下载';
                 if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
             }
+        }
+    }
+
+    async function updateKernel(name) {
+        if (!await confirmDialog('将从 GitHub 拉取 ' + name + ' 最新源码，更新期间服务会短暂停止。', { title: '更新确认', confirmText: '更新', danger: false })) return;
+        showToast('正在更新 ' + name + '...', 'info');
+        try {
+            const data = await apiCall(`/api/kernels/${name}/update`, 'POST');
+            if (data.success) {
+                showToast(data.message, 'success');
+                setTimeout(() => refreshStatus(), 1000);
+            } else {
+                showToast(data.message, 'error');
+            }
+        } catch (e) {
+            showToast('更新失败: ' + e.message, 'error');
         }
     }
 

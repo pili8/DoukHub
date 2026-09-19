@@ -58,7 +58,7 @@ class DownloaderService:
                 # TTD 直接启动 Web API 模式（绕过交互式菜单）
                 launcher = self.path / "_doukhub_launcher.py"
                 launcher.write_text(
-                    "# Patch: ?? rich legacy Windows ???????????? OSError\n"
+                    "# Patch: rich legacy Windows detect causes OSError on some systems\n"
                     "try:\n"
                     "    import rich.console as _rc\n"
                     "    _rc.detect_legacy_windows = lambda: False\n"
@@ -67,27 +67,9 @@ class DownloaderService:
                     "import asyncio\n"
                     "import aiosqlite\n"
                     "from src.application import TikTokDownloader\n"
-                    "from src.application.main_server import APIServer\n"
-                    "from src.custom import PROJECT_ROOT\n\n"
-                    "# Patch: add /douyin/user/profile endpoint for DoukHub account sync\n"
-                    "_orig = APIServer.setup_routes\n"
-                    "def _patched(self):\n"
-                    "    _orig(self)\n"
-                    "    from fastapi import Body\n"
-                    "    @self.server.post('/douyin/user/profile')\n"
-                    "    async def _profile(payload: dict = Body(...)):\n"
-                    "        sid = payload.get('sec_user_id', '')\n"
-                    "        ck = payload.get('cookie', '') or None\n"
-                    "        if not sid:\n"
-                    "            return {'data': None, 'message': 'sec_user_id required'}\n"
-                    "        try:\n"
-                    "            info = await self._get_user_data(sid, cookie=ck)\n"
-                    "            return {'data': info, 'message': 'OK' if info else 'no data'}\n"
-                    "        except Exception as e:\n"
-                    "            return {'data': None, 'message': str(e)}\n"
-                    "APIServer.setup_routes = _patched\n\n"
+                    "from src.custom import ROOT\n\n"
                     "async def init_db():\n"
-                    "    db_file = PROJECT_ROOT / 'DouK-Downloader.db'\n"
+                    "    db_file = ROOT / 'DouK-Downloader.db'\n"
                     "    async with aiosqlite.connect(db_file, timeout=5.0) as db:\n"
                     "        await db.execute('PRAGMA journal_mode=WAL')\n"
                     "        await db.execute('PRAGMA foreign_keys=ON')\n"
@@ -117,21 +99,25 @@ class DownloaderService:
                 )
                 self.path.joinpath('logs').mkdir(exist_ok=True)
                 log_file = open(self._log_path, 'w', encoding='utf-8')
+                creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
                 self.process = subprocess.Popen(
                     [python, str(launcher)],
                     cwd=str(self.path),
                     stdout=log_file,
                     stderr=log_file,
+                    creationflags=creationflags,
                 )
             else:
                 # XHS-Downloader: python main.py API
                 self.path.joinpath('logs').mkdir(exist_ok=True)
                 log_file = open(self._log_path, 'w', encoding='utf-8')
+                creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
                 self.process = subprocess.Popen(
                     [python, str(main_py), "API"],
                     cwd=str(self.path),
                     stdout=log_file,
                     stderr=log_file,
+                    creationflags=creationflags,
                 )
 
             # 等待服务启动
@@ -189,7 +175,12 @@ class DownloaderService:
         }
 
     def update(self) -> dict:
-        """通过 git pull 更新源代码"""
+        """通过 git pull 更新源代码。
+
+        本地有修改时自动 stash → pull → stash pop；
+        如果 stash pop 冲突则丢弃本地修改（新版可能已修复同类问题）。
+        所有 subprocess 调用隐藏 CMD 黑框。
+        """
         # 内核未安装
         if not self.source_exists:
             return {
@@ -204,22 +195,110 @@ class DownloaderService:
                 "success": False,
                 "message": f"{self.name} 不是 git 仓库，无法自动更新",
             }
+
+        # Windows: 隐藏 CMD 黑框
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = subprocess.CREATE_NO_WINDOW
+
         try:
             # 先停止服务
             was_running = self.is_running
             if was_running:
                 self.stop()
 
-            # git pull
+            # Step 1: stash 本地修改（如果有）
+            # 注意：git stash 可能因日志文件被占用等产生警告（stderr），
+            #       但 stash 本身可能已成功。用 stash list 判断是否真的 stash 了。
+            stash_result = subprocess.run(
+                ["git", "stash"],
+                cwd=str(self.path),
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=creationflags,
+            )
+            stash_output = stash_result.stdout + stash_result.stderr
+            # 判断是否真的 stash 了：输出含 "Saved working directory" 表示成功 stash
+            stashed = "Saved working directory" in stash_output
+            if stashed:
+                logging.info(f"{self.name} 已 stash 本地修改")
+            elif "No local changes" in stash_output or "没有要提交" in stash_output:
+                logging.info(f"{self.name} 无本地修改，直接 pull")
+            else:
+                # stash 出错（可能因文件被占用等），尝试用 checkout 丢弃 tracked 文件的修改
+                logging.warning(f"{self.name} stash 异常: {stash_output.strip()}")
+                # 强制丢弃 tracked 文件的修改，确保 pull 不被阻塞
+                subprocess.run(
+                    ["git", "checkout", "--"],
+                    cwd=str(self.path),
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    creationflags=creationflags,
+                )
+
+            # Step 2: git pull
             result = subprocess.run(
                 ["git", "pull"],
                 cwd=str(self.path),
                 capture_output=True,
                 text=True,
                 timeout=120,
+                creationflags=creationflags,
             )
 
             output = result.stdout + result.stderr
+
+            # Step 3: 如果 stash 了，尝试恢复
+            if stashed and result.returncode == 0:
+                pop_result = subprocess.run(
+                    ["git", "stash", "pop"],
+                    cwd=str(self.path),
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    creationflags=creationflags,
+                )
+                pop_output = pop_result.stdout + pop_result.stderr
+                if pop_result.returncode != 0 or "CONFLICT" in pop_output:
+                    # stash pop 冲突 → 丢弃本地修改，用新版代码
+                    logging.warning(f"{self.name} stash pop 冲突，丢弃本地修改: {pop_output.strip()}")
+                    # 丢弃所有冲突标记和本地修改，恢复到新版代码
+                    subprocess.run(
+                        ["git", "checkout", "--", "."],
+                        cwd=str(self.path),
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                        creationflags=creationflags,
+                    )
+                    # 清理暂存区中可能残留的 stash pop 合并状态
+                    subprocess.run(
+                        ["git", "reset", "HEAD"],
+                        cwd=str(self.path),
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                        creationflags=creationflags,
+                    )
+                    subprocess.run(
+                        ["git", "checkout", "--", "."],
+                        cwd=str(self.path),
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                        creationflags=creationflags,
+                    )
+                    subprocess.run(
+                        ["git", "stash", "drop"],
+                        cwd=str(self.path),
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                        creationflags=creationflags,
+                    )
+                    output += "\n（本地修改已丢弃，使用新版代码）"
 
             if result.returncode == 0:
                 # 更新依赖
@@ -229,6 +308,7 @@ class DownloaderService:
                         [sys.executable, "-m", "pip", "install", "-r", str(req_file)],
                         capture_output=True,
                         timeout=120,
+                        creationflags=creationflags,
                     )
 
                 # 如果之前在运行，重新启动
@@ -239,6 +319,16 @@ class DownloaderService:
                     return {"name": self.name, "success": True, "message": f"{self.name} 已是最新版本"}
                 return {"name": self.name, "success": True, "message": f"{self.name} 更新完成: {output.strip()}"}
             else:
+                # pull 失败 → 如果 stash 了，恢复本地修改
+                if stashed:
+                    subprocess.run(
+                        ["git", "stash", "pop"],
+                        cwd=str(self.path),
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        creationflags=creationflags,
+                    )
                 return {"name": self.name, "success": False, "message": f"{self.name} 更新失败: {output.strip()}"}
 
         except subprocess.TimeoutExpired:
@@ -347,11 +437,13 @@ class ServiceManager:
             return {"success": False, "message": f"{svc.name} 未配置仓库地址"}
         try:
             svc.path.parent.mkdir(parents=True, exist_ok=True)
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             result = subprocess.run(
                 ["git", "clone", "--depth", "1", svc.repo_url, str(svc.path)],
                 capture_output=True,
                 text=True,
                 timeout=300,
+                creationflags=creationflags,
             )
             output = result.stdout + result.stderr
             if result.returncode == 0:
@@ -361,6 +453,7 @@ class ServiceManager:
                         [sys.executable, "-m", "pip", "install", "-r", str(req_file)],
                         capture_output=True,
                         timeout=300,
+                        creationflags=creationflags,
                     )
                 return {"success": True, "message": f"{svc.name} 下载安装完成"}
             return {"success": False, "message": f"{svc.name} 下载失败:\n{output.strip()}"}

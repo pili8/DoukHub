@@ -1402,7 +1402,7 @@ input[type="checkbox"]:disabled {
 
     var TABLE_MODAL_ALWAYS_READONLY = {
         'account_cache': ['链接', '账号名称', '粉丝数', '作品数', '签名', '头像'],
-        'cookie_cache': ['状态', '验证时间', 'last_used_at', 'use_count'],
+        'cookie_cache': ['状态', '验证说明', '验证时间', 'last_used_at', 'use_count'],
     };
 
     var TABLE_MODAL_READONLY_ON_EDIT = {
@@ -1455,7 +1455,7 @@ var FIELD_EDITORS = {
         '获取状态': 90, '解析状态': 90, 'synced': 70,
         'last_collected_at': 140, 'collect_window_days': 110,
         'local_updated_at': 140, 'is_deleted': 80, 'deleted_at': 140,
-        'share_code': 120, '验证时间': 140, '任务名称': 150,
+        'share_code': 120, '验证时间': 140, '验证说明': 150, '任务名称': 150,
         'Cron表达式': 130, '等级筛选': 100, '上次运行': 140, '下次运行': 140,
         'ID': 70, '耗时秒数': 90, '开始时间': 140, '结束时间': 140,
         '错误信息': 150,
@@ -1479,7 +1479,7 @@ var FIELD_EDITORS = {
         ],
         'cookie_cache': [
             '启用', '平台', '备注',
-            'Cookie', '状态', '验证时间', 'last_used_at', 'use_count',
+            'Cookie', '状态', '验证说明', '验证时间', 'last_used_at', 'use_count',
             'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
         ],
     };
@@ -1505,6 +1505,7 @@ var FIELD_EDITORS = {
         'cookie_cache': {
             'Cookie': 'credential',
             '状态': 'credential',
+            '验证说明': 'credential',
             '验证时间': 'credential', 'last_used_at': 'credential', 'use_count': 'credential',
             '平台': 'control', '启用': 'control', '备注': 'control',
             'created_at': 'system', '同步时间': 'system', 'record_id': 'system',
@@ -1697,6 +1698,19 @@ function fetchStatusRenderer(params) {
         return '<span title="' + String(val).replace(/"/g, '&quot;') + '" style="color: var(--danger); font-size: 12px;">' + display + '</span>';
     }
 
+    // 验证说明渲染器：空值灰色"-"，有内容时根据关键词着色
+    function verifyNoteRenderer(params) {
+        const val = params.value;
+        if (!val) return '<span style="color: var(--text-muted);">-</span>';
+        let display = String(val);
+        if (display.length > 40) display = display.substring(0, 40) + '…';
+        // 包含"过期/超时/异常/错误/失败"等 → danger 色
+        const isError = /过期|超时|异常|错误|失败|未启动|失效/.test(display);
+        const tone = isError ? 'danger' : 'muted';
+        const pair = TONE_VARS[tone];
+        return '<span title="' + htmlEscape(String(val)) + '" class="tbl-pill" style="background:' + pair[0] + ';color:' + pair[1] + ';">' + htmlEscape(display) + '</span>';
+    }
+
     function statusBadgeRenderer(params) {
         const val = params.value;
         if (!val) return '<span style="color: var(--text-muted);">-</span>';
@@ -1768,6 +1782,7 @@ var FIELD_RENDERERS = {
 '标签': tagsRenderer,
 'Cookie': cookieRenderer,
 '状态': statusBadgeRenderer,
+'验证说明': verifyNoteRenderer,
 '解析状态': parseStatusRenderer,
 '获取状态': fetchStatusRenderer,
 };

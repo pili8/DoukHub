@@ -14,6 +14,16 @@ from .link_resolver import classify_douyin_url, extract_sec_user_id
 
 _logger = logging.getLogger("doukhub.collector")
 
+
+def _pick_avatar(d: dict) -> str:
+    """从抖音 API 响应中提取头像 URL。"""
+    avatar_field = d.get("avatar_larger") or d.get("avatar_300x300") or d.get("avatar_thumb")
+    if isinstance(avatar_field, dict):
+        url_list = avatar_field.get("url_list", [])
+        if url_list:
+            return url_list[0]
+    return ""
+
 # 短码长度下限：抖音/TikTok 短码是 base62（如 iMJV5Ajw），低于此值必然是截断垃圾
 MIN_SHARE_CODE_LEN = 6
 SHARE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_.\-]+$")
@@ -185,7 +195,9 @@ class Collector:
             "sec_user_id": account.sec_user_id,
             "cookie": cookie,
             "tab": TAB_MAP.get(account.collection_type, "post"),
-            "source": False,
+            # source=True：返回原始 API 数据，不经 TTD 的文件处理流程
+            # （新版 TTD 的 source=False 需要 Volume 目录等配置，会 500）
+            "source": True,
         }
         if account.proxy:
             payload["proxy"] = account.proxy
@@ -238,7 +250,7 @@ class Collector:
                     result.status = "failed"
                     result.message = "无法从链接中提取作品ID"
                     return result
-                payload = {"detail_id": match.group(1), "source": False}
+                payload = {"detail_id": match.group(1), "source": True}
                 if cookie:
                     payload["cookie"] = cookie
             elif platform == "xhs":
@@ -315,7 +327,10 @@ class Collector:
         return outcome.url
 
     async def resolve_short_url_ex(self, url: str, platform: str = "douyin", proxy: str = "") -> ResolveOutcome:
-        """调用 TTD API 解析短链接，并给出可判定的失败类型。
+        """解析短链接，并给出可判定的失败类型。
+
+        快路径：直连 HTTP 重定向（~0.4s），不经 TTD。
+        回退路径：TTD /share 端点（~6s，含 TTD 内置 wait）。
 
         TTD 对失效链接**没有业务错误码**，表现为「200 但 url 跳到平台首页」；
         所以死链只能靠解析出来的 URL 反推，这也是本方法存在的理由。
@@ -329,15 +344,26 @@ class Collector:
         if not self.is_valid_share_code(code):
             return ResolveOutcome(kind="bad_link", detail=f"分享码残缺({len(code)} 字符): {code}")
 
-        endpoint = f"{self.ttd_url}/douyin/share" if platform == "douyin" else f"{self.ttd_url}/tiktok/share"
         is_short_code = not code.startswith("http")
         # 直接粘贴的完整作品/直播链接：本地正则就能判，不必发给 TTD
         if not is_short_code and platform == "douyin" and classify_douyin_url(code) == "content":
             return ResolveOutcome(kind="not_profile", detail=f"本身就是作品或直播链接: {code[:80]}")
-        # 补全短链接前缀（TTD API 需要完整 URL）
+        # 补全短链接前缀
         if is_short_code:
             code = f"https://v.douyin.com/{code}/" if platform == "douyin" else f"https://vm.tiktok.com/{code}"
 
+        # ── 快路径：直连 HTTP 重定向（~0.4s），不经 TTD ──
+        direct_resolved = await self._direct_redirect(code, proxy)
+        if direct_resolved:
+            outcome = self._evaluate_resolved(direct_resolved, platform, code)
+            if outcome.kind != "bad_link":
+                return outcome
+            # 直连也跳首页 → 短码失效，不必再请求 TTD
+            if outcome.kind == "not_profile":
+                return outcome
+
+        # ── 回退路径：TTD /share 端点 ──
+        endpoint = f"{self.ttd_url}/douyin/share" if platform == "douyin" else f"{self.ttd_url}/tiktok/share"
         payload: dict[str, Any] = {"text": code}
         if proxy:
             payload["proxy"] = proxy
@@ -351,6 +377,46 @@ class Collector:
             if outcome.kind != "bad_link":
                 return outcome
         return outcome
+
+    async def _direct_redirect(self, url: str, proxy: str = "") -> str:
+        """直连 HTTP 重定向解析短链接（~0.4s），不经 TTD。
+
+        与 single_work._resolve_share_link 同理：抖音短链接会 302 到完整 URL。
+        返回空字符串表示直连失败，调用方应回退 TTD。
+        """
+        try:
+            redirect_client = httpx.AsyncClient(
+                timeout=10,
+                follow_redirects=True,
+                trust_env=False,
+            )
+            if proxy:
+                redirect_client = httpx.AsyncClient(
+                    timeout=10,
+                    follow_redirects=True,
+                    trust_env=False,
+                    proxy=proxy,
+                )
+            async with redirect_client as rc:
+                resp = await rc.get(url)
+            resolved = str(resp.url)
+            # 如果跳到了平台首页，说明短码失效
+            if resolved and resolved != url:
+                return resolved
+        except httpx.HTTPError:
+            pass
+        except Exception:
+            pass
+        return ""
+
+    def _evaluate_resolved(self, resolved: str, platform: str, original_code: str) -> ResolveOutcome:
+        """评估重定向后的 URL，判定链接类型（与 _request_share 中的逻辑一致）。"""
+        if not extract_sec_user_id(resolved, platform):
+            if platform == "douyin" and classify_douyin_url(resolved) == "content":
+                return ResolveOutcome(kind="not_profile", detail=f"指向作品或直播: {resolved[:80]}")
+            return ResolveOutcome(kind="bad_link", detail=f"未跳到用户页: {resolved[:80]}")
+        _logger.info(f"直连解析成功: {original_code[:60]} → {resolved[:80]}")
+        return ResolveOutcome(url=resolved, kind="ok")
 
     async def _request_share(self, endpoint: str, payload: dict, platform: str) -> ResolveOutcome:
         """发一次短链解析请求，并按 TTD 的返回内容判定类型。"""
@@ -391,13 +457,40 @@ class Collector:
         return "tiktok" if "/tiktok/" in endpoint else "douyin"
 
     async def get_account_info(self, sec_user_id: str, platform: str = "douyin", cookie: str = "") -> dict:
-        """通过 sec_user_id 获取账号资料（账号名称、粉丝数、作品数等）"""
+        """通过 sec_user_id 获取账号资料（账号名称、粉丝数、作品数等）。
+
+        快路径：直连抖音 API（ABogus 签名，~1s），不经 TTD。
+        回退路径：TTD /douyin/account（~6s，含 TTD 内置 wait）。
+        """
         if not sec_user_id:
             return {}
 
+        # ── 快路径：直连抖音 API（仅抖音 + 有 Cookie） ──
+        if platform == "douyin" and cookie:
+            try:
+                from app.core.douyin_api import fetch_user_profile_direct
+                info = await fetch_user_profile_direct(self._client, sec_user_id, cookie)
+                if info and info.get("nickname"):
+                    return info
+                # 直连返回但没拿到 nickname → 可能是 Cookie 过期
+                return {
+                    "sec_user_id": sec_user_id,
+                    "_kind": "cookie",
+                    "_error": "直连 API 未返回用户数据，Cookie 可能已过期",
+                }
+            except RuntimeError as e:
+                msg = str(e)
+                # 账号本身不存在/已注销 → 不必再请求 TTD
+                if any(kw in msg for kw in ("账号不存在", "用户不存在", "已被注销", "已被封禁")):
+                    return {"sec_user_id": sec_user_id, "_kind": "no_data", "_error": msg}
+                _logger.warning(f"直连 API 获取账号资料失败，回退 TTD: {msg}")
+            except Exception as e:
+                _logger.warning(f"直连 API 异常，回退 TTD: {type(e).__name__}: {e}")
+
+        # ── 回退路径：TTD API ──
         try:
             if platform == "douyin":
-                endpoint = f"{self.ttd_url}/douyin/user/profile"
+                endpoint = f"{self.ttd_url}/douyin/account"
             elif platform == "tiktok":
                 endpoint = f"{self.ttd_url}/tiktok/account"
             else:
@@ -405,6 +498,8 @@ class Collector:
 
             payload = {
                 "sec_user_id": sec_user_id,
+                "source": True,
+                "count": 1,
             }
             if cookie:
                 payload["cookie"] = cookie
@@ -414,24 +509,36 @@ class Collector:
             data = resp.json()
             if data.get("data"):
                 d = data["data"]
-                avatar = ""
-                avatar_field = d.get("avatar_larger") or d.get("avatar_300x300") or d.get("avatar_thumb")
-                if isinstance(avatar_field, dict):
-                    url_list = avatar_field.get("url_list", [])
-                    if url_list:
-                        avatar = url_list[0]
-                return {
-                    "sec_user_id": sec_user_id,
-                    "nickname": d.get("nickname", ""),
-                    "signature": d.get("signature", ""),
-                    "follower_count": d.get("follower_count", 0),
-                    "aweme_count": d.get("aweme_count", 0),
-                    "following_count": d.get("following_count", 0),
-                    "total_favorited": d.get("total_favorited", 0),
-                    "avatar": avatar,
-                    "uid": d.get("uid", ""),
-                    "unique_id": d.get("unique_id", ""),
-                }
+                # TTD /douyin/account 返回的是作品列表，第一个作品的 author 里有账号资料
+                if isinstance(d, list) and d:
+                    author = d[0].get("author", {})
+                    if author:
+                        return {
+                            "sec_user_id": sec_user_id,
+                            "nickname": author.get("nickname", ""),
+                            "signature": author.get("signature", ""),
+                            "follower_count": author.get("follower_count", 0),
+                            "aweme_count": author.get("aweme_count", 0),
+                            "following_count": author.get("following_count", 0),
+                            "total_favorited": author.get("total_favorited", 0),
+                            "avatar": _pick_avatar(author),
+                            "uid": author.get("uid", ""),
+                            "unique_id": author.get("unique_id", ""),
+                        }
+                # 非列表格式（旧接口可能返回直接对象）
+                if isinstance(d, dict):
+                    return {
+                        "sec_user_id": sec_user_id,
+                        "nickname": d.get("nickname", ""),
+                        "signature": d.get("signature", ""),
+                        "follower_count": d.get("follower_count", 0),
+                        "aweme_count": d.get("aweme_count", 0),
+                        "following_count": d.get("following_count", 0),
+                        "total_favorited": d.get("total_favorited", 0),
+                        "avatar": _pick_avatar(d),
+                        "uid": d.get("uid", ""),
+                        "unique_id": d.get("unique_id", ""),
+                    }
             # TTD 返回了但 data 为空：绝大多数是 Cookie 失效/封控
             return {
                 "sec_user_id": sec_user_id,
@@ -451,6 +558,9 @@ class Collector:
     async def validate_cookie(self, cookie: str, platform: str = "douyin") -> dict:
         """验证 Cookie 是否有效，返回详细状态。
 
+        优先使用 Dok 直连 API（ABogus 签名）验证，速度快且不依赖 TTD Server。
+        直连失败时回退 TTD Server。
+
         返回值:
             {"status": "valid", "message": "...", "nickname": "..."}
             {"status": "invalid", "message": "..."}
@@ -459,6 +569,36 @@ class Collector:
         if not cookie or not cookie.strip():
             return {"status": "invalid", "message": "Cookie 为空"}
 
+        if platform != "douyin":
+            # TikTok Cookie 暂不支持直连验证，回退 TTD
+            return await self._validate_cookie_ttd(cookie, platform)
+
+        # ── 优先：Dok 直连 API 验证 ──
+        test_sec = "MS4wLjABAAAAzDqoM18FSDjaF9sNew0tqW6SfduLomZWPPhOrBkDm3IzPjbBWhw31ec8O6wfn1ps"
+        try:
+            from app.core.douyin_api import fetch_user_profile_direct
+            result = await fetch_user_profile_direct(self._client, test_sec, cookie)
+            nickname = result.get("nickname", "")
+            return {
+                "status": "valid",
+                "message": f"有效 ({nickname})" if nickname else "有效",
+                "nickname": nickname,
+            }
+        except RuntimeError as e:
+            # 直连 API 明确返回"未登录/过期"→ Cookie 无效
+            msg = str(e)
+            if any(kw in msg for kw in ("登录", "过期", "未登录", "不存在", "封")):
+                return {"status": "invalid", "message": msg[:80]}
+            # 其他错误 → 回退 TTD
+            logger.debug(f"直连验证失败，回退 TTD: {msg}")
+        except Exception as e:
+            logger.debug(f"直连验证异常，回退 TTD: {e}")
+
+        # ── 回退：TTD Server 验证 ──
+        return await self._validate_cookie_ttd(cookie, platform)
+
+    async def _validate_cookie_ttd(self, cookie: str, platform: str = "douyin") -> dict:
+        """通过 TTD Server 验证 Cookie（回退方案）。"""
         test_sec = "MS4wLjABAAAAzDqoM18FSDjaF9sNew0tqW6SfduLomZWPPhOrBkDm3IzPjbBWhw31ec8O6wfn1ps"
 
         if platform == "douyin":

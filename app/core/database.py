@@ -108,6 +108,7 @@ class Database:
                     启用 BOOLEAN DEFAULT 1,
                     备注 TEXT,
                     验证时间 DATETIME,
+                    验证说明 TEXT,
                     last_used_at DATETIME,
                     use_count INTEGER DEFAULT 0,
                     同步时间 DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -351,9 +352,11 @@ class Database:
             "cookie_cache": [
                 ("last_used_at", "DATETIME"),
                 ("use_count", "INTEGER DEFAULT 0"),
+                ("验证说明", "TEXT"),
             ],
             "collection_batches": [
                 ("preset_name", "TEXT"),
+                ("message", "TEXT"),
             ],
         }
         # 软删除字段（墓碑）：三张同步表都加上
@@ -667,6 +670,7 @@ class Database:
     _BATCH_FIELDS = {
         "status", "process_pid", "log_path", "started_at", "finished_at",
         "total_accounts", "success_accounts", "failed_accounts", "skipped_accounts",
+        "message",
     }
     _BATCH_ITEM_FIELDS = {
         "status", "message", "started_at", "finished_at",
