@@ -71,33 +71,3 @@ class TestHistoryDB:
         assert stats["total"] == 2
         assert stats["success"] == 1
         assert stats["failed"] == 1
-
-    def test_add_and_get_tasks(self, tmp_data_dir):
-        """定时任务增查"""
-        db = HistoryDB(tmp_data_dir)
-        task_id = db.add_task("每日巡检", "0 2 * * *", "3,4,5")
-        assert task_id > 0
-
-        tasks = db.get_tasks()
-        assert len(tasks) == 1
-        assert tasks[0]["name"] == "每日巡检"
-        assert tasks[0]["cron_expression"] == "0 2 * * *"
-
-    def test_update_task(self, tmp_data_dir):
-        """更新定时任务"""
-        db = HistoryDB(tmp_data_dir)
-        task_id = db.add_task("测试任务", "0 3 * * *")
-        db.update_task(task_id, {"name": "改名任务", "enabled": False})
-
-        tasks = db.get_tasks()
-        assert tasks[0]["name"] == "改名任务"
-        assert tasks[0]["enabled"] == 0  # SQLite stores bool as int
-
-    def test_delete_task(self, tmp_data_dir):
-        """删除定时任务"""
-        db = HistoryDB(tmp_data_dir)
-        task_id = db.add_task("待删除", "0 0 * * *")
-        db.delete_task(task_id)
-
-        tasks = db.get_tasks()
-        assert len(tasks) == 0

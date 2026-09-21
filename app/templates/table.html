@@ -89,6 +89,7 @@
 </div>
 
 <!-- 弹窗 -->
+<!-- 导入预览：只读预览 + 确认按钮 → 点遮罩关闭 = 取消导入（安全） -->
 <div id="import-modal" class="modal-overlay">
     <div class="modal-box" style="max-width:700px;">
         <div class="modal-header"><h3><i class="ph ph-upload-simple"></i> 导入预览</h3><button onclick="closeImportModal()" class="modal-close"><i class="ph ph-x"></i></button></div>
@@ -96,7 +97,8 @@
     </div>
 </div>
 
-<div id="add-record-modal" class="modal-overlay">
+ <!-- 新增/编辑记录：表单，误点遮罩会丢掉已填内容 → 豁免点外关闭 -->
+<div id="add-record-modal" class="modal-overlay" data-no-outside-close>
     <div class="modal-box" style="max-width:600px;">
         <div class="modal-header"><h3><i class="ph ph-plus-circle"></i> <span id="add-modal-title">新增记录</span></h3><button onclick="closeAddModal()" class="modal-close"><i class="ph ph-x"></i></button></div>
         <div id="add-modal-body"></div>
@@ -110,7 +112,8 @@
     </div>
 </div>
 
-<div id="save-preset-modal" class="modal-overlay">
+<!-- 保存为采集方案：需要输入方案名 → 豁免点外关闭 -->
+<div id="save-preset-modal" class="modal-overlay" data-no-outside-close>
     <div class="modal-box" style="max-width:480px;">
         <div class="modal-header"><h3><i class="ph ph-floppy-disk"></i> 保存为采集方案</h3><button onclick="closeSavePresetModal()" class="modal-close"><i class="ph ph-x"></i></button></div>
         <div id="save-preset-body"></div>
@@ -1201,7 +1204,8 @@
 /* ===== 弹窗 ===== */
 .modal-overlay {
     display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(10, 11, 15, 0.7); z-index: 1000;
+    /* 与 base.html 的 .dh-modal-overlay 同层级（31000）：必须高于移动端抽屉 30001~30003 */
+    background: rgba(10, 11, 15, 0.7); z-index: 31000;
     align-items: center; justify-content: center;
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);

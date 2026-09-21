@@ -230,6 +230,27 @@ class Database:
                 )
             """)
 
+            # 表9：定时任务（引用采集方案 preset_id，由 Scheduler 模块管理）
+            # ⚠️ 列顺序刻意与旧版线上表（中文列名）对齐：
+            #    ID / 任务名称 / Cron表达式 / 等级筛选 / 启用 / 上次运行 / 下次运行
+            #    迁移时只做 RENAME COLUMN，顺序即保持不变，避免新旧库 SELECT * 列序漂移。
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    cron_expression TEXT NOT NULL,
+                    preset_id INTEGER,
+                    enabled BOOLEAN DEFAULT 1,
+                    last_run_at DATETIME,
+                    next_run_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    sync_before BOOLEAN DEFAULT 0,
+                    last_run_status TEXT DEFAULT '',
+                    last_batch_ids TEXT
+                )
+            """)
+
             # 兼容旧库：自动迁移字段名（账号标识→sec_user_id 等）
             # 必须在 CREATE INDEX 之前执行，因为索引依赖字段名
             self._migrate_legacy_columns(conn)
@@ -248,6 +269,7 @@ class Database:
                 "CREATE INDEX IF NOT EXISTS idx_collection_works_batch ON collection_works(batch_id)",
                 "CREATE INDEX IF NOT EXISTS idx_collection_works_sec ON collection_works(sec_user_id)",
                 "CREATE INDEX IF NOT EXISTS idx_collection_works_aweme ON collection_works(aweme_id)",
+                "CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_enabled ON scheduled_tasks(enabled, next_run_at)",
             ]:
                 try:
                     conn.execute(sql)
@@ -331,6 +353,19 @@ class Database:
             "cookie_cache": [
                 ("更新时间", "同步时间"),
             ],
+            # ⚠️ 定时任务表（旧版线上库列名是中文，与代码读写完全脱节）
+            #    必须放在最后：先把它改成英文，后面的 add_columns 才认得这些列。
+            #    「等级筛选」是历史遗留字段，语义已被 preset_id（采集方案）取代。
+            "scheduled_tasks": [
+                ("ID", "id"),
+                ("任务名称", "name"),
+                ("Cron表达式", "cron_expression"),
+                ("等级筛选", "preset_id"),
+                ("启用", "enabled"),
+                ("上次运行", "last_run_at"),
+                ("下次运行", "next_run_at"),
+                ("同步时间", "updated_at"),
+            ],
         }
         # v2 系统字段英文化（三张同步表）
         v2_renames = {
@@ -382,6 +417,18 @@ class Database:
             "account_cache": ["昵称", "获取错误"],
             "share_cache": ["昵称", "签名", "头像", "同步错误"],
         }
+
+        # v2.3：批次回填「定时任务」溯源字段（用于按任务 ID 精确匹配执行历史）
+        # scheduled_task_id 为空 = 手动发起的采集；不会误配到任何定时任务
+        add_columns.setdefault("collection_batches", []).extend([
+            ("scheduled_task_id", "INTEGER"),
+            ("preset_id", "INTEGER"),
+        ])
+        add_columns.setdefault("scheduled_tasks", []).extend([
+            ("sync_before", "BOOLEAN DEFAULT 0"),
+            ("last_run_status", "TEXT DEFAULT ''"),
+            ("last_batch_ids", "TEXT"),
+        ])
 
         # 执行 v1 业务字段重命名
         for table, renames in rename_map.items():
@@ -689,16 +736,22 @@ class Database:
         log_path: str,
         items: list[dict],
         preset_name: str = "",
+        scheduled_task_id: Optional[int] = None,
+        preset_id: Optional[int] = None,
     ) -> None:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO collection_batches
-                (id, status, filter_json, platform, preset_name, log_path, total_accounts, created_at)
-                VALUES (?, 'pending', ?, ?, ?, ?, ?, ?)
+                (id, status, filter_json, platform, preset_name, log_path, total_accounts,
+                 created_at, scheduled_task_id, preset_id)
+                VALUES (?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (batch_id, filter_json, platform, preset_name, log_path, len(items), now),
+                (
+                    batch_id, filter_json, platform, preset_name, log_path, len(items), now,
+                    scheduled_task_id, preset_id,
+                ),
             )
             conn.executemany(
                 """
@@ -1965,3 +2018,94 @@ class Database:
             )
             conn.commit()
             return cursor.rowcount
+
+    # ========== 定时任务操作 ==========
+
+    def add_scheduled_task(self, name: str, preset_id: int, cron_expression: str,
+                           enabled: bool = True, sync_before: bool = False,
+                           next_run_at: str = "") -> int:
+        """添加定时任务，返回 id"""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """INSERT INTO scheduled_tasks
+                   (name, preset_id, cron_expression, enabled, sync_before, next_run_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (name, preset_id, cron_expression, 1 if enabled else 0,
+                 1 if sync_before else 0, next_run_at or None),
+            )
+            conn.commit()
+            return cursor.lastrowid or 0
+
+    @staticmethod
+    def _normalize_scheduled_task(task: dict) -> dict:
+        """归一化 scheduled_tasks 的列类型漂移（只动 preset_id）。
+
+        ⚠️ 老库（由中文列名迁移而来）的 preset_id 是 **TEXT** —— 旧列「等级筛选」本就是文本，
+        而 ALTER TABLE RENAME COLUMN **不跟着改列类型**；新装库建表 DDL 写的是 INTEGER。
+        于是同一字段在两种库里读出来是 "1" / 1，调用方的 === 与 dict 查找会全部失配
+        （前端会误报「方案已删除」，后端 preset_map 会查不到名字）。
+        统一在出口转成 int，让上层只面对一种类型。
+        """
+        pid = task.get("preset_id")
+        if pid is None or pid == "":
+            task["preset_id"] = None
+            return task
+        try:
+            task["preset_id"] = int(pid)
+        except (TypeError, ValueError):
+            task["preset_id"] = None
+        return task
+
+    def get_scheduled_tasks(self) -> list[dict]:
+        """获取所有定时任务"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM scheduled_tasks ORDER BY id"
+            ).fetchall()
+            return [self._normalize_scheduled_task(dict(r)) for r in rows]
+
+    def get_scheduled_task(self, task_id: int) -> Optional[dict]:
+        """获取单个定时任务"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM scheduled_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            return self._normalize_scheduled_task(dict(row)) if row else None
+
+    def update_scheduled_task(self, task_id: int, data: dict) -> bool:
+        """更新定时任务，返回是否成功"""
+        fields = []
+        values = []
+        for key in ("name", "preset_id", "cron_expression", "enabled",
+                     "sync_before", "last_run_at", "last_run_status", "next_run_at"):
+            if key in data:
+                fields.append(f"{key} = ?")
+                values.append(data[key])
+        if not fields:
+            return False
+        fields.append("updated_at = datetime('now')")
+        values.append(task_id)
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"UPDATE scheduled_tasks SET {', '.join(fields)} WHERE id = ?",
+                values,
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_scheduled_task(self, task_id: int) -> bool:
+        """删除定时任务"""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM scheduled_tasks WHERE id = ?", (task_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_enabled_scheduled_tasks(self) -> list[dict]:
+        """获取所有启用的定时任务"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM scheduled_tasks WHERE enabled = 1 ORDER BY next_run_at"
+            ).fetchall()
+            return [dict(r) for r in rows]

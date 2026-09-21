@@ -233,9 +233,5 @@
     document.getElementById('directory-picker-name').addEventListener('keydown', event => {
         if (event.key === 'Enter') createDirectory();
     });
-    document.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && document.getElementById('directory-picker-overlay').classList.contains('dh-show')) {
-            closeDirectoryPicker();
-        }
-    });
+    // Esc / 点遮罩关闭由 base.html 的「通用浮层关闭」统一处理，此处不再单独监听
 </script>

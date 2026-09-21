@@ -60,7 +60,7 @@
                 </div>
 
                 <!-- 采集父级:手风琴式展开/收起子项 -->
-                <div class="nav-group{% if page in ('collect_overview','collect_account','collect_detail') %} expanded{% endif %}">
+                <div class="nav-group{% if page in ('collect_overview','collect_account','collect_detail','schedule') %} expanded{% endif %}">
                     <a href="/collect/overview" title="采集" class="nav-group-toggle{% if page == 'collect_overview' %} active{% endif %}">
                         <i data-lucide="download"></i><span>采集</span>
                         <i data-lucide="chevron-right" class="nav-arrow" onclick="toggleNavGroup(event, this)" title="展开/收起"></i>
@@ -71,6 +71,9 @@
                         </a>
                         <a href="/collect" title="增量采集" class="{% if page == 'collect_account' %}active{% endif %}">
                             <i data-lucide="download"></i><span>增量采集</span>
+                        </a>
+                        <a href="/schedule" title="定时任务" class="{% if page == 'schedule' %}active{% endif %}">
+                            <i data-lucide="calendar-clock"></i><span>定时任务</span>
                         </a>
                     </div>
                 </div>
@@ -97,7 +100,33 @@
                     <i data-lucide="settings"></i><span>设置</span>
                 </a>
             </div>
+            <!-- 采集进度条：固定在侧边栏底部、按钮组上方；折叠态缩为图标，悬停向右伸出详情 -->
+            <!-- 外层 .gpc-slot 是定位锚点：折叠态展开时 absolute 以此为基准，位置不跑偏 -->
+            <!-- 注意：不加 title 属性 —— 原生 tooltip 会盖住悬停展开的内容 -->
+            <div class="gpc-slot">
+                <div id="global-collect-progress" class="global-progress-chip" style="display:none;" onclick="openTaskPanel()">
+                    <!-- .gpc-main 是纵向堆叠容器：第一行（图标+百分比+项数）、第二行（任务名）。
+                         为什么要第二行：侧栏内容区只有 ~136px，第一行剩下的 60px 放不下任务名
+                         （「另 sync_v2 +1」需 75px）→ 与其截断成半截词，不如让它独占一行。 -->
+                    <div class="gpc-main">
+                        <div class="gpc-head">
+                            <i data-lucide="activity" class="gpc-icon"></i>
+                            <span id="global-collect-label" class="gpc-label">采集 0%</span>
+                            <span id="global-collect-extra" class="gpc-extra" style="display:none;"></span>
+                        </div>
+                        <div id="global-collect-sub" class="gpc-sub" style="display:none;"></div>
+                    </div>
+                    <div class="gpc-bar"><div id="global-collect-bar"></div></div>
+                </div>
+            </div>
+            <!-- 顺序：折叠态自上而下 = 展开态自左至右，两态一一对应。
+                 这样过渡动画才是「原地扇开」，而不是图标互相交叉乱飞 -->
             <div class="sidebar-footer">
+              <!-- 磁盘状态：常驻图标，剩余空间告急时转红 + 角标；点击查看详情 -->
+              <button id="disk-badge" class="footer-btn footer-btn--disk" onclick="openDiskPanel()" title="磁盘空间">
+                <i data-lucide="hard-drive"></i>
+                <span id="disk-badge-dot" class="footer-badge" style="display:none;">!</span>
+              </button>
               <button id="mode-toggle" class="footer-btn" onclick="toggleMode()" title="切换明/暗">
                 <i data-lucide="moon"></i>
               </button>
@@ -105,11 +134,6 @@
                 <i data-lucide="list-checks"></i>
                 <span id="task-badge-count" class="footer-badge">0</span>
               </button>
-              <div id="global-collect-progress" class="global-progress-chip" style="display:none;" onclick="openTaskPanel()">
-                <i data-lucide="activity"></i>
-                <span id="global-collect-label">采集 0%</span>
-                <div class="gpc-bar"><div id="global-collect-bar"></div></div>
-              </div>
             </div>
             <button id="sidebar-collapse-btn" class="sidebar-collapse-edge" onclick="toggleSidebar()" title="折叠侧边栏">
                 <i data-lucide="chevrons-left"></i>
@@ -129,7 +153,7 @@
     <div id="toast" class="toast"></div>
 
 
-<div id="migration-overlay" class="dh-modal-overlay">
+<div id="migration-overlay" class="dh-modal-overlay" data-no-outside-close>
     <div class="dh-modal-box" style="max-width:440px;">
         <div class="dh-modal-header">
             <h3><i data-lucide="hard-drive"></i> <span id="migration-title">应用数据迁移</span></h3>
@@ -173,9 +197,25 @@
                 <h3><i data-lucide="list-checks"></i> <span>后台任务</span></h3>
                 <button class="dh-modal-close" onclick="closeTaskPanel()"><i data-lucide="x"></i></button>
             </div>
-            <div id="task-panel-body" class="dh-modal-body" style="max-height:72vh;overflow-y:auto;"><div class="task-tabs"><button class="task-tab active" data-tab="active" onclick="switchTaskTab('active')">进行中</button><button class="task-tab" data-tab="history" onclick="switchTaskTab('history')">历史</button></div><div id="task-tab-content"></div></div>
+            <div id="task-panel-body" class="dh-modal-body" style="max-height:72vh;overflow-y:auto;"><div class="task-tabs"><button class="task-tab active" data-tab="active" onclick="switchTaskTab('active')">进行中</button><button class="task-tab" data-tab="history" onclick="switchTaskTab('history')">历史</button><button class="task-tab" data-tab="failures" onclick="switchTaskTab('failures')" id="task-tab-failures">失败<span class="task-tab-dot" id="task-tab-failures-dot" style="display:none;"></span></button></div><div id="task-tab-content"></div></div>
             <div class="dh-modal-actions">
                 <button class="dh-btn dh-btn-ghost" onclick="closeTaskPanel()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 磁盘空间面板：点击侧栏 footer 的磁盘图标打开 -->
+    <div id="disk-panel-overlay" class="dh-modal-overlay">
+        <div class="dh-modal-box" style="max-width:520px;">
+            <div class="dh-modal-header">
+                <h3><i data-lucide="hard-drive"></i> <span>磁盘空间</span></h3>
+                <button class="dh-modal-close" onclick="closeDiskPanel()"><i data-lucide="x"></i></button>
+            </div>
+            <div id="disk-panel-body" class="dh-modal-body" style="max-height:60vh;overflow-y:auto;">
+                <div class="empty-state"><div class="empty-state-title">正在读取…</div></div>
+            </div>
+            <div class="dh-modal-actions">
+                <button class="dh-btn dh-btn-ghost" onclick="closeDiskPanel()">关闭</button>
             </div>
         </div>
     </div>
@@ -184,11 +224,17 @@
     /* 通用确认弹窗(全局共享,使用通用 CSS 变量,4 主题通吃) */
     .dh-modal-overlay {
         display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(10, 11, 15, 0.7); z-index: 20000;
+        /* 层级要压在移动端抽屉之上（抽屉 30003 / 遮罩 30001），否则会被遮罩盖住：
+           实测在抽屉里点「后台任务」，面板确实打开了，却开在遮罩底下 —— 又暗又点不动 */
+        background: rgba(10, 11, 15, 0.7); z-index: 31000;
         align-items: center; justify-content: center;
         backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     }
     .dh-modal-overlay.dh-show { display: flex !important; }
+    /* 确认框永远压在其它浮层之上：它可能从任务面板 / 方案编辑弹窗里弹出来，
+       而各 overlay 的 z-index 相同、DOM 顺序里它排在前面 → 默认会被后写的面板盖住。
+       （实测：面板开着时弹确认框，点遮罩关掉的是面板，确认框根本没露面） */
+    #dh-confirm-overlay { z-index: 40000; }
     .list-clip-bar { list-style:none; text-align:center; padding:10px 0; }
     .list-clip-bar .list-clip-btn { font-size:12px; }
 
@@ -226,7 +272,7 @@
     .dh-modal-close {
         background: none; border: none; font-size: 16px; cursor: pointer;
         color: var(--text-muted); padding: 4px; border-radius: var(--radius-xs);
-        width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
+        width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
     }
     .dh-modal-close svg[data-lucide] { width: 16px; height: 16px; }
     .dh-modal-close:hover { background: var(--danger-light); color: var(--danger-text); }
@@ -244,6 +290,45 @@
     }
     .task-tab:hover { color: var(--text-primary); }
     .task-tab.active { background: var(--accent); color: var(--text-on-accent); }
+    /* 「失败」标签上的未读小红点：有未读失败时显示，点开该标签即消失。
+       用 danger 而非 warning —— 这里的圆点表达"有未处理事项"，是调用注意力的信号 */
+    .task-tab { position: relative; }
+    .task-tab-dot {
+        position: absolute; top: 6px; right: 12px;
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--dh-danger);
+    }
+    /* 「失败」标签页内容 */
+    .sched-failure-bar {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 10px; font-size: 12px; color: var(--dh-text-secondary);
+    }
+    /* 「清空记录」是文字链接，本体只有 19px 高 → 用负 margin + padding 撑出 32px 热区，
+       视觉位置不变但点得中（触控目标不足是移动端最常见的可用性缺陷） */
+    .sched-failure-clear {
+        color: var(--dh-text-secondary); cursor: pointer; text-decoration: underline;
+        display: inline-flex; align-items: center;
+        min-height: 32px; padding: 0 8px; margin: -6px -8px;
+    }
+    .sched-failure-clear:hover { color: var(--dh-accent); }
+    .sched-failure {
+        border: 1px solid var(--dh-border); border-radius: var(--radius-sm);
+        padding: 10px; margin-bottom: 8px;
+    }
+    .sched-failure-head {
+        display: flex; justify-content: space-between; align-items: baseline;
+        gap: 8px; margin-bottom: 4px;
+    }
+    .sched-failure-name { font-size: 13px; font-weight: 600; color: var(--dh-text); }
+    /* 时间戳：这是"任务什么时候挂的"这类功能信息，不是装饰文字，
+       不能用 muted（浅色下 muted 只有 2.38:1，实测必挂）。secondary 浅 6.49 / 深 9.38 双过线 */
+    .sched-failure-time { font-size: 12px; color: var(--dh-text-secondary); white-space: nowrap; }
+    /* 错误详情用 danger 语义色。⚠️ 深浅两套主题各有 --dh-danger，
+       浅色 #C2410C 自带足够对比度，深色 #FF8A7A 也亮于底 —— 与 style.css 的既有写法保持一致 */
+    .sched-failure-detail {
+        font-size: 12px; word-break: break-all;
+        color: var(--dh-danger, var(--danger-text, #C2410C));
+    }
     .dh-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
     .dh-btn {
         padding: 8px 18px; border: none; border-radius: var(--radius-sm);
@@ -273,7 +358,6 @@
     .sb-collapsed .sidebar-brand > i { font-size: 24px; }
     .sb-collapsed .sidebar-brand > svg[data-lucide] { width: 24px; height: 24px; }
     .sb-collapsed .sidebar-nav a { justify-content: center; padding: 0; gap: 0; }
-    .sb-collapsed .sidebar-footer { padding: 8px 0; border-top: none; }
     .sb-collapsed .sidebar-nav a::before { left: auto; right: 0; }
     .sb-collapsed .sidebar-collapse-btn {
         display: flex; margin-left: 0;
@@ -385,7 +469,7 @@
         max-height: 0; overflow: hidden;
         transition: max-height 0.25s ease-out;
     }
-    .nav-group.expanded .nav-submenu { max-height: 320px; }
+    .nav-group.expanded .nav-submenu { max-height: 400px; }
     .nav-group .nav-submenu a {
         display: flex; align-items: center; gap: 10px;
         padding: 0 16px 0 40px; height: 36px;
@@ -483,12 +567,18 @@
         opacity: 1;
         transform: translateY(-50%) translateX(0);
     }
-    /* ===== 侧边栏底部按钮（明暗切换 + 后台任务） ===== */
+    /* ===== 侧边栏底部按钮（磁盘状态 + 明暗切换 + 后台任务） ===== */
+    /* 展开态：磁盘与明暗靠左成组，后台任务推到最右 ——
+       从主内容区回侧栏时后台按钮最近，比三个按钮均匀铺开更好点。
+       （原用 order 让后台排最后，但 order 只改绘制顺序、改不了「成组 vs 分散」） */
     .sidebar-footer {
-        display: flex; flex-direction: row; gap: 8px;
+        display: flex; flex-direction: row; align-items: center; gap: 8px;
         padding: 12px 16px;
         border-top: 1px solid var(--md-outline-variant);
     }
+    .sidebar-footer > #task-badge { margin-left: auto; }
+    /* 折叠态是纵向排列：column 下 margin-left:auto 落在交叉轴上，会把按钮顶到右沿 → 重置 */
+    .sb-collapsed .sidebar-footer > #task-badge { margin-left: 0; }
     .footer-btn {
         position: relative;
         display: flex; align-items: center; justify-content: center;
@@ -512,7 +602,14 @@
         border-radius: 8px; display: flex; align-items: center; justify-content: center;
         padding: 0 4px; line-height: 1;
     }
-    .sb-collapsed .sidebar-footer { flex-direction: column; align-items: center; }
+    /* 折叠态：四个控件（采集 / 后台 / 明暗 / 磁盘）纵向排一列，间距统一
+       （采集图标与后台按钮点开的是同一个面板，不再强行贴成 0 间距） */
+    .sb-collapsed .sidebar-footer {
+        flex-direction: column; align-items: center;
+        gap: 6px; padding: 6px 0 10px;
+        border-top: none;
+    }
+    /* 折叠态隐藏分隔线：图标与按钮组已是一列，再加一条横线会把「同一组」割裂开 */
     .sb-collapsed .footer-btn .footer-badge {
         width: 8px; height: 8px; min-width: 8px;
         font-size: 0; padding: 0; border-radius: 4px;
@@ -556,31 +653,230 @@
       .nav-group .nav-submenu a { height: 44px; padding-left: 44px; }
       .nav-arrow { width: 20px; height: 20px; padding: 10px; }
       .nav-arrow svg[data-lucide] { width: 18px; height: 18px; }
+      /* 窄屏进度条高度见文件末尾的移动端补丁（须在主规则之后才生效） */
     }
     @media (min-width: 769px) {
       body.sidebar-open .sidebar { position: sticky; top: 0; transform: none; }
     }
 
-    /* ===== 全局采集进度浮条：胶囊形 + 呼吸图标 + 细进度条，明暗自适应 ===== */
+    /* ===== 采集进度条：侧边栏底部固定区块（按钮组上方）===== */
+    /* 展开态：撑满侧边栏宽度，与导航项左右对齐；折叠态：缩为图标 + 悬停向右伸出详情 */
+    /* 定位锚点：折叠态悬停展开用 absolute，以此为包含块 → 始终贴在图标右侧同一高度 */
+    .gpc-slot { position: relative; flex-shrink: 0; }
     .global-progress-chip {
-        position: fixed; left: 68px; bottom: 16px; z-index: 9999;
+        position: relative;
         display: none; align-items: center; gap: 8px;
+        margin: 10px 12px 2px;
+        /* 白卡 + 实描边：与侧栏内其它卡片同一语言。
+           （原先是米色内陷面 + 透明边框，在暖白侧栏上几乎看不出边界，显得"糊"）
+           底色统一走 --dh-surface，侧栏白底 → 卡片也是白的，靠描边 + 极淡投影分层 */
         background: var(--dh-surface);
         border: 1px solid var(--dh-border);
-        border-radius: 9999px;
-        padding: 7px 14px 7px 11px;
-        font-size: 12px; font-weight: 600; color: var(--dh-text);
+        border-radius: var(--dh-radius-sm);
+        /* 左右 padding 与 .gpc-head 的 gap 都收紧 1~3px：
+           实测内容区 136px，而「采集 67%｜另 sync_v2 +1」需要约 151px。
+           这几像素是从内边距里省出来的，不必加宽卡片或改侧栏。 */
+        padding: 0 8px;
+        /* width 必须写成 calc 而不是 auto：auto ↔ 具体值不可插值，
+           折叠时宽度会「啪」地跳变。calc/px 都是长度 → 能平滑过渡到 36px */
+        width: calc(100% - 24px);
+        height: 40px; box-sizing: border-box;
+        font-size: 12.5px; font-weight: 600; color: var(--dh-text);
         cursor: pointer;
-        box-shadow: 0 4px 16px rgba(31,27,23,.16), 0 1px 4px rgba(31,27,23,.08);
-        transition: box-shadow .15s, transform .15s;
+        user-select: none; -webkit-user-select: none;
+        overflow: hidden;
+        box-shadow: var(--dh-shadow-sm);
+        /* 时长与 FLIP 的 240ms 对齐：栏宽、卡片尺寸、图标位移三者同时到位 */
+        transition: background .15s, border-color .15s, box-shadow .15s,
+                    width .24s cubic-bezier(.2,.9,.25,1),
+                    height .24s cubic-bezier(.2,.9,.25,1),
+                    margin .24s cubic-bezier(.2,.9,.25,1),
+                    padding .24s cubic-bezier(.2,.9,.25,1),
+                    gap .24s cubic-bezier(.2,.9,.25,1);
     }
-    .global-progress-chip:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(31,27,23,.22), 0 2px 6px rgba(31,27,23,.1); }
-    .global-progress-chip > i, .global-progress-chip > svg { font-size: 14px; color: var(--dh-accent); animation: gpc-pulse 1.6s ease-in-out infinite; }
-    .global-progress-chip.is-paused > i, .global-progress-chip.is-paused > svg { color: var(--dh-warning); animation: none; }
+    /* 尺寸变化中：内容快速淡出，避免文字被挤压变形 */
+    .global-progress-chip.is-folding .gpc-head,
+    .global-progress-chip.is-folding .gpc-sub,
+    .global-progress-chip.is-folding .gpc-bar {
+        opacity: 0;
+        transition: opacity .1s linear;
+    }
+    /* 悬停：描边加深 + 抬起，暗示可点击 */
+    .global-progress-chip:hover {
+        background: var(--dh-surface);
+        border-color: var(--dh-border-strong);
+        box-shadow: var(--dh-shadow-lg);
+    }
+    /* 纵向堆叠容器：第一行（图标+百分比+项数）、第二行（同时进行的任务名）。
+       flex:1 1 auto + min-width:0 —— 卡片是 flex 容器，不加这两条会被内容撑宽 */
+    .global-progress-chip .gpc-main {
+        flex: 1 1 auto; min-width: 0;
+        display: flex; flex-direction: column; justify-content: center; gap: 2px;
+    }
+    /* 头部行：图标 + 主标签 + 「另 N 项」 */
+    .global-progress-chip .gpc-head {
+        display: flex; align-items: center; gap: 6px;
+        width: 100%; min-width: 0;
+    }
+    /* 第二行：其它正在跑的任务名。
+       为什么单占一行：第一行剩余的 60px 放不下「sync_v2、文件查重」（需约 100px），
+       硬挤只会截成半截词；独占一行后可用的宽度翻倍，仍放不下才走省略号 + title。
+       色彩用 secondary 而非 muted —— 这是功能性信息（还有谁在跑），muted 对比度不达标 */
+    .global-progress-chip .gpc-sub {
+        font-size: 11px; font-weight: 500; line-height: 1.3;
+        color: var(--dh-text-secondary);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        transition: opacity .16s linear;
+    }
+    /* 出现第二行时卡片长高（40 → 50）；折叠态/peek 由各自规则覆盖回 36 */
+    .global-progress-chip.has-extras { height: 50px; }
+    /* 图标：呼吸闪烁，状态由 is-paused 切换 */
+    .global-progress-chip .gpc-icon { width: 14px; height: 14px; flex-shrink: 0; color: var(--dh-accent); animation: gpc-pulse 1.6s ease-in-out infinite; }
+    .global-progress-chip.is-paused .gpc-icon { color: var(--dh-warning); animation: none; }
     .global-progress-chip.is-paused .gpc-bar > div { background: var(--dh-warning); }
-    @keyframes gpc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
-    .global-progress-chip .gpc-bar { width: 90px; height: 4px; background: var(--dh-surface-muted); border-radius: 2px; overflow: hidden; }
-    .global-progress-chip .gpc-bar > div { width: 0%; height: 100%; background: var(--dh-accent); border-radius: 2px; transition: width .5s; }
+    @keyframes gpc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .38; } }
+    /* 文字：主标签 + 「另 N 项」后缀 */
+    .global-progress-chip .gpc-label { white-space: nowrap; letter-spacing: .2px; transition: opacity .16s linear; }
+    /* 「另 N 项」是功能性信息（提示还有其他任务在跑），不是装饰文字 → 用 secondary 保证 ≥4.5:1。
+       分隔线改用极淡的 --dh-border（原是 border-strong，在浅底上一条深灰竖线显得突兀）。
+       窄侧栏里带任务名必然被截断 → 单行省略号，完整名称在原生 title 里（悬停可见） */
+    .global-progress-chip .gpc-extra {
+        white-space: nowrap; font-size: 11px; font-weight: 500;
+        color: var(--dh-text-secondary); padding-left: 6px;
+        margin-left: auto; transition: opacity .16s linear;
+        border-left: 1px solid var(--dh-border);
+        overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1;
+    }
+    /* 进度线：贴卡片下沿，左右各内缩圆角半径 ——
+       贯通到底会把 chip 的左下/右下圆角填成方角（3× 截图实测），
+       内缩后线与圆角各自完整，视觉更干净 */
+    .global-progress-chip .gpc-bar {
+        position: absolute; left: 6px; right: 6px; bottom: 0;
+        height: 3px; background: transparent;
+        overflow: hidden; pointer-events: none; transition: opacity .16s linear;
+    }
+    .global-progress-chip .gpc-bar > div {
+        width: 0%; height: 100%; background: var(--dh-accent);
+        transition: width .5s;
+    }
+
+    /* ===== 侧边栏折叠态：采集条缩为一个图标，悬停向右伸出详情 ===== */
+    /* 折叠态图标与 footer 的三个按钮同形同色（白底 + 描边 + 6px 圆角），
+       连上采集图标共四个控件，在 64px 侧栏里构成整齐一列 */
+    .sb-collapsed .global-progress-chip {
+        width: 36px; height: 36px; padding: 0; gap: 0; margin: 0;
+        justify-content: center; border-radius: var(--radius-sm);
+        background: var(--bg-input);
+        border-color: var(--border-default);
+        box-shadow: none;
+    }
+    /* ⚠️ .gpc-head 在主规则里是 width:100%（展开态要占满整行），
+       折叠态不重置就会把图标顶到 36px 圆点的左沿 ——
+       实测图标中心 cx=24，而下面三个按钮都是 32，肉眼就是"没对齐"（差 8px）。
+       重置为自适应宽 + 居中，图标才与按钮同心。 */
+    .sb-collapsed .global-progress-chip .gpc-head { width: auto; gap: 0; justify-content: center; }
+    /* 折叠态悬停：与相邻 footer 按钮的 hover 反馈保持同一语言 */
+    .sb-collapsed .global-progress-chip:hover {
+        background: var(--bg-hover);
+        border-color: var(--accent);
+    }
+    /* 折叠态小球：文字与进度线收起。
+       必须用 display:none —— visibility 仍占布局空间，40px 宽的图标会被撑歪、无法居中。
+       展开的顺滑感改由 chip 的 left/width 过渡 + 图标尺寸过渡提供，实测足够连贯。 */
+    .sb-collapsed .global-progress-chip .gpc-label,
+    .sb-collapsed .global-progress-chip .gpc-extra,
+    .sb-collapsed .global-progress-chip .gpc-sub,
+    .sb-collapsed .global-progress-chip .gpc-bar {
+        display: none;
+    }
+    /* 折叠态压回 36×36：覆盖展开态的 height:50px（has-extras）。
+       同一元素上两个类选择器特异性相同，靠"后写胜出"—— 这条必须在主规则之后 */
+    .sb-collapsed .global-progress-chip.has-extras { height: 36px; }
+    /* .gpc-main 在展开态是 flex:1 1 auto（撑满剩余宽），折叠态要收成自适应宽，
+       否则 36px 圆点里它仍会占满、图标被推到左沿（与 .gpc-head 同理） */
+    .sb-collapsed .global-progress-chip .gpc-main { flex: 0 0 auto; }
+    /* 图标尺寸取 16px = .footer-btn 的图标尺寸，四个控件才是同一套视觉 */
+    .sb-collapsed .global-progress-chip .gpc-icon {
+        width: 16px; height: 16px; color: var(--text-secondary);
+        animation: gpc-pulse 1.4s ease-in-out infinite;
+        transition: width .3s cubic-bezier(.2,.9,.25,1), height .3s cubic-bezier(.2,.9,.25,1);
+    }
+    .sb-collapsed .global-progress-chip:hover .gpc-icon { color: var(--accent); }
+    /* ✅ 闪烁已从根上消除：peek 时 chip 的 left 保持 0（原地不动）、只向右展宽，
+       鼠标始终落在 chip 内部 → 不可能触发 mouseleave → 无需再铺"防闪烁桥"。
+       （早期版本把 chip 左沿从 12px 移到 58px，鼠标被甩到元素外才导致 40↔168 来回震荡） */
+    /* 悬停展开：胶囊从图标位置原地「长」出来（left 不动，宽度 36 → 172），
+       视觉上就是「图标展开成详情」，而不是「图标飞走、另冒出一个胶囊」 */
+    /* 关键：slot 在折叠态必须有固定占位高度 —— 否则 chip 转 absolute 后 slot 高度归零，
+       而 slot 靠 margin-top:auto 贴底，高度一没就被顶走 → peek 会飞到别处 */
+    .sb-collapsed .gpc-slot { margin: 6px auto 0; width: 36px; height: 36px; }
+    .sb-collapsed .global-progress-chip.is-peek {
+        /* left:0 相对 .gpc-slot 左沿（slot 已在 64px 侧栏里居中，左沿=14px）——
+           与折叠态图标位置完全重合，胶囊从图标处原地生根，不会留空洞也不会偏移 */
+        position: absolute; left: 0; top: 0; right: auto;
+        transition: background .15s, border-color .15s, box-shadow .15s,
+                    width .32s cubic-bezier(.2,.9,.25,1),
+                    padding .32s cubic-bezier(.2,.9,.25,1),
+                    gap .32s cubic-bezier(.2,.9,.25,1);
+        /* flex:0 0 auto + box-sizing 确保 200px 不被内容撑开或压缩 ——
+           否则「另 N 项」有/无会让胶囊忽长忽短，悬停时宽度会跳。
+           宽度取 200 而非 172：「另 sync_v2 +1」这类文案需要 200 才不被截断 */
+        flex: 0 0 auto; box-sizing: border-box;
+        width: 200px; min-width: 200px; max-width: 200px; height: 36px;
+        padding: 0 11px; gap: 8px;
+        margin: 0; justify-content: flex-start; z-index: 30;
+        border-radius: var(--dh-radius-sm);
+        background: var(--dh-surface);
+        border-color: var(--dh-border-strong);
+        box-shadow: var(--dh-shadow-lg);
+    }
+    .sb-collapsed .global-progress-chip.is-peek .gpc-label,
+    .sb-collapsed .global-progress-chip.is-peek .gpc-extra {
+        display: inline;
+    }
+    .sb-collapsed .global-progress-chip.is-peek .gpc-bar { display: block; }
+    /* peek 是"展开成完整卡片"，把折叠态为居中图标而收窄的两层（main / head）恢复成撑满 + 两端对齐：
+       标签靠左、「另 N 项」用 margin-left:auto 靠右，视觉才不挤成一团 */
+    .sb-collapsed .global-progress-chip.is-peek .gpc-main { flex: 1 1 auto; }
+    .sb-collapsed .global-progress-chip.is-peek .gpc-head {
+        width: 100%; gap: 6px; justify-content: flex-start;
+    }
+    /* peek 不放第二行：200px 的单行已能装下「另 sync_v2 +1」，
+       保持 36px 高度与图标等高更整齐（第二行只在侧栏展开态出现） */
+    /* 图标尺寸随展开一起过渡（16 → 14），避免展开瞬间图标"咯噔"一下 */
+    .sb-collapsed .global-progress-chip.is-peek .gpc-icon { width: 14px; height: 14px; color: var(--dh-accent); }
+
+    /* ===== 磁盘状态按钮 ===== */
+    /* 常驻 footer；剩余空间正常时与其它按钮完全同形（白底描边），
+       告急时才转红 + 显示「!」角标 —— 常态不抢注意力 */
+    .footer-btn--disk.is-low {
+        border-color: var(--dh-danger);
+        color: var(--dh-danger);
+        background: var(--dh-danger-soft);
+    }
+    .footer-btn--disk.is-low .footer-badge {
+        background: var(--dh-danger);
+    }
+    /* 定时任务有未读失败：后台按钮转警示色（与磁盘告警同一范式，颜色区分语义）
+       用 warning 而非 danger —— 失败已发生但不会继续恶化，与"空间要满了"的持续风险分级 */
+    #task-badge.has-schedule-failure {
+        border-color: var(--dh-warning);
+        color: var(--dh-warning);
+        background: var(--dh-warning-soft);
+    }
+
+    /* 窄屏（抽屉模式）补充：触控高度抬到 36px 底线。
+       必须放在主规则之后 —— 同特异性下后写的胜出，写在前面会被覆盖 */
+    @media (max-width: 768px) {
+      /* 必须用 min-height 而不是 height：height 会盖掉 .has-extras 的 50px
+         （两者特异性相同、媒体查询在后），第二行任务名会被 overflow:hidden 裁掉。
+         这里只要保证触控底线 36px，高度仍由内容语义决定（40 / 有第二行时 50）。 */
+      .sidebar .global-progress-chip { min-height: 36px; }
+      /* 窄屏（135px 卡片）第一行放不下「另 N 项」，会被截成「另 2…」——
+         第二行已列出完整任务名，项数在这里是冗余信息，直接收起 */
+      .sidebar .global-progress-chip.has-extras .gpc-extra { display: none; }
+      /* 窄屏侧栏始终全宽、不进入 sb-collapsed，折叠态悬停展开规则无需适配 */
+    }
     </style>
 
     <script>
@@ -611,11 +907,48 @@
             (requireText ? inputEl : okBtn).focus();
             return new Promise(resolve => { _dhConfirmCb = resolve; });
         }
-        // Esc 关闭
-        document.addEventListener('keydown', e => {
-            if (e.key === 'Escape' && document.getElementById('dh-confirm-overlay').classList.contains('dh-show')) {
-                dhConfirmResolve(false);
+        // 确认框的 Esc / 点遮罩关闭交给下面的「通用浮层关闭」统一处理，
+        // 这里不再单独监听 —— 否则一次 Esc 会先把确认框关掉、再顺手把它下面的面板也关掉
+    </script>
+
+    <script>
+        // ===== 通用浮层关闭：点遮罩空白处 / 按 Esc = 等同于点右上角 ✕ =====
+        // 不逐个弹窗写处理：框内有 ✕ 按钮就能关；表单类、进行中的阻塞弹窗加
+        // data-no-outside-close 属性豁免（防止误触丢掉已填内容或打断进度）。
+        // 为什么是"点 ✕ 按钮"而不是直接调关闭函数：关闭函数散落在各页 script 里、
+        // 命名不统一，✕ 按钮才是唯一权威入口 —— 点它 = 走它。
+        var _dhDownOn = null;
+        function _dhCloseBtnOf(el) {
+            if (!el || !el.classList) return null;
+            if (!el.classList.contains('dh-modal-overlay') && !el.classList.contains('modal-overlay')) return null;
+            if (getComputedStyle(el).display === 'none') return null;    // 没在展示
+            if (el.hasAttribute('data-no-outside-close')) return null;   // 显式豁免
+            return el.querySelector('.dh-modal-close, .modal-close');
+        }
+        // 取最上层浮层：各 overlay 的 z-index 相同，DOM 顺序不可靠
+        //（确认框写在任务面板之前，却要盖在它上面）→ 用视口中心的命中测试判定
+        function _dhTopOverlay() {
+            var hits = document.elementsFromPoint(window.innerWidth / 2, window.innerHeight / 2) || [];
+            for (var i = 0; i < hits.length; i++) {
+                var ov = hits[i].closest && hits[i].closest('.dh-modal-overlay, .modal-overlay');
+                if (ov) return ov;
             }
+            var all = document.querySelectorAll('.dh-modal-overlay, .modal-overlay');
+            for (var j = all.length - 1; j >= 0; j--) {
+                if (getComputedStyle(all[j]).display !== 'none') return all[j];
+            }
+            return null;
+        }
+        document.addEventListener('mousedown', function (e) { _dhDownOn = e.target; }, true);
+        document.addEventListener('click', function (e) {
+            // 按下与松开都要落在遮罩本身上，否则"在框内拖选文字、松手到框外"会被误判成点遮罩
+            var btn = (e.target === _dhDownOn) ? _dhCloseBtnOf(e.target) : null;
+            if (btn) btn.click();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Escape') return;
+            var btn = _dhCloseBtnOf(_dhTopOverlay());
+            if (btn) btn.click();
         });
     </script>
 
@@ -721,11 +1054,67 @@
         updateModeToggle(document.documentElement.getAttribute('data-theme') || 'light');
 
         // ===== 侧边栏折叠(仅一个折叠/展开按钮,桌面端) =====
+        // 底部四个控件（采集 / 磁盘 / 明暗 / 后台）折叠态是纵向一列、展开态是横向一行。
+        // flex-direction 不可插值 → 用 FLIP 补间位置：切换前后各量一次矩形，
+        // 把元素瞬时挪回旧位置（Invert），下一帧释放为 0（Play），浏览器自然补间。
+        // 全程只动 transform、不触发布局 → 与 .sidebar 自身的 width 过渡可以并行不打架。
+        var _SB_MOTION_IDS = ['global-collect-progress', 'disk-badge', 'mode-toggle', 'task-badge'];
+        var _SB_MOTION_MS = 240;
+        var _SB_EASE = 'cubic-bezier(.2,.9,.25,1)';
+
+        var _sbFlipTimer = null;
+        function _sbFlip(apply) {
+            var nodes = [];
+            _SB_MOTION_IDS.forEach(function (id) {
+                var el = document.getElementById(id);
+                // getClientRects() 为空 = display:none（没有采集任务时的卡片）→ 跳过
+                if (el && el.getClientRects().length) nodes.push(el);
+            });
+            if (!nodes.length) { apply(); return; }
+            var first = nodes.map(function (el) { return el.getBoundingClientRect(); });
+            apply();
+            void document.body.offsetHeight;   // 强制同步布局，保证下面量到的是新位置
+            var shifts = [];
+            nodes.forEach(function (el, i) {
+                var last = el.getBoundingClientRect();
+                var dx = first[i].left - last.left;
+                var dy = first[i].top - last.top;
+                if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) shifts.push({ el: el, dx: dx, dy: dy });
+            });
+            if (!shifts.length) return;
+            shifts.forEach(function (s) {
+                s.el.style.transition = 'none';   // 先瞬时挪回旧位置，这一步绝不能带过渡
+                s.el.style.transform = 'translate(' + s.dx + 'px,' + s.dy + 'px)';
+            });
+            requestAnimationFrame(function () {
+                shifts.forEach(function (s) {
+                    s.el.style.transition = 'transform ' + _SB_MOTION_MS + 'ms ' + _SB_EASE;
+                    s.el.style.transform = 'translate(0,0)';
+                });
+            });
+            // 结束后必须清掉内联样式：内联 transition 优先级高于样式表，
+            // 留着会长期压住卡片自身的 hover / peek 过渡
+            clearTimeout(_sbFlipTimer);
+            _sbFlipTimer = setTimeout(function () {
+                shifts.forEach(function (s) { s.el.style.transition = ''; s.el.style.transform = ''; });
+            }, _SB_MOTION_MS + 60);
+        }
+
         function toggleSidebar() {
             const sb = document.querySelector('.sidebar');
-            const collapsed = sb.classList.toggle('sb-collapsed');
+            // 卡片若正处于悬停展开（peek），先收掉 —— 否则 FLIP 量到的是 200px 的展开矩形
+            const chip = document.getElementById('global-collect-progress');
+            if (chip) chip.classList.remove('is-peek');
+            var collapsed;
+            _sbFlip(function () { collapsed = sb.classList.toggle('sb-collapsed'); });
             localStorage.setItem('doukhub-sidebar-collapsed', collapsed ? '1' : '0');
             updateCollapseBtn(collapsed);
+            // 「另 N 项」文案随侧栏宽窄切换（窄=只报数量 / 宽=报任务名），
+            // 不能等下一次轮询 —— 折叠后要有 2.5s 才更新，视觉上像漏了一拍。
+            // ⚠️ 必须在 FLIP 之后调用：它会改卡片文案
+            if (typeof updateGlobalCollectProgress === 'function' && _lastTasks) {
+                updateGlobalCollectProgress(_lastTasks);
+            }
         }
         function updateCollapseBtn(collapsed) {
             const btn = document.getElementById('sidebar-collapse-btn');
@@ -945,6 +1334,58 @@
                 if (typeof onTasksUpdate === 'function') onTasksUpdate(_lastTasks);
             } catch (e) { /* 静默,下次重试 */ }
         }
+
+        // ===== 定时任务失败通知 =====
+        // 为什么单独轮询而不是塞进 /api/tasks：失败记录来自 sync_history，
+        // 与"正在运行的任务"是两类数据，混在一起会让 /api/tasks 语义变浑。
+        // 频率放低（60s）：失败是低频事件，没必要跟着 2.5s 的任务轮询一起刷。
+        var _scheduleFailures = [];
+        var _seenFailureId = 0;
+        var _failureToastShown = {};
+        var _failureUnread = false;
+        async function pollScheduleFailures() {
+            try {
+                var data = await apiCall('/api/schedules/failures?since_id=' + _seenFailureId, 'GET');
+                var list = data.failures || [];
+                if (!list.length) return;
+                _scheduleFailures = _scheduleFailures.concat(list).slice(-20);
+                _seenFailureId = Math.max(_seenFailureId, data.latest_id || 0);
+                _failureUnread = true;
+                renderFailureBadge();
+                // 首次拉到就弹 toast 提示（同一条只提醒一次，避免每轮重弹）
+                list.forEach(function (f) {
+                    if (_failureToastShown[f.id]) return;
+                    _failureToastShown[f.id] = true;
+                    showToast('定时任务「' + f.name + '」执行失败：' + f.detail, 'error');
+                    // 「立即执行」触发时会同步弹成功 toast，与失败提醒可能重叠 → 精确记录时间戳便于排查
+                    console.warn('[schedule] 失败通知', f.id, f.at);
+                });
+            } catch (e) { /* 静默，下次重试 */ }
+        }
+        function renderFailureBadge() {
+            var btn = document.getElementById('task-badge');
+            if (!btn) return;
+            var n = _scheduleFailures.length;
+            btn.classList.toggle('has-schedule-failure', n > 0);
+            if (n > 0) {
+                var names = _scheduleFailures.map(function (f) { return f.name; });
+                btn.title = '后台任务 · ' + n + ' 个定时任务执行失败：' + names.slice(-3).join('、');
+            }
+            renderFailureDot();
+            renderTaskPanel(_lastTasks);
+        }
+        function renderFailureDot() {
+            var dot = document.getElementById('task-tab-failures-dot');
+            if (!dot) return;
+            dot.style.display = (_failureUnread && _scheduleFailures.length) ? 'block' : 'none';
+        }
+        function clearScheduleFailures() {
+            _scheduleFailures = [];
+            _failureUnread = false;
+            // 同步把服务端记录标记为已读（否则下次轮询仍会拉到同一批）
+            apiCall('/api/schedules/failures/ack', 'POST', { ids: [] }).catch(function () {});
+            renderFailureBadge();
+        }
         function updateTaskBadge(tasks) {
             const active = tasks.filter(t => t.status === 'pending' || t.status === 'running' || t.status === 'paused');
             const count = document.getElementById('task-badge-count');
@@ -963,10 +1404,89 @@
             widget.classList.toggle('is-paused', batch.status === 'paused');
             document.getElementById('global-collect-label').textContent = (batch.status === 'paused' ? '已暂停 ' : '采集 ') + pct + '%';
             document.getElementById('global-collect-bar').style.width = pct + '%';
-            widget.style.display = 'block';
+            // 除当前采集批次外，还有几项任务在排队/运行 —— 两种布局各用各的写法：
+            //   · 侧栏展开态（内容区仅 ~136px）→ 第一行只报数量「另 2 项」，
+            //     任务名放**第二行**独占整行（宽度翻倍后才装得下「sync_v2、文件查重」）
+            //   · 折叠态 peek（宽 200px、单行）→ 直接「另 sync_v2 +1」
+            // 两处都避免出现"截断的半个词"。
+            const extras = tasks.filter(function (t) {
+                return t.task_id !== batch.task_id &&
+                    (t.status === 'pending' || t.status === 'running' || t.status === 'paused');
+            });
+            const extraEl = document.getElementById('global-collect-extra');
+            const subEl = document.getElementById('global-collect-sub');
+            if (extras.length > 0) {
+                const names = extras.map(function (t) {
+                    return TASK_TYPE_LABEL[t.type] || t.type;
+                });
+                const full = '同时进行：' + names.join('、');
+                const collapsed = document.querySelector('.sidebar').classList.contains('sb-collapsed');
+                if (collapsed) {
+                    // peek：单行放「另 sync_v2 +1」，不启用第二行（36px 高才与图标等高）
+                    extraEl.textContent = extras.length === 1
+                        ? '另 ' + names[0]
+                        : '另 ' + names[0] + ' +' + (extras.length - 1);
+                    subEl.style.display = 'none';
+                    widget.classList.remove('has-extras');
+                } else {
+                    extraEl.textContent = '另 ' + extras.length + ' 项';
+                    subEl.textContent = names.join('、');
+                    subEl.title = full;
+                    subEl.style.display = '';
+                    // has-extras 让卡片长高到 50px 容纳第二行
+                    widget.classList.add('has-extras');
+                }
+                extraEl.title = full;
+                extraEl.style.display = '';
+            } else {
+                extraEl.style.display = 'none';
+                extraEl.removeAttribute('title');
+                // 没有其它任务时必须撤掉第二行与增高，否则卡片会留一条空白
+                subEl.style.display = 'none';
+                subEl.removeAttribute('title');
+                widget.classList.remove('has-extras');
+            }
+            widget.style.display = 'flex';
         }
+        // ===== 采集进度条：侧边栏固定展示 + 折叠态悬停向右展开详情 =====
+        (function () {
+            var el = document.getElementById('global-collect-progress');
+            if (!el) return;
+            var sidebar = document.querySelector('.sidebar');
+            var _hideTimer = null;
+
+            function isCollapsed() {
+                return !!(sidebar && sidebar.classList.contains('sb-collapsed'));
+            }
+            // 折叠态：图标悬停 → 向右伸出完整详情；展开态无需处理（本身就是完整内容）
+            function enterPeek() {
+                if (!isCollapsed() || el.classList.contains('is-peek')) return;
+                if (_hideTimer) { clearTimeout(_hideTimer); _hideTimer = null; }
+                el.classList.add('is-peek');
+            }
+            function exitPeek() {
+                if (!el.classList.contains('is-peek')) return;
+                el.classList.remove('is-peek');
+            }
+            // 离开时留一点延迟，避免鼠标从图标移到伸出胶囊的途中被判定为"已离开"
+            function scheduleExit() {
+                if (_hideTimer) clearTimeout(_hideTimer);
+                _hideTimer = setTimeout(function () { _hideTimer = null; exitPeek(); }, 90);
+            }
+            el.addEventListener('mouseenter', enterPeek);
+            el.addEventListener('mouseleave', scheduleExit);
+
+            // 侧边栏折叠/展开时清掉悬停态，避免残留的绝对定位错位
+            if (sidebar && window.MutationObserver) {
+                new MutationObserver(function () {
+                    if (!isCollapsed()) exitPeek();
+                }).observe(sidebar, { attributes: true, attributeFilter: ['class'] });
+            }
+        })();
         function openTaskPanel() {
             _taskPanelOpen = true;
+            // 窄屏下这个按钮在抽屉里：先把抽屉收掉，避免抽屉和面板叠着两层
+            if (typeof setSidebarDrawer === 'function') setSidebarDrawer(false);
             document.getElementById('task-panel-overlay').classList.add('dh-show');
             renderTaskPanel(_lastTasks);
         }
@@ -974,14 +1494,113 @@
             _taskPanelOpen = false;
             document.getElementById('task-panel-overlay').classList.remove('dh-show');
         }
+
+        // ===== 磁盘空间：侧栏常驻图标 + 告急转红 + 详情面板 =====
+        // 阈值 5GB：与采集启动前的空间检查口径保持一致（不足 5GB 会弹确认框）。
+        // 为什么常驻而不只是告急才显示：常态隐藏的图标会让用户永远注意不到它的存在，
+        // 真告急时冒出来反而像"莫名多了个东西"。常态同形、告急变色 → 变化本身就是提示。
+        var DISK_LOW_GB = 5;
+        var _diskInfo = null;
+        async function pollDisk() {
+            var btn = document.getElementById('disk-badge');
+            if (!btn) return;
+            try {
+                var data = await apiCall('/api/disk', 'GET');
+                _diskInfo = data;
+                var drives = data.drives || [];
+                // 告急判定：只看真正会被写入的盘（存储方案里已启用的目录所在卷）
+                var lows = drives.filter(function (d) { return d.writable && d.free_gb < DISK_LOW_GB; });
+                var isLow = lows.length > 0;
+                btn.classList.toggle('is-low', isLow);
+                var dot = document.getElementById('disk-badge-dot');
+                if (dot) dot.style.display = isLow ? 'flex' : 'none';
+                btn.title = isLow
+                    ? '磁盘空间不足：' + lows.map(function (d) { return d.name + ' 仅剩 ' + d.free_gb.toFixed(1) + 'GB'; }).join('；')
+                    : '磁盘空间（充足）';
+            } catch (e) { /* 静默，下次重试 */ }
+        }
+        // 路径行：让用户能核对"这个盘到底是哪几个目录在用"。
+        // 路径来自配置，含用户输入 → 转义后再拼 HTML，避免特殊字符破坏结构
+        function _dhEsc(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        function _diskPathsHtml(d) {
+            var paths = d.paths || (d.path ? [d.path] : []);
+            if (!paths.length) return '';
+            return '<div style="margin-top:4px;font-size:11px;line-height:1.55;' +
+                'color:var(--dh-text-secondary);word-break:break-all;">' +
+                paths.map(_dhEsc).join('<br>') + '</div>';
+        }
+        function _diskRowHtml(d) {
+            var barW = d.total_gb > 0 ? Math.min(100, d.used_gb / d.total_gb * 100) : 0;
+            var low = d.writable && d.free_gb < DISK_LOW_GB;
+            var barColor = low ? 'var(--dh-danger)' : 'var(--dh-accent)';
+            return '' +
+                '<div style="padding:12px 0;border-bottom:1px solid var(--dh-border);">' +
+                  '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">' +
+                    '<span style="font-weight:600;color:var(--dh-text);">' + d.name + '</span>' +
+                    '<span style="font-size:12px;color:var(--dh-text-secondary);">' + (d.label || '') + '</span>' +
+                    (low
+                        ? '<span style="margin-left:auto;font-size:12px;font-weight:600;color:var(--dh-danger);">空间不足</span>'
+                        : (d.writable ? '' : '<span style="margin-left:auto;font-size:12px;color:var(--dh-text-secondary);">不参与告警</span>')) +
+                  '</div>' +
+                  _diskPathsHtml(d) +
+                  '<div style="margin-top:8px;height:6px;border-radius:3px;background:var(--dh-surface-muted);overflow:hidden;">' +
+                    '<div style="width:' + barW.toFixed(1) + '%;height:100%;background:' + barColor + ';"></div>' +
+                  '</div>' +
+                  '<div style="margin-top:6px;font-size:12px;color:var(--dh-text-secondary);">' +
+                    '已用 ' + d.used_gb.toFixed(1) + ' GB / 共 ' + d.total_gb.toFixed(1) + ' GB' +
+                    '　·　剩余 <b style="color:' + (low ? 'var(--dh-danger)' : 'var(--dh-text)') + ';">' +
+                    d.free_gb.toFixed(1) + ' GB</b>' +
+                  '</div>' +
+                '</div>';
+        }
+        async function openDiskPanel() {
+            // 同上：窄屏下按钮在抽屉里，先收抽屉再弹面板
+            if (typeof setSidebarDrawer === 'function') setSidebarDrawer(false);
+            document.getElementById('disk-panel-overlay').classList.add('dh-show');
+            var body = document.getElementById('disk-panel-body');
+            try {
+                var data = await apiCall('/api/disk', 'GET');
+                _diskInfo = data;
+                var drives = data.drives || [];
+                if (!drives.length) {
+                    body.innerHTML = '<div class="empty-state">' +
+                        '<div class="empty-state-title">无可用磁盘信息</div>' +
+                        '<div class="empty-state-desc">磁盘信息完全读不到时会出现这种情况' +
+                        '（存储方案里的目录都不可访问，且应用数据目录所在盘也不可达）。</div></div>';
+                    return;
+                }
+                var html = drives.map(_diskRowHtml).join('');
+                html += '<div style="margin-top:12px;font-size:12px;line-height:1.6;color:var(--dh-text-secondary);">' +
+                    '统计范围：<b style="color:var(--dh-text);">存储方案</b>中已启用的目录所在磁盘 + ' + 
+                    '<b style="color:var(--dh-text);">应用数据</b>目录所在盘（未方案化的盘不计入）。<br>' +
+                    '告警范围：仅存储方案用到的盘 —— 低于 ' + DISK_LOW_GB + ' GB 时图标转红；' +
+                    '采集启动前也会用同一阈值弹确认框。</div>';
+                body.innerHTML = html;
+                if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+            } catch (e) {
+                body.innerHTML = '<div class="empty-state">' +
+                    '<div class="empty-state-title">读取失败</div>' +
+                    '<div class="empty-state-desc">' + (e.message || '未知错误') + '</div></div>';
+            }
+        }
+        function closeDiskPanel() {
+            document.getElementById('disk-panel-overlay').classList.remove('dh-show');
+        }
         var _taskPanelTab = 'active';
         function switchTaskTab(tab) {
             _taskPanelTab = tab;
             document.querySelectorAll('.task-tab').forEach(function (b) {
                 b.classList.toggle('active', b.getAttribute('data-tab') === tab);
             });
+            // 打开「失败」标签即视为已读，圆点消失（列表内容保留，用户还能回看）
+            if (tab === 'failures') _failureUnread = false;
+            renderFailureDot();
             if (tab === 'active') {
                 renderActiveTasks(_lastTasks);
+            } else if (tab === 'failures') {
+                renderFailures();
             } else {
                 loadHistory(true);
             }
@@ -989,6 +1608,34 @@
         function renderTaskPanel(tasks) {
             if (_taskPanelTab === 'active') {
                 renderActiveTasks(tasks);
+            } else if (_taskPanelTab === 'failures') {
+                renderFailures();
+            }
+        }
+        function renderFailures() {
+            const body = document.getElementById('task-tab-content');
+            if (!body) return;
+            if (!_scheduleFailures.length) {
+                body.innerHTML = '<div class="empty-state compact"><i data-lucide="shield-check"></i><div class="es-title">暂无执行失败</div><div class="es-desc">定时任务执行失败时会记录在这里，并弹出提醒</div></div>';
+                if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(body);
+                return;
+            }
+            const rows = _scheduleFailures.slice().reverse().map(function (f) {
+                return '<div class="sched-failure">' +
+                    '<div class="sched-failure-head">' +
+                    '<b class="sched-failure-name">' + f.name + '</b>' +
+                    '<span class="sched-failure-time">' + (f.at || '') + '</span>' +
+                    '</div>' +
+                    '<div class="sched-failure-detail">' + (f.detail || '') + '</div>' +
+                    '</div>';
+            }).join('');
+            const head = '<div class="sched-failure-bar">' +
+                '<span>最近 ' + _scheduleFailures.length + ' 条</span>' +
+                '<a class="sched-failure-clear" onclick="clearScheduleFailures()">清空记录</a></div>';
+            const html = head + rows;
+            if (body.innerHTML !== html) {
+                body.innerHTML = html;
+                if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(body);
             }
         }
         function _taskCardHtml(t) {
@@ -1145,9 +1792,26 @@
             }, 2500);
             pollTasks();
         }
+        // 磁盘轮询独立计时：剩余空间变化很慢，2.5s 一次纯属浪费，改为 60s
+        if (!window._diskPollTimer) {
+            window._diskPollTimer = setInterval(() => {
+                if (document.hidden) return;
+                pollDisk();
+            }, 60000);
+            pollDisk();
+        }
+        // 定时任务失败轮询：与磁盘同频（60s）。失败是低频事件，且接口查的是 sync_history，
+        // 没必要跟着 2.5s 的任务轮询一起刷。
+        if (!window._scheduleFailurePollTimer) {
+            window._scheduleFailurePollTimer = setInterval(() => {
+                if (document.hidden) return;
+                pollScheduleFailures();
+            }, 60000);
+            pollScheduleFailures();
+        }
         // 页面恢复可见时立即轮询一次
         document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) pollTasks();
+            if (!document.hidden) { pollTasks(); pollScheduleFailures(); }
         });
     </script>
     <div id="page-scripts" style="display:none">{% block scripts %}{% endblock %}</div>

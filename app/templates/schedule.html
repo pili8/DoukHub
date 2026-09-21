@@ -1,0 +1,1341 @@
+{% extends "base.html" %}
+{% block title %}定时任务 - DoukHub{% endblock %}
+{% block content %}
+<style>
+/* ===== 定时任务：概览条 + 任务卡列表 ===== */
+/* 弹窗面板一律 L1 白底（.dh-modal-box 默认是米色降级面），并让表单控件继承文字色 */
+#schedule-modal .dh-modal-box,
+#schedule-history-modal .dh-modal-box {
+  background: var(--dh-surface);
+  display: flex;
+  flex-direction: column;
+  max-height: 88vh;
+}
+#schedule-modal .dh-modal-body input,
+#schedule-modal .dh-modal-body select { color: inherit; }
+.sched-scroll { flex:1 1 auto;overflow-y:auto;padding-right:2px; }
+
+.sched-metrics { display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px; }
+.sched-metric {
+  border:1px solid var(--dh-border);
+  border-radius:var(--dh-radius-sm);
+  background:var(--dh-surface);
+  padding:12px;
+}
+.sched-metric-value {
+  display:block;font-size:17px;font-weight:500;
+  color:var(--dh-text);font-variant-numeric:tabular-nums;
+}
+.sched-metric-value.accent { color:var(--dh-accent); }
+.sched-metric-label {
+  display:block;margin-top:2px;font-size:11px;color:var(--dh-text-secondary);white-space:nowrap;
+}
+
+.sched-list { display:flex;flex-direction:column;gap:12px; }
+
+.sched-card {
+  border:1px solid var(--dh-border);
+  border-radius:var(--dh-radius);
+  background:var(--dh-surface);
+  padding:16px 18px;
+  transition:border-color var(--transition-fast);
+}
+.sched-card:hover { border-color:var(--dh-border-strong); }
+/* 禁用态：整卡降噪（不改色相，只降透明度） */
+.sched-card.is-off { opacity:.68; }
+
+.sched-head { display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px; }
+.sched-title-wrap { min-width:0;display:flex;flex-direction:column;gap:6px; }
+.sched-title { display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;color:var(--dh-text); }
+.sched-title .sched-name { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.sched-tags { display:flex;align-items:center;flex-wrap:wrap;gap:6px; }
+.sched-tag {
+  display:inline-flex;align-items:center;gap:5px;
+  height:24px;padding:0 9px;border-radius:var(--radius-full);
+  background:var(--dh-surface-muted);color:var(--dh-text-secondary);
+  font-size:12px;white-space:nowrap;
+}
+.sched-tag svg[data-lucide], .sched-tag i { width:13px;height:13px;flex-shrink:0; }
+.sched-tag.plain { background:transparent;padding:0;color:var(--dh-text-secondary); }
+/* 「仅一次」标识：用 accent-soft 而不是语义色 —— 它是类型标识，不是状态告警 */
+.sched-tag.once { background:var(--dh-accent-soft);color:var(--dh-accent);font-weight:500; }
+
+/* 下次执行：这一行是本页最重要的信息，给它实心强调 */
+.sched-next {
+  display:inline-flex;align-items:center;gap:6px;
+  height:26px;padding:0 10px;border-radius:var(--radius-full);
+  background:var(--dh-accent-soft);color:var(--dh-accent);
+  font-size:12px;font-weight:600;white-space:nowrap;
+}
+.sched-next.off { background:var(--dh-surface-muted);color:var(--dh-text-secondary);font-weight:500; }
+.sched-next svg[data-lucide] { width:13px;height:13px;flex-shrink:0; }
+
+.sched-head-right { display:flex;align-items:center;gap:10px;flex-shrink:0; }
+
+/* 开关：20px 视觉、36px 实际触控热区 */
+.sched-switch { position:relative;display:inline-flex;align-items:center;justify-content:center;width:36px;height:30px;cursor:pointer; }
+.sched-switch input { position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer; }
+.sched-switch-track {
+  position:relative;width:34px;height:20px;border-radius:10px;
+  background:var(--dh-border-strong);transition:background .2s;
+}
+.sched-switch-track::after {
+  content:"";position:absolute;width:14px;height:14px;left:3px;top:3px;
+  border-radius:50%;background:#fff;transition:transform .2s;
+}
+.sched-switch input:checked + .sched-switch-track { background:var(--dh-success); }
+.sched-switch input:checked + .sched-switch-track::after { transform:translateX(14px); }
+.sched-switch input:focus-visible + .sched-switch-track { outline:2px solid var(--dh-accent);outline-offset:2px; }
+
+.sched-sentence {
+  font-size:13px;line-height:1.6;color:var(--dh-text-secondary);
+  padding:10px 12px;border-radius:var(--dh-radius-sm);
+  background:var(--dh-surface-muted);
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.sched-sentence svg[data-lucide] { width:14px;height:14px;color:var(--dh-text-muted);flex-shrink:0; }
+.sched-cron {
+  font-family:var(--dh-mono);
+  font-size:11px;color:var(--dh-text-muted);
+}
+
+.sched-foot {
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-top:12px;padding-top:12px;border-top:1px solid var(--dh-border);
+}
+.sched-last { display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dh-text-secondary);min-width:0; }
+.sched-last svg[data-lucide] { width:13px;height:13px;flex-shrink:0; }
+.sched-last .time { font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.sched-btns { display:flex;align-items:center;gap:6px;flex-shrink:0; }
+
+/* 状态徽章：统一走 .workflow-status 语义色，这里只增强图标对齐 */
+.sched-badge svg[data-lucide] { width:12px;height:12px;flex-shrink:0; }
+
+/* 弹窗表单：一行两列（时间 + 频率） */
+.sched-row { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
+.sched-days { display:flex;gap:6px;flex-wrap:wrap; }
+/* ⚠️ 必须带 `.form-group` 前缀（与 §18 的 `.sched-hint` 是同一类坑）：
+   这些「星期」按钮本身就是 <label>，而 style.css 里有 `.form-group label`（特异性 11）
+   ——比 `.sched-day`（特异性 10）高，会把 display 从 inline-flex 抢成 block，
+   于是 align-items:center 失效、字全部贴到按钮顶部；同时 font-size 被压成 12px、
+   font-weight 被抬成 600、还凭空多出 6px 下边距。
+   **给容器内后代写样式，特异性必须 ≥ 容器级规则。** */
+.sched-day,
+.form-group .sched-day {
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:36px;height:34px;margin-bottom:0;padding:0 10px;
+  border:1px solid var(--dh-border-strong);border-radius:var(--dh-radius-sm);
+  background:var(--dh-surface);color:var(--dh-text-secondary);
+  font-size:13px;font-weight:500;line-height:1;cursor:pointer;user-select:none;
+  transition:background var(--transition-fast),border-color var(--transition-fast),color var(--transition-fast);
+}
+.sched-day input { position:absolute;opacity:0;width:0;height:0; }
+.sched-day:has(input:checked) {
+  background:var(--dh-accent-soft);border-color:var(--dh-accent);
+  color:var(--dh-accent);font-weight:600;
+}
+.sched-day:hover { border-color:var(--dh-accent); }
+/* 表单提示文字：对比度必须达标。
+   ⚠️ 不能只写 `.sched-hint`(特异性 10) —— style.css 里有
+   `.form-group small, .field-hint { color: var(--md-outline) }`(特异性 21)，
+   而 --md-outline(#A39E96) 在浅色白底上只有 2.66:1，远低于 4.5:1 要求。
+   本页的提示统一用 <small class="sched-hint">，正好被那条规则点名命中。
+   加 `.form-group` 前缀把特异性提到 21 并靠后声明，才能稳定胜出。 */
+.sched-hint,
+.form-group .sched-hint,
+.form-group small.sched-hint {
+  font-size:12px;line-height:1.55;color:var(--dh-text-secondary);
+}
+
+/* 快捷模板：常用计划的快捷入口。
+   ⚠️ 高度必须与其他控件同为 34px；居中用 inline-flex 而不是 block+text-align
+   —— 后者靠 line-height 撑，行高算法不同会让文字在按钮里上下不居中。 */
+.sched-presets { display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px; }
+
+/* ===== 弹窗内控件高度基线：一律 34px（与 .btn 等高） =====
+   ⚠️ style.css 给 .form-group select 写的是 min-height:34px，而原生 <select>
+   和 <input type=time> 各有自己的内部高度，实测会被撑到 35 / 35.6px ——
+   与 34px 的输入框横排放一起就差一截。这里用 id 前缀把特异性拉满，钉死 height。 */
+#schedule-modal .dh-modal-box select,
+#schedule-modal .dh-modal-box input[type="time"],
+#schedule-modal .dh-modal-box input[type="date"],
+#schedule-modal .dh-modal-box input[type="datetime-local"] {
+  height:34px;min-height:34px;
+}
+.sched-quick {
+  display:inline-flex;align-items:center;justify-content:center;
+  height:34px;padding:0 12px;
+  border:1px dashed var(--dh-border-strong);border-radius:var(--radius-full);
+  background:transparent;color:var(--dh-text-secondary);
+  font-size:12px;font-family:inherit;line-height:1;cursor:pointer;
+  transition:border-color var(--transition-fast),color var(--transition-fast),background var(--transition-fast);
+}
+.sched-quick:hover {
+  border-style:solid;border-color:var(--dh-accent);
+  background:var(--dh-accent-soft);color:var(--dh-accent);
+}
+
+/* ===== 「每天多次」：方式选择 + 时间点 chip + 固定间隔 ===== */
+.sched-mode-row { display:flex;gap:8px;flex-wrap:wrap; }
+/* ⚠️ 同样必须带 `.form-group` 前缀 —— 理由同上面的 `.sched-day`：
+   它是 <label>，会被 `.form-group label` 抢走 display/font-size/font-weight/margin-bottom，
+   实测文字因此偏上 7px（应当为 0）。 */
+.sched-mode,
+.form-group .sched-mode {
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  height:34px;min-height:34px;margin-bottom:0;padding:0 12px;cursor:pointer;user-select:none;
+  border:1px solid var(--dh-border-strong);border-radius:var(--dh-radius-sm);
+  background:var(--dh-surface);color:var(--dh-text-secondary);
+  font-size:13px;font-weight:500;line-height:1;
+  transition:background var(--transition-fast),border-color var(--transition-fast),color var(--transition-fast);
+}
+.sched-mode input { position:absolute;opacity:0;width:0;height:0; }
+.sched-mode:has(input:checked) {
+  background:var(--dh-accent-soft);border-color:var(--dh-accent);
+  color:var(--dh-accent);font-weight:600;
+}
+.sched-mode:hover { border-color:var(--dh-accent); }
+.sched-mode:has(input:focus-visible) { outline:2px solid var(--dh-accent);outline-offset:2px; }
+
+/* 时间点列表：每行一个时间输入 + 删除，纵向排列（窄屏也一样，不做横向挤压） */
+.sched-times { display:flex;flex-direction:column;gap:8px; }
+.sched-time-row { display:flex;align-items:center;gap:8px; }
+.sched-time-row input[type="time"] { width:132px;flex:0 0 auto; }
+.sched-time-del {
+  display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;flex:0 0 auto;
+  border:1px solid var(--dh-border-strong);border-radius:var(--dh-radius-sm);
+  background:var(--dh-surface);color:var(--dh-text-secondary);
+  cursor:pointer;transition:border-color var(--transition-fast),color var(--transition-fast);
+}
+.sched-time-del:hover { border-color:var(--dh-danger);color:var(--dh-danger); }
+.sched-time-del svg[data-lucide] { width:14px;height:14px; }
+.sched-time-del:disabled { opacity:.4;cursor:not-allowed; }
+.sched-time-del:disabled:hover { border-color:var(--dh-border-strong);color:var(--dh-text-secondary); }
+
+.sched-add-time {
+  display:inline-flex;align-items:center;gap:6px;
+  min-height:34px;margin-top:8px;padding:0 12px;
+  border:1px dashed var(--dh-border-strong);border-radius:var(--dh-radius-sm);
+  background:transparent;color:var(--dh-text-secondary);
+  font-size:12px;font-family:inherit;cursor:pointer;
+  transition:border-color var(--transition-fast),color var(--transition-fast),background var(--transition-fast);
+}
+.sched-add-time:hover { border-style:solid;border-color:var(--dh-accent);background:var(--dh-accent-soft);color:var(--dh-accent); }
+.sched-add-time svg[data-lucide] { width:13px;height:13px; }
+.sched-add-time:disabled { opacity:.45;cursor:not-allowed; }
+.sched-add-time:disabled:hover { border-style:dashed;border-color:var(--dh-border-strong);background:transparent;color:var(--dh-text-secondary); }
+
+.sched-every-row { display:flex;align-items:center;gap:8px;flex-wrap:wrap; }
+.sched-every-label { font-size:13px;color:var(--dh-text-secondary);white-space:nowrap; }
+.sched-every-row select { width:auto;min-width:76px; }
+
+/* 间隔过短的温和提醒：用 warning 而非 danger —— 是提醒不是错误 */
+.sched-hint.is-warn, .form-group small.sched-hint.is-warn { color:var(--dh-warning);font-weight:500; }
+
+.sched-switch-row {
+  display:flex;align-items:flex-start;gap:10px;padding:12px;cursor:pointer;
+  border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);
+  background:var(--dh-surface);
+}
+.sched-switch-row input { margin-top:2px;flex-shrink:0; }
+.sched-switch-row .txt { display:flex;flex-direction:column;gap:2px;min-width:0; }
+.sched-switch-row .txt strong { font-size:13px;font-weight:500;color:var(--dh-text); }
+.sched-switch-row .txt span { font-size:12px;color:var(--dh-text-secondary);line-height:1.5; }
+
+/* 执行历史：批次行 */
+.sched-hist { display:flex;flex-direction:column;gap:8px; }
+.sched-hist-item {
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:11px 13px;border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);
+  background:var(--dh-surface);
+}
+.sched-hist-main { min-width:0;display:flex;flex-direction:column;gap:4px; }
+.sched-hist-time { font-size:13px;color:var(--dh-text);font-variant-numeric:tabular-nums; }
+.sched-hist-meta { display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--dh-text-secondary); }
+.sched-hist-nums { display:flex;align-items:center;gap:10px;flex-shrink:0;font-size:12px;color:var(--dh-text-secondary); }
+.sched-hist-nums b { font-weight:600;font-variant-numeric:tabular-nums; }
+.sched-hist-nums .ok b { color:var(--dh-success); }
+.sched-hist-nums .bad b { color:var(--dh-danger); }
+
+@media (max-width:768px) {
+  .sched-card { padding:14px; }
+  .sched-head { flex-direction:column;gap:10px; }
+  .sched-head-right { width:100%;justify-content:space-between; }
+  .sched-foot { flex-direction:column;align-items:stretch;gap:10px; }
+  .sched-btns { justify-content:flex-start;flex-wrap:wrap; }
+  .sched-btns .btn { flex:1;min-width:86px; }
+  .sched-row { grid-template-columns:1fr; }
+  .sched-metrics { grid-template-columns:repeat(2,1fr); }
+  /* 「每天多次」：触摸屏上的时间输入与删除按钮都要够大 */
+  .sched-time-row { gap:10px; }
+  /* ⚠️ 时间输入在桌面态被 height:34px 钉死（见上方基线规则），这里必须显式改 height，
+     只写 min-height:40px 抬不动 —— min-height 管不住已定死的 height。 */
+  .sched-time-row input[type="time"] { flex:1 1 auto;width:auto;min-width:0;height:40px;min-height:40px; }
+  .sched-time-del { width:40px;height:40px; }
+  /* ⚠️ 桌面态 `.sched-mode` 把 height 钉成 34px，这里必须显式改 height，
+     只写 min-height:40px 是抬不动的（min-height 管不住已定死的 height）。 */
+  /* ⚠️ 桌面态 `.sched-mode` 把 height 钉成 34px，这里必须显式改 height，
+     只写 min-height:40px 是抬不动的（min-height 管不住已定死的 height）。
+     ⚠️ 且必须补 `.form-group` 前缀：桌面那条已含前缀（特异性 20），
+     这里若还只写单类（特异性 10）会被反向压回 34px。 */
+  .sched-mode, .form-group .sched-mode { flex:1 1 auto;justify-content:center;height:40px;min-height:40px; }
+  .sched-add-time { width:100%;justify-content:center;min-height:40px; }
+  /* 同理：桌面 `.sched-day` 已提到特异性 20，这里也要带前缀才压得住 */
+  .sched-day, .form-group .sched-day { min-width:40px;height:36px; }
+  .sched-switch { width:44px;height:36px; }
+  .sched-switch-track { width:40px;height:23px;border-radius:12px; }
+  .sched-switch-track::after { width:17px;height:17px;left:3px;top:3px; }
+  .sched-switch input:checked + .sched-switch-track::after { transform:translateX(17px); }
+  /* 移动端触控目标：弹窗内的表单控件统一抬到 40px。
+     ⚠️ 两个坑叠在一起：
+     1. 必须同时写 height 和 min-height —— 桌面基线用 height 钉死 34px，min-height 抬不动。
+     2. 选择器必须**带上 input[type="time"] / select** 这类具体分支，
+        否则特异性低于桌面基线那条（它含 input[type="time"]，属性选择器更多），照样抬不动。 */
+  #schedule-modal .dh-modal-box input,
+  #schedule-modal .dh-modal-box select,
+  #schedule-modal .dh-modal-box input[type="time"],
+  #schedule-modal .dh-modal-box input[type="date"],
+  #schedule-modal .dh-modal-box input[type="datetime-local"] {
+    height:40px;min-height:40px;
+  }
+  .sched-hist-item { flex-direction:column;align-items:flex-start; }
+}
+</style>
+
+<div class="page-head">
+    <div>
+        <h1 class="page-title">定时任务</h1>
+        <div class="page-sub" id="sched-sub">按计划自动执行采集方案</div>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-primary" onclick="openTaskModal()"><i data-lucide="plus"></i> 新建定时任务</button>
+    </div>
+</div>
+
+<!-- 概览：任务总数 / 启用中 / 今日待执行 / 最近结果 -->
+<div class="workflow-panel" id="sched-overview" style="display:none;">
+    <div class="workflow-header">
+        <div class="workflow-title"><i data-lucide="calendar-check"></i><span>调度概览</span></div>
+    </div>
+    <div class="sched-metrics" id="sched-metrics"></div>
+</div>
+
+<div id="schedule-empty" class="empty-state" style="display:none;">
+    <i data-lucide="calendar-clock"></i>
+    <div class="es-title">还没有定时任务</div>
+    <div class="es-desc">定时任务会按你设定的时间自动执行采集方案，适合「每天凌晨巡检竞品」这类固定动作</div>
+    <div class="es-action"><button class="btn btn-primary" onclick="openTaskModal()"><i data-lucide="plus"></i> 创建第一个定时任务</button></div>
+</div>
+
+<div id="schedule-list" class="sched-list"></div>
+
+<!-- ===== 新建/编辑弹窗 ===== -->
+<div id="schedule-modal" class="dh-modal-overlay">
+    <div class="dh-modal-box" style="max-width:560px;">
+        <div class="dh-modal-header">
+            <h3 id="schedule-modal-title"><i data-lucide="calendar-plus"></i> <span>新建定时任务</span></h3>
+            <button class="dh-modal-close" onclick="closeTaskModal()"><i data-lucide="x"></i></button>
+        </div>
+        <div class="dh-modal-body sched-scroll" style="padding:16px 0 0;">
+            <input type="hidden" id="schedule-edit-id">
+            <div class="form-group" style="margin-bottom:16px;">
+                <label>任务名称</label>
+                <input type="text" id="schedule-name" placeholder="如：每日巡检-竞品" maxlength="50">
+            </div>
+            <div class="form-group" style="margin-bottom:16px;">
+                <label>采集方案</label>
+                <select id="schedule-preset">
+                    <option value="">请选择采集方案</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:10px;">
+                <label>执行频率</label>
+                <select id="schedule-freq" onchange="onFreqChange()">
+                    <option value="daily">每天</option>
+                    <option value="multi">每天多次</option>
+                    <option value="weekly">每周</option>
+                    <option value="monthly">每月</option>
+                    <option value="once">仅一次（指定日期时间）</option>
+                </select>
+            </div>
+            <!-- 快捷模板：把最常用的三种计划一键填好，省掉选频率/时间/星期 -->
+            <div class="sched-presets" id="schedule-quick">
+                <button type="button" class="sched-quick" onclick="applyQuick('daily-2')">每天凌晨 2 点</button>
+                <button type="button" class="sched-quick" onclick="applyQuick('weekly-mon')">每周一早上 8 点</button>
+                <button type="button" class="sched-quick" onclick="applyQuick('monthly-1')">每月 1 号凌晨 3 点</button>
+                <button type="button" class="sched-quick" onclick="applyQuick('multi-4')">每天 4 次（间隔 6 小时）</button>
+            </div>
+            <!-- ===== 每天多次 ===== -->
+            <div id="schedule-multi" style="display:none;">
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label>方式</label>
+                    <div class="sched-mode-row">
+                        <label class="sched-mode"><input type="radio" name="schedule-mmulti-mode" value="times" checked onchange="onMultiModeChange()"> 指定时间点</label>
+                        <label class="sched-mode"><input type="radio" name="schedule-mmulti-mode" value="every" onchange="onMultiModeChange()"> 固定间隔</label>
+                    </div>
+                </div>
+                <!-- ① 指定时间点 -->
+                <div id="schedule-multi-times" class="form-group" style="margin-bottom:16px;">
+                    <label>时间点</label>
+                    <div class="sched-times" id="schedule-times-list"></div>
+                    <button type="button" class="sched-add-time" id="schedule-add-time" onclick="addTimePoint()">
+                        <i data-lucide="plus"></i> 添加时间点
+                    </button>
+                    <small class="sched-hint">最多 12 个；相邻两次至少间隔 1 小时</small>
+                </div>
+                <!-- ② 固定间隔 -->
+                <div id="schedule-multi-every" class="form-group" style="margin-bottom:16px;display:none;">
+                    <label>间隔</label>
+                    <div class="sched-every-row">
+                        <span class="sched-every-label">每</span>
+                        <select id="schedule-every-hours" onchange="onEveryHoursChange()">
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="6" selected>6</option>
+                            <option value="8">8</option>
+                            <option value="12">12</option>
+                        </select>
+                        <span class="sched-every-label">小时执行一次</span>
+                    </div>
+                    <div class="sched-every-row" style="margin-top:10px;">
+                        <span class="sched-every-label">从</span>
+                        <input type="time" id="schedule-every-from" value="00:00" onchange="onEveryHoursChange()" style="width:112px;">
+                        <span class="sched-every-label">开始计时</span>
+                    </div>
+                    <small class="sched-hint" id="schedule-every-hint">0 点、6 点、12 点、18 点各执行一次</small>
+                </div>
+            </div>
+            <div id="schedule-once" class="form-group" style="margin-bottom:16px;display:none;">
+                <label>执行时间点</label>
+                <input type="datetime-local" id="schedule-once-at">
+                <small class="sched-hint">到点执行一次，之后自动停用，不会重复触发</small>
+            </div>
+            <div class="sched-row" style="margin-bottom:16px;" id="schedule-time-row">
+                <div class="form-group">
+                    <label>到点</label>
+                    <input type="time" id="schedule-time" value="02:00">
+                </div>
+                <div class="form-group">
+                    <label>&nbsp;</label>
+                    <div class="sched-hint" style="padding-top:9px;">按本地时区（Asia/Shanghai）</div>
+                </div>
+            </div>
+            <div id="schedule-weekly-days" class="form-group" style="margin-bottom:16px;display:none;">
+                <label>星期（可多选）</label>
+                <div class="sched-days">
+                    <label class="sched-day"><input type="checkbox" name="schedule-wday" value="1">一</label>
+                    <label class="sched-day"><input type="checkbox" name="schedule-wday" value="2">二</label>
+                    <label class="sched-day"><input type="checkbox" name="schedule-wday" value="3">三</label>
+                    <label class="sched-day"><input type="checkbox" name="schedule-wday" value="4">四</label>
+                    <label class="sched-day"><input type="checkbox" name="schedule-wday" value="5">五</label>
+                    <label class="sched-day"><input type="checkbox" name="schedule-wday" value="6">六</label>
+                    <label class="sched-day"><input type="checkbox" name="schedule-wday" value="0">日</label>
+                </div>
+            </div>
+            <div id="schedule-monthly-days" class="form-group" style="margin-bottom:16px;display:none;">
+                <label>每月几号</label>
+                <input type="text" id="schedule-mday" placeholder="如：1,15（多个用逗号分隔）">
+                <small class="sched-hint">填 1 表示每月 1 号；要固定月末请填 28（小月无 29~31 号，任务会跳过该月）</small>
+            </div>
+            <div class="form-group" style="margin-bottom:16px;">
+                <label>计划预览</label>
+                <div class="sched-sentence">
+                    <i data-lucide="info"></i>
+                    <span id="schedule-preview">每天 02:00 执行</span>
+                    <span class="sched-cron" id="schedule-preview-cron"></span>
+                </div>
+            </div>
+            <label class="sched-switch-row">
+                <input type="checkbox" id="schedule-sync-before">
+                <span class="txt">
+                    <strong>执行前先同步云端账号表</strong>
+                    <span>勾选后，每次触发前先从飞书同步最新账号列表，避免用旧名单采集</span>
+                </span>
+            </label>
+        </div>
+        <div class="dh-modal-actions">
+            <button class="btn btn-secondary" onclick="closeTaskModal()">取消</button>
+            <button class="btn btn-primary" onclick="saveTask()"><i data-lucide="check"></i> 保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== 执行历史弹窗 ===== -->
+<div id="schedule-history-modal" class="dh-modal-overlay">
+    <div class="dh-modal-box" style="max-width:640px;">
+        <div class="dh-modal-header">
+            <h3><i data-lucide="history"></i> <span id="history-title">执行历史</span></h3>
+            <button class="dh-modal-close" onclick="closeHistoryModal()"><i data-lucide="x"></i></button>
+        </div>
+        <div id="history-body" class="dh-modal-body sched-scroll" style="padding:16px 0 0;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var presets = [];
+var tasks = [];
+
+// ===== 初始化 =====
+async function initSchedulePage() {
+    await loadPresets();
+    await loadTasks();
+    // 触发中的任务需要刷新状态（last_run_status=running）
+    if (window._schedTimer) clearInterval(window._schedTimer);
+    window._schedTimer = setInterval(function() {
+        if (tasks.some(function(t) { return t.last_run_status === 'running'; })) loadTasks();
+    }, 5000);
+}
+
+async function loadPresets() {
+    try {
+        var data = await apiCall('/api/collection/presets', 'GET');
+        presets = data.presets || [];
+    } catch(e) {
+        showToast('加载采集方案失败: ' + e.message, 'error');
+    }
+}
+
+async function loadTasks() {
+    try {
+        var data = await apiCall('/api/schedules', 'GET');
+        tasks = data.tasks || [];
+        renderTasks();
+    } catch(e) {
+        showToast('加载定时任务失败: ' + e.message, 'error');
+    }
+}
+
+// ===== 时间工具 =====
+function fmtDatetime(s) {
+    if (!s) return '-';
+    return String(s).slice(0, 16);
+}
+
+// 相对时间：刚刚 / N 分钟前 / N 小时前 / N 天前
+function relTime(s) {
+    if (!s) return '';
+    var t = new Date(String(s).replace(' ', 'T'));
+    if (isNaN(t.getTime())) return '';
+    var diff = Math.floor((Date.now() - t.getTime()) / 1000);
+    if (diff < 0) return '';
+    if (diff < 60) return '刚刚';
+    if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+    if (diff < 86400 * 30) return Math.floor(diff / 86400) + ' 天前';
+    return '';
+}
+
+// 距下次执行还有多久
+function untilTime(s) {
+    if (!s) return '';
+    var t = new Date(String(s).replace(' ', 'T'));
+    if (isNaN(t.getTime())) return '';
+    var diff = Math.floor((t.getTime() - Date.now()) / 1000);
+    if (diff <= 0) return '即将执行';
+    if (diff < 60) return diff + ' 秒后';
+    if (diff < 3600) return Math.floor(diff / 60) + ' 分钟后';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' 小时后';
+    return Math.floor(diff / 86400) + ' 天后';
+}
+
+var STATUS_META = {
+    success:      { cls: 'success',  label: '成功',    icon: 'check-circle-2' },
+    failed:       { cls: 'failed',   label: '失败',    icon: 'x-circle' },
+    running:      { cls: 'running',  label: '执行中',  icon: 'loader' },
+    interrupted:  { cls: 'warning',  label: '中断',    icon: 'alert-triangle' },
+    skipped_busy: { cls: 'warning',  label: '已跳过',  icon: 'skip-forward' },
+    '':           { cls: 'pending',  label: '未执行',  icon: 'minus-circle' },
+};
+// 被跳过的补充说明（徽章放不下，放 title）
+var STATUS_HINT = {
+    skipped_busy: '上一次采集还没结束，本次按计划跳过，避免任务堆叠',
+};
+
+// ===== 渲染 =====
+function renderTasks() {
+    var list = document.getElementById('schedule-list');
+    var empty = document.getElementById('schedule-empty');
+    var overview = document.getElementById('sched-overview');
+
+    if (!tasks.length) {
+        list.innerHTML = '';
+        empty.style.display = '';
+        overview.style.display = 'none';
+        document.getElementById('sched-sub').textContent = '按计划自动执行采集方案';
+        if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+        return;
+    }
+    empty.style.display = 'none';
+    overview.style.display = '';
+    renderOverview();
+
+    list.innerHTML = tasks.map(function(t) {
+        // ⚠️ 必须转字符串比对：老库 preset_id 是 TEXT 列，读回来是字符串 "1"，
+        //    而方案 id 是数字 1 —— 用 === 会判假，把好好的任务误报成「方案已删除」。
+        var preset = presets.find(function(p) { return String(p.id) === String(t.preset_id); });
+        var presetName = preset
+            ? escapeHtml(preset.name)
+            : '<span style="color:var(--dh-danger);">方案已删除</span>';
+        var enabled = !!t.enabled;
+        var meta = STATUS_META[t.last_run_status || ''] || STATUS_META[''];
+        var metaHint = STATUS_HINT[t.last_run_status] || '';
+        var cronDesc = cronToChinese(t.cron_expression);
+
+        // 下次执行：启用且有排期才展示；禁用时给出恢复提示
+        var nextHtml;
+        if (!enabled) {
+            nextHtml = '<span class="sched-next off"><i data-lucide="pause-circle"></i> 已暂停，不再触发</span>';
+        } else if (t.next_run_at) {
+            nextHtml = '<span class="sched-next"><i data-lucide="alarm-clock"></i> 下次 ' + fmtDatetime(t.next_run_at) +
+                '<span style="font-weight:500;opacity:.85;"> · ' + untilTime(t.next_run_at) + '</span></span>';
+        } else {
+            nextHtml = '<span class="sched-next off"><i data-lucide="help-circle"></i> 等待调度器排期</span>';
+        }
+
+        var lastRel = relTime(t.last_run_at);
+        var lastHtml = '<span class="time">' + (t.last_run_at ? fmtDatetime(t.last_run_at) : '从未执行') +
+            (lastRel ? '（' + lastRel + '）' : '') + '</span>';
+
+        var syncTag = t.sync_before
+            ? '<span class="sched-tag"><i data-lucide="cloud-download"></i> 执行前同步</span>'
+            : '';
+        // 一次性任务要能一眼认出来：它跑完会自动停用，不然用户会以为"任务坏了"
+        var isOnce = (t.cron_expression || '').indexOf(ONCE_PREFIX) === 0;
+        var onceTag = isOnce
+            ? '<span class="sched-tag once"><i data-lucide="zap"></i> 仅一次</span>'
+            : '';
+
+        return '<div class="sched-card' + (enabled ? '' : ' is-off') + '">' +
+            '<div class="sched-head">' +
+                '<div class="sched-title-wrap">' +
+                    '<div class="sched-title"><span class="sched-name">' + escapeHtml(t.name) + '</span></div>' +
+                    '<div class="sched-tags">' +
+                        '<span class="sched-tag"><i data-lucide="layers"></i> ' + presetName + '</span>' +
+                        onceTag +
+                        syncTag +
+                        nextHtml +
+                    '</div>' +
+                '</div>' +
+                '<div class="sched-head-right">' +
+                    '<span class="workflow-status sched-badge ' + meta.cls + '"' +
+                        (metaHint ? ' title="' + escapeHtml(metaHint) + '"' : '') + '>' +
+                        '<i data-lucide="' + meta.icon + '"></i> ' + meta.label +
+                    '</span>' +
+                    '<label class="sched-switch" title="' + (enabled ? '点击暂停' : '点击启用') + '">' +
+                        '<input type="checkbox" ' + (enabled ? 'checked' : '') +
+                            ' onchange="toggleTask(' + t.id + ', this.checked)">' +
+                        '<span class="sched-switch-track"></span>' +
+                    '</label>' +
+                '</div>' +
+            '</div>' +
+            '<div class="sched-sentence">' +
+                '<i data-lucide="repeat"></i>' +
+                '<span>' + cronDesc + '</span>' +
+                '<span class="sched-cron">cron: ' + escapeHtml(t.cron_expression) + '</span>' +
+            '</div>' +
+            '<div class="sched-foot">' +
+                '<span class="sched-last">' +
+                    '<i data-lucide="history"></i> 上次执行 ' + lastHtml +
+                '</span>' +
+                '<div class="sched-btns">' +
+                    '<button class="btn btn-secondary btn-sm" onclick="runTaskNow(' + t.id + ')">' +
+                        '<i data-lucide="play"></i> 立即执行</button>' +
+                    '<button class="btn btn-secondary btn-sm" onclick="editTask(' + t.id + ')">' +
+                        '<i data-lucide="pencil"></i> 编辑</button>' +
+                    '<button class="btn btn-secondary btn-sm" onclick="showHistory(' + t.id + ')">' +
+                        '<i data-lucide="list"></i> 历史</button>' +
+                    '<button class="btn btn-secondary btn-sm" onclick="deleteTask(' + t.id + ')">' +
+                        '<i data-lucide="trash-2"></i> 删除</button>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+}
+
+function renderOverview() {
+    var enabled = tasks.filter(function(t) { return t.enabled; });
+    var todayKey = new Date().toISOString().slice(0, 10);
+    var dueToday = enabled.filter(function(t) {
+        return t.next_run_at && String(t.next_run_at).slice(0, 10) === todayKey;
+    }).length;
+    // 最近一次执行结果（按 last_run_at 排序取最新）
+    var ran = tasks.filter(function(t) { return t.last_run_at; })
+        .sort(function(a, b) { return String(b.last_run_at).localeCompare(String(a.last_run_at)); });
+    var lastStatus = ran.length ? (STATUS_META[ran[0].last_run_status || ''] || STATUS_META['']) : null;
+
+    document.getElementById('sched-sub').textContent =
+        '共 ' + tasks.length + ' 个任务 · ' + enabled.length + ' 个启用中 · 今日待执行 ' + dueToday + ' 个';
+
+    document.getElementById('sched-metrics').innerHTML =
+        metric(tasks.length, '任务总数', true) +
+        metric(enabled.length, '启用中') +
+        metric(dueToday, '今日待执行') +
+        '<div class="sched-metric">' +
+            '<span class="sched-metric-value">' +
+                (lastStatus ? lastStatus.label : '—') +
+            '</span>' +
+            '<span class="sched-metric-label">最近执行结果' +
+                (ran.length ? '（' + fmtDatetime(ran[0].last_run_at) + '）' : '') +
+            '</span>' +
+        '</div>';
+}
+
+function metric(value, label, accent) {
+    return '<div class="sched-metric">' +
+        '<span class="sched-metric-value' + (accent ? ' accent' : '') + '">' + value + '</span>' +
+        '<span class="sched-metric-label">' + label + '</span>' +
+    '</div>';
+}
+
+// ===== cron 工具 =====
+var WEEK_CN = {'0':'日','1':'一','2':'二','3':'三','4':'四','5':'五','6':'六'};
+var ONCE_PREFIX = '@once:';
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+// ===== 「每天多次」时间点管理 =====
+var MAX_TIME_POINTS = 12;
+var MIN_INTERVAL_MINUTES = 60;   // 与后端 SCHEDULE_MIN_INTERVAL_MINUTES 一致
+var WARN_INTERVAL_MINUTES = 120; // 小于这个值只提醒不拦
+
+// 读时间输入框的 "HH:MM" → 当天分钟偏移；非法返回 null
+function timeToMinutes(v) {
+    if (!v || v.indexOf(':') === -1) return null;
+    var p = v.split(':');
+    var h = parseInt(p[0], 10), m = parseInt(p[1], 10);
+    if (isNaN(h) || isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) return null;
+    return h * 60 + m;
+}
+
+function minutesToTime(mins) {
+    mins = ((mins % 1440) + 1440) % 1440;
+    return pad2(Math.floor(mins / 60)) + ':' + pad2(mins % 60);
+}
+
+// 收集当前所有时间点的分钟偏移（跳过空的），返回 {val, mins, idx} 列表
+function collectTimePoints() {
+    var out = [];
+    document.querySelectorAll('#schedule-times-list input[type="time"]').forEach(function(inp, idx) {
+        var mins = timeToMinutes(inp.value);
+        if (mins !== null) out.push({ val: inp.value, mins: mins, idx: idx });
+    });
+    return out;
+}
+
+// 把小时列表收成紧凑写法：连续 3 个以上用 a-b，其余逗号列举
+function compressHours(hours) {
+    hours = hours.slice().sort(function(a, b) { return a - b; });
+    // 覆盖全部 24 小时 → 用 `*`，别写成 `0-23`（等价但不易读）
+    if (hours.length >= 24) return '*';
+    var runs = [];
+    for (var i = 0; i < hours.length; i++) {
+        if (runs.length && hours[i] === runs[runs.length - 1][runs[runs.length - 1].length - 1] + 1) {
+            runs[runs.length - 1].push(hours[i]);
+        } else {
+            runs.push([hours[i]]);
+        }
+    }
+    return runs.map(function(r) {
+        if (r.length >= 3) return r[0] + '-' + r[r.length - 1];
+        return r.join(',');
+    }).join(',');
+}
+
+function addTimePoint(value) {
+    var list = document.getElementById('schedule-times-list');
+    if (list.children.length >= MAX_TIME_POINTS) {
+        showToast('最多只能添加 ' + MAX_TIME_POINTS + ' 个时间点', 'error');
+        return;
+    }
+    // 默认给一个"上一个时间点 + 6 小时"，避免新行空着导致无法保存
+    if (!value) {
+        var cur = collectTimePoints();
+        var base = cur.length ? cur[cur.length - 1].mins : 120;
+        value = minutesToTime(base + 360);
+    }
+    var row = document.createElement('div');
+    row.className = 'sched-time-row';
+    row.innerHTML =
+        '<input type="time" value="' + value + '" onchange="onTimePointsChange()" oninput="onTimePointsChange()">' +
+        '<button type="button" class="sched-time-del" title="删除这个时间点" onclick="removeTimePoint(this)">' +
+        '<i data-lucide="x"></i></button>';
+    list.appendChild(row);
+    syncTimeRowButtons();
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    updatePreview();
+}
+
+function removeTimePoint(btn) {
+    var list = document.getElementById('schedule-times-list');
+    if (list.children.length <= 1) return;  // 至少留一个
+    btn.closest('.sched-time-row').remove();
+    syncTimeRowButtons();
+    updatePreview();
+}
+
+// 只剩一行时禁用删除按钮（避免删空后表单无输入框可填）
+function syncTimeRowButtons() {
+    var list = document.getElementById('schedule-times-list');
+    var onlyOne = list.children.length <= 1;
+    list.querySelectorAll('.sched-time-del').forEach(function(b) { b.disabled = onlyOne; });
+    var addBtn = document.getElementById('schedule-add-time');
+    if (addBtn) addBtn.disabled = list.children.length >= MAX_TIME_POINTS;
+}
+
+function renderTimePoints(values) {
+    var list = document.getElementById('schedule-times-list');
+    list.innerHTML = '';
+    (values && values.length ? values : ['02:00']).forEach(function(v) {
+        var row = document.createElement('div');
+        row.className = 'sched-time-row';
+        row.innerHTML =
+            '<input type="time" value="' + v + '" onchange="onTimePointsChange()" oninput="onTimePointsChange()">' +
+            '<button type="button" class="sched-time-del" title="删除这个时间点" onclick="removeTimePoint(this)">' +
+            '<i data-lucide="x"></i></button>';
+        list.appendChild(row);
+    });
+    syncTimeRowButtons();
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+}
+
+function onTimePointsChange() {
+    updatePreview();
+}
+
+function getMultiMode() {
+    var el = document.querySelector('input[name="schedule-mmulti-mode"]:checked');
+    return el ? el.value : 'times';
+}
+
+function setMultiMode(mode) {
+    document.querySelectorAll('input[name="schedule-mmulti-mode"]').forEach(function(r) {
+        r.checked = r.value === mode;
+    });
+    onMultiModeChange();
+}
+
+function onMultiModeChange() {
+    var mode = getMultiMode();
+    document.getElementById('schedule-multi-times').style.display = mode === 'times' ? '' : 'none';
+    document.getElementById('schedule-multi-every').style.display = mode === 'every' ? '' : 'none';
+    if (mode === 'every') onEveryHoursChange();
+    updatePreview();
+}
+
+// 固定间隔 → 实际时间点列表（按"从 X 点开始"平移，避免起点永远是 0 点）
+function everyModeToTimes() {
+    var step = parseInt(document.getElementById('schedule-every-hours').value, 10) || 6;
+    var from = timeToMinutes(document.getElementById('schedule-every-from').value);
+    if (from === null) from = 0;
+    var hours = [];
+    for (var h = 0; h < 24; h += step) hours.push(h);
+    var baseMinute = from % 60;
+    var baseHour = Math.floor(from / 60);
+    // 以"从 X 点"为起点，把整点序列平移到最近的起点上
+    var shifted = hours.map(function(h) { return (h + baseHour) % 24; });
+    return { step: step, baseMinute: baseMinute, hours: shifted, fromMin: from };
+}
+
+function onEveryHoursChange() {
+    var info = everyModeToTimes();
+    var times = info.hours.slice().sort(function(a, b) { return a - b; })
+        .map(function(h) { return minutesToTime(h * 60 + info.baseMinute); });
+    var hint = document.getElementById('schedule-every-hint');
+    hint.textContent = times.map(function(t) { return t.replace(/^0(\d)/, '$1'); }).join('、') + ' 各执行一次';
+    var gap = info.step * 60;
+    if (gap < WARN_INTERVAL_MINUTES) {
+        hint.classList.add('is-warn');
+        hint.textContent += '（间隔较短，可能触发平台风控）';
+    } else {
+        hint.classList.remove('is-warn');
+    }
+    updatePreview();
+}
+
+function buildCronExpression() {
+    var freq = document.getElementById('schedule-freq').value;
+    // 一次性：直接把 datetime-local 的值（2026-09-25T20:00）写成 @once: 表达式
+    if (freq === 'once') {
+        var v = document.getElementById('schedule-once-at').value;
+        if (!v) return '';
+        return ONCE_PREFIX + v.replace('T', ' ');
+    }
+    // 每天多次：分两种方式，最终都落到"分 时 * * *"
+    if (freq === 'multi') {
+        if (getMultiMode() === 'every') {
+            var info = everyModeToTimes();
+            return info.baseMinute + ' ' + compressHours(info.hours) + ' * * *';
+        }
+        var pts = collectTimePoints();
+        if (!pts.length) return '';
+        var minutes = {}, hours = [];
+        pts.forEach(function(p) {
+            minutes[p.mins % 60] = true;
+            if (hours.indexOf(Math.floor(p.mins / 60)) === -1) hours.push(Math.floor(p.mins / 60));
+        });
+        return Object.keys(minutes).map(Number).sort(function(a, b) { return a - b; }).join(',') +
+            ' ' + compressHours(hours) + ' * * *';
+    }
+    var time = document.getElementById('schedule-time').value || '02:00';
+    var parts = time.split(':');
+    var hour = parseInt(parts[0]);
+    var minute = parseInt(parts[1]);
+    if (isNaN(hour)) hour = 0;
+    if (isNaN(minute)) minute = 0;
+    if (freq === 'daily') {
+        return minute + ' ' + hour + ' * * *';
+    } else if (freq === 'weekly') {
+        var days = Array.from(document.querySelectorAll('input[name="schedule-wday"]:checked'))
+            .map(function(cb) { return cb.value; })
+            .sort(function(a, b) { return Number(a) - Number(b); });
+        if (!days.length) days = ['1'];
+        return minute + ' ' + hour + ' * * ' + days.join(',');
+    } else if (freq === 'monthly') {
+        var mday = (document.getElementById('schedule-mday').value || '').trim() || '1';
+        return minute + ' ' + hour + ' ' + mday + ' * *';
+    }
+    return '';
+}
+
+function cronToChinese(cron) {
+    if (!cron) return '未设置';
+    // 一次性：@once:YYYY-MM-DD HH:MM
+    if (cron.indexOf(ONCE_PREFIX) === 0) {
+        var raw = cron.slice(ONCE_PREFIX.length);
+        var d = new Date(raw.replace(' ', 'T'));
+        if (isNaN(d.getTime())) return '仅执行一次';
+        return '仅执行一次：' + d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+            ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    }
+    var parts = cron.split(/\s+/);
+    if (parts.length !== 5) return cron;
+    var minute = parts[0], hour = parts[1], dom = parts[2], dow = parts[4];
+    var timeStr = pad2(hour) + ':' + pad2(minute);
+    if (dom === '*' && dow === '*') {
+        // 一天内触发多次（时或分是列表/范围/步长）→ 说清"几次"，别只说"每天"
+        var multi = /[,*\/-]/.test(hour) || /[,*\/-]/.test(minute);
+        if (multi) {
+            var times = describeDailyTimes(hour, minute);
+            if (times) {
+                return '每天 ' + times.length + ' 次：' + times.join('、');
+            }
+            return '每天多次执行';
+        }
+        return '每天 ' + timeStr + ' 执行';
+    }
+    if (dom === '*' && dow !== '*') {
+        var days = dow.split(',').map(function(d) { return WEEK_CN[d] || d; });
+        return '每周' + days.join('、') + ' ' + timeStr + ' 执行';
+    }
+    if (dom !== '*' && dow === '*') return '每月 ' + dom + ' 号 ' + timeStr + ' 执行';
+    return cron;
+}
+
+// 把 cron 的「分」「时」字段展开成具体的 "HH:MM" 列表（仅支持常见写法，失败返回 null）
+function describeDailyTimes(hourF, minuteF) {
+    function expand(field, low, high) {
+        var vals = [];
+        var ok = true;
+        field.split(',').forEach(function(seg) {
+            var step = 1, range = seg;
+            if (seg.indexOf('/') !== -1) {
+                var sp = seg.split('/');
+                range = sp[0];
+                step = parseInt(sp[1], 10);
+                if (isNaN(step) || step < 1) { ok = false; return; }
+            }
+            var lo = low, hi = high;
+            if (range !== '*') {
+                if (range.indexOf('-') !== -1) {
+                    var rp = range.split('-');
+                    lo = parseInt(rp[0], 10); hi = parseInt(rp[1], 10);
+                } else {
+                    lo = hi = parseInt(range, 10);
+                }
+                if (isNaN(lo) || isNaN(hi)) { ok = false; return; }
+            }
+            if (lo < low || hi > high || lo > hi) { ok = false; return; }
+            for (var v = lo; v <= hi; v += step) vals.push(v);
+        });
+        if (!ok) return null;
+        vals = vals.filter(function(v, i) { return vals.indexOf(v) === i; });
+        return vals.sort(function(a, b) { return a - b; });
+    }
+    var hours = expand(hourF, 0, 23);
+    var minutes = expand(minuteF, 0, 59);
+    if (!hours || !minutes) return null;
+    var out = [];
+    hours.forEach(function(h) {
+        minutes.forEach(function(m) { out.push(pad2(h) + ':' + pad2(m)); });
+    });
+    out.sort();
+    if (out.length > 10) return null;   // 太多就不列举了，用兜底文案
+    return out;
+}
+
+function onFreqChange() {
+    var freq = document.getElementById('schedule-freq').value;
+    var isOnce = freq === 'once';
+    var isMulti = freq === 'multi';
+    document.getElementById('schedule-weekly-days').style.display = freq === 'weekly' ? '' : 'none';
+    document.getElementById('schedule-monthly-days').style.display = freq === 'monthly' ? '' : 'none';
+    document.getElementById('schedule-once').style.display = isOnce ? '' : 'none';
+    document.getElementById('schedule-multi').style.display = isMulti ? '' : 'none';
+    // 「每天多次」自带时间输入，隐藏单时间的"到点"行（避免两处时间打架）
+    document.getElementById('schedule-time-row').style.display = (isOnce || isMulti) ? 'none' : '';
+    // 一次性任务下"快捷模板"没有意义；每天多次的模板在下方已有对应入口
+    document.getElementById('schedule-quick').style.display = isOnce ? 'none' : '';
+    if (isOnce) {
+        // 默认给一个"明天此刻"，避免空着
+        var input = document.getElementById('schedule-once-at');
+        if (!input.value) input.value = toLocalInputValue(new Date(Date.now() + 86400000));
+    }
+    if (isMulti) {
+        if (!document.getElementById('schedule-times-list').children.length) {
+            renderTimePoints(['02:00', '08:00', '14:00', '20:00']);
+        }
+        onMultiModeChange();
+    }
+    updatePreview();
+}
+
+// Date → datetime-local 需要的 "YYYY-MM-DDTHH:MM"
+function toLocalInputValue(d) {
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+        'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+
+// 快捷模板
+var QUICK_TEMPLATES = {
+    'daily-2':    function() { setFreq('daily'); setTime('02:00'); },
+    'weekly-mon': function() { setFreq('weekly'); setTime('08:00'); setWeekdays(['1']); },
+    'monthly-1':  function() { setFreq('monthly'); setTime('03:00'); setMonthDays('1'); },
+    'multi-4':    function() {
+        setFreq('multi');
+        setMultiMode('every');
+        document.getElementById('schedule-every-hours').value = '6';
+        document.getElementById('schedule-every-from').value = '00:00';
+        onEveryHoursChange();
+    },
+};
+
+function setFreq(v) {
+    document.getElementById('schedule-freq').value = v;
+    onFreqChange();
+}
+function setTime(v) { document.getElementById('schedule-time').value = v; }
+function setWeekdays(list) {
+    document.querySelectorAll('input[name="schedule-wday"]').forEach(function(cb) {
+        cb.checked = list.indexOf(cb.value) !== -1;
+    });
+}
+function setMonthDays(v) { document.getElementById('schedule-mday').value = v; }
+
+function applyQuick(key) {
+    var fn = QUICK_TEMPLATES[key];
+    if (!fn) return;
+    fn();
+    updatePreview();
+}
+
+function updatePreview() {
+    var cron = buildCronExpression();
+    document.getElementById('schedule-preview').textContent = cronToChinese(cron);
+    document.getElementById('schedule-preview-cron').textContent = cron ? 'cron: ' + cron : '';
+}
+
+// 解析 cron 回填到表单
+function parseCronToForm(cron) {
+    cron = cron || '';
+    // 一次性
+    if (cron.indexOf(ONCE_PREFIX) === 0) {
+        document.getElementById('schedule-freq').value = 'once';
+        document.getElementById('schedule-once-at').value =
+            cron.slice(ONCE_PREFIX.length).replace(' ', 'T').slice(0, 16);
+        onFreqChange();
+        return;
+    }
+    var parts = cron.split(/\s+/);
+    if (parts.length !== 5) return;
+    var minute = parts[0], hour = parts[1], dom = parts[2], dow = parts[4];
+    // 每天多次：时或分带列表/范围/步长 → 回填为 multi，并还原具体时间点
+    var isMultiDaily = (dom === '*' && dow === '*') &&
+        (/[,*\/-]/.test(hour) || /[,*\/-]/.test(minute));
+    if (isMultiDaily) {
+        var pts = describeDailyTimes(hour, minute);
+        document.getElementById('schedule-freq').value = 'multi';
+        setMultiMode('times');
+        renderTimePoints(pts && pts.length ? pts : ['02:00']);
+        onFreqChange();
+        return;
+    }
+    document.getElementById('schedule-time').value =
+        String(hour).padStart(2,'0') + ':' + String(minute).padStart(2,'0');
+    if (dom === '*' && dow === '*') {
+        document.getElementById('schedule-freq').value = 'daily';
+    } else if (dom === '*' && dow !== '*') {
+        document.getElementById('schedule-freq').value = 'weekly';
+        dow.split(',').forEach(function(d) {
+            var cb = document.querySelector('input[name="schedule-wday"][value="' + d + '"]');
+            if (cb) cb.checked = true;
+        });
+    } else if (dom !== '*') {
+        document.getElementById('schedule-freq').value = 'monthly';
+        document.getElementById('schedule-mday').value = dom;
+    }
+    onFreqChange();
+}
+
+// ===== 新建/编辑 =====
+// HTML 转义：方案名来自用户输入，拼进 innerHTML 前必须转义。
+// ⚠️ 这个名字在本模板里一度被当成"全局已存在"直接用（fillPresetOptions），
+//    实际上它只定义在 collect.html / settings.html / sync/import.html 各自的作用域里，
+//    本页没有 → 一点「新建定时任务」就 ReferenceError，弹窗打不开。这里补上定义。
+function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function fillPresetOptions(selectedId) {
+    var sel = document.getElementById('schedule-preset');
+    if (!presets.length) {
+        sel.innerHTML = '<option value="">暂无可用方案，请先到「增量采集」创建</option>';
+        return;
+    }
+    sel.innerHTML = presets.map(function(p) {
+        // 同列表查找：转字符串比对，否则编辑任务时下拉永远回填成第一个方案，
+        // 用户打开编辑框直接保存就会把任务的采集方案静默换掉。
+        return '<option value="' + p.id + '"' + (String(p.id) === String(selectedId) ? ' selected' : '') + '>' +
+            escapeHtml(p.name) + '</option>';
+    }).join('');
+}
+
+function openTaskModal() {
+    document.getElementById('schedule-edit-id').value = '';
+    document.getElementById('schedule-name').value = '';
+    document.getElementById('schedule-sync-before').checked = false;
+    fillPresetOptions(presets.length ? presets[0].id : null);
+    document.getElementById('schedule-freq').value = 'daily';
+    document.getElementById('schedule-time').value = '02:00';
+    document.querySelectorAll('input[name="schedule-wday"]').forEach(function(cb) { cb.checked = false; });
+    document.getElementById('schedule-mday').value = '';
+    document.getElementById('schedule-once-at').value = '';
+    // 「每天多次」重置为默认的四时段写法
+    setMultiMode('times');
+    renderTimePoints(['02:00', '08:00', '14:00', '20:00']);
+    document.getElementById('schedule-every-hours').value = '6';
+    document.getElementById('schedule-every-from').value = '00:00';
+    onFreqChange();
+    document.getElementById('schedule-modal-title').innerHTML =
+        '<i data-lucide="calendar-plus"></i> <span>新建定时任务</span>';
+    document.getElementById('schedule-modal').classList.add('dh-show');
+    document.body.style.overflow = 'hidden';
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+}
+
+function editTask(taskId) {
+    var t = tasks.find(function(x) { return x.id === taskId; });
+    if (!t) return;
+    document.getElementById('schedule-edit-id').value = t.id;
+    document.getElementById('schedule-name').value = t.name;
+    document.getElementById('schedule-sync-before').checked = !!t.sync_before;
+    fillPresetOptions(t.preset_id);
+    document.querySelectorAll('input[name="schedule-wday"]').forEach(function(cb) { cb.checked = false; });
+    document.getElementById('schedule-mday').value = '';
+    parseCronToForm(t.cron_expression);
+    document.getElementById('schedule-modal-title').innerHTML =
+        '<i data-lucide="pencil"></i> <span>编辑定时任务</span>';
+    document.getElementById('schedule-modal').classList.add('dh-show');
+    document.body.style.overflow = 'hidden';
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+}
+
+function closeTaskModal() {
+    document.getElementById('schedule-modal').classList.remove('dh-show');
+    document.body.style.overflow = '';
+}
+
+async function saveTask() {
+    var editId = document.getElementById('schedule-edit-id').value;
+    var name = document.getElementById('schedule-name').value.trim();
+    var presetId = parseInt(document.getElementById('schedule-preset').value);
+    var syncBefore = document.getElementById('schedule-sync-before').checked;
+    var cron = buildCronExpression();
+    if (!name) { showToast('请输入任务名称', 'error'); return; }
+    if (!presetId) { showToast('请选择采集方案', 'error'); return; }
+    if (!cron) { showToast('请设置执行时间', 'error'); return; }
+    var freq = document.getElementById('schedule-freq').value;
+    if (freq === 'once') {
+        var at = document.getElementById('schedule-once-at').value;
+        if (!at) { showToast('请选择一次性执行的时间点', 'error'); return; }
+        if (new Date(at).getTime() <= Date.now()) {
+            showToast('一次性执行的时间必须晚于当前时间', 'error'); return;
+        }
+    }
+    if (freq === 'monthly') {
+        var mday = document.getElementById('schedule-mday').value.trim();
+        if (!/^\d{1,2}(,\d{1,2})*$/.test(mday)) {
+            showToast('「每月几号」请填 1~31 的数字，多个用逗号分隔', 'error'); return;
+        }
+        var bad = mday.split(',').some(function(d) { var n = parseInt(d); return n < 1 || n > 31; });
+        if (bad) { showToast('日期需在 1~31 之间', 'error'); return; }
+    }
+    if (freq === 'multi') {
+        if (getMultiMode() === 'times') {
+            var pts = collectTimePoints();
+            if (!pts.length) { showToast('请至少填一个执行时间点', 'error'); return; }
+            var uniq = {};
+            pts.forEach(function(p) { uniq[p.mins] = true; });
+            if (Object.keys(uniq).length < pts.length) {
+                showToast('有重复的时间点，请调整后再保存', 'error'); return;
+            }
+            // 按时间排序后取相邻最小间隔（含跨零点）
+            var sorted = pts.map(function(p) { return p.mins; }).sort(function(a, b) { return a - b; });
+            var minGap = Infinity;
+            for (var i = 1; i < sorted.length; i++) minGap = Math.min(minGap, sorted[i] - sorted[i - 1]);
+            if (sorted.length > 1) {
+                minGap = Math.min(minGap, 1440 - sorted[sorted.length - 1] + sorted[0]);
+            }
+            // 硬拦 1 小时：与后端 SCHEDULE_MIN_INTERVAL_MINUTES 一致
+            if (sorted.length > 1 && minGap < MIN_INTERVAL_MINUTES) {
+                showToast('相邻时间点至少间隔 ' + MIN_INTERVAL_MINUTES + ' 分钟（当前最短 ' +
+                    minGap + ' 分钟），过于频繁会触发平台风控', 'error');
+                return;
+            }
+        }
+    }
+    var payload = {
+        name: name,
+        preset_id: presetId,
+        cron_expression: cron,
+        sync_before: syncBefore,
+    };
+    try {
+        if (editId) {
+            await apiCall('/api/schedules/' + editId, 'PUT', payload);
+            showToast('定时任务已更新');
+        } else {
+            await apiCall('/api/schedules', 'POST', payload);
+            showToast('定时任务已创建');
+        }
+        closeTaskModal();
+        await loadTasks();
+    } catch(e) {
+        showToast('保存失败: ' + e.message, 'error');
+    }
+}
+
+async function toggleTask(taskId, enabled) {
+    try {
+        await apiCall('/api/schedules/' + taskId, 'PUT', { enabled: enabled });
+        showToast(enabled ? '已启用' : '已暂停');
+        await loadTasks();
+    } catch(e) {
+        showToast('操作失败: ' + e.message, 'error');
+        await loadTasks();
+    }
+}
+
+async function runTaskNow(taskId) {
+    var t = tasks.find(function(x) { return x.id === taskId; });
+    if (!t) return;
+    var msg = '立即执行一次「' + t.name + '」？\n\n本次执行不影响原有的定时计划。';
+    if (!t.enabled) msg += '\n该任务当前处于暂停状态，本次为手动的一次性执行。';
+    if (!await confirmDialog(msg, { title: '立即执行', confirmText: '开始执行' })) return;
+    try {
+        await apiCall('/api/schedules/' + taskId + '/run', 'POST');
+        showToast('已开始执行，可在侧栏底部查看进度');
+        // 立刻回读一次，随后由 5 秒轮询跟进
+        await loadTasks();
+    } catch(e) {
+        showToast('执行失败: ' + e.message, 'error');
+    }
+}
+
+async function deleteTask(taskId) {
+    var t = tasks.find(function(x) { return x.id === taskId; });
+    if (!t) return;
+    if (!await confirmDialog('确认删除定时任务「' + t.name + '」？此操作不可撤销。', { title: '删除确认', confirmText: '删除' })) return;
+    try {
+        await apiCall('/api/schedules/' + taskId, 'DELETE');
+        showToast('已删除');
+        await loadTasks();
+    } catch(e) {
+        showToast('删除失败: ' + e.message, 'error');
+    }
+}
+
+// ===== 执行历史 =====
+async function showHistory(taskId) {
+    var t = tasks.find(function(x) { return x.id === taskId; });
+    if (!t) return;
+    document.getElementById('history-title').textContent = t.name + ' — 执行历史';
+    var body = document.getElementById('history-body');
+    body.innerHTML = '<div class="empty-state compact"><i data-lucide="loader"></i><div class="es-desc">加载中…</div></div>';
+    document.getElementById('schedule-history-modal').classList.add('dh-show');
+    document.body.style.overflow = 'hidden';
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+    try {
+        var data = await apiCall('/api/schedules/' + taskId + '/history', 'GET');
+        var batches = data.batches || [];
+        if (!batches.length) {
+            body.innerHTML = '<div class="empty-state compact"><i data-lucide="inbox"></i>' +
+                '<div class="es-title">暂无执行记录</div>' +
+                '<div class="es-desc">任务首次触发后，这里会列出每次采集的账号数与成功/失败情况</div></div>';
+        } else {
+            body.innerHTML = '<div class="sched-hist">' + batches.map(function(b) {
+                var meta = STATUS_META[b.status] || { cls: 'pending', label: b.status || '-', icon: 'help-circle' };
+                return '<div class="sched-hist-item">' +
+                    '<div class="sched-hist-main">' +
+                        '<span class="sched-hist-time">' + fmtDatetime(b.started_at) + '</span>' +
+                        '<span class="sched-hist-meta">' +
+                            '<span class="workflow-status sched-badge ' + meta.cls + '">' +
+                                '<i data-lucide="' + meta.icon + '"></i> ' + meta.label +
+                            '</span>' +
+                            '<span>' + (b.platform || '-') + '</span>' +
+                            '<span class="sched-cron">' + escapeHtml(String(b.id || '').slice(0, 17)) + '</span>' +
+                        '</span>' +
+                    '</div>' +
+                    '<div class="sched-hist-nums">' +
+                        '<span>账号 <b>' + (b.total_accounts || 0) + '</b></span>' +
+                        '<span class="ok">成功 <b>' + (b.success_accounts || 0) + '</b></span>' +
+                        '<span class="bad">失败 <b>' + (b.failed_accounts || 0) + '</b></span>' +
+                        '<span>跳过 <b>' + (b.skipped_accounts || 0) + '</b></span>' +
+                    '</div>' +
+                '</div>';
+            }).join('') + '</div>';
+        }
+    } catch(e) {
+        body.innerHTML = '<div class="empty-state compact"><i data-lucide="alert-triangle"></i>' +
+            '<div class="es-title">加载失败</div><div class="es-desc">' + escapeHtml(e.message) + '</div></div>';
+    }
+    if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
+}
+
+function closeHistoryModal() {
+    document.getElementById('schedule-history-modal').classList.remove('dh-show');
+    document.body.style.overflow = '';
+}
+
+// 输入变化时实时刷新计划预览
+document.addEventListener('input', function(e) {
+    if (!e.target.closest('#schedule-modal')) return;
+    updatePreview();
+});
+document.addEventListener('change', function(e) {
+    if (!e.target.closest('#schedule-modal')) return;
+    updatePreview();
+});
+
+// 启动
+initSchedulePage();
+</script>
+{% endblock %}

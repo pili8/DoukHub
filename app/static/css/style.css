@@ -1058,6 +1058,21 @@ tbody tr:hover {
 .empty-state.compact i { font-size: 30px; margin-bottom: 8px; }
 .empty-state.compact svg[data-lucide] { width: 26px; height: 26px; margin-bottom: 8px; }
 
+/* ⚠️ 空态「操作按钮」里的图标必须豁免上面的尺寸规则。
+   上面 `.empty-state svg[data-lucide]` 是 36×36 + margin-bottom:16px，
+   而 `.btn svg[data-lucide]`(14px) 与它**特异性相同(0,2,1)、位置更靠前** → 被覆盖，
+   导致按钮图标被当"空态大图标"渲染：比 34px 的按钮还高，且 margin-bottom 把它顶上去 8px。
+   加 `.btn` 提升到 (0,3,1) 才能稳定胜出，并用 margin:0 清掉那 16px 下边距。 */
+.empty-state .es-action .btn svg[data-lucide],
+.empty-state .es-action .btn i[data-lucide] {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    display: inline-block;
+    vertical-align: middle;
+    flex: 0 0 auto;
+}
+
 /* ===== 15. M3 Linear Progress Indicator ===== */
 .progress-bar-container {
   width: 100%;

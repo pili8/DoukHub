@@ -42,6 +42,7 @@ package-lock.json
 # 开发调试残留（临时脚本/截图/预览，保留在磁盘但不跟踪）
 _dbg_*.js
 _shot_*
+_test_*.py
 _fix_*.py
 _redo_*.py
 _gen_*.py

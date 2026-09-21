@@ -42,18 +42,9 @@ class HistoryDB:
                     error_message TEXT DEFAULT ''
                 )
             """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS scheduled_tasks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    cron_expression TEXT NOT NULL,
-                    rating_filter TEXT DEFAULT '3,4,5',
-                    enabled BOOLEAN DEFAULT 1,
-                    last_run_at DATETIME,
-                    next_run_at DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            # 旧版 scheduled_tasks 表已废弃，功能移至主库 doukhub.db
+            # 如存在则删除（安全清理，不影响已有数据）
+            conn.execute("DROP TABLE IF EXISTS scheduled_tasks")
             conn.commit()
 
     def add_record(self, data: dict) -> int:
@@ -123,48 +114,3 @@ class HistoryDB:
                 "success": success,
                 "failed": failed,
             }
-
-    # --- 定时任务 ---
-
-    def add_task(self, name: str, cron_expression: str, rating_filter: str = "3,4,5") -> int:
-        """添加定时任务"""
-        with self._connect() as conn:
-            cursor = conn.execute(
-                """INSERT INTO scheduled_tasks (name, cron_expression, rating_filter)
-                   VALUES (?, ?, ?)""",
-                (name, cron_expression, rating_filter),
-            )
-            conn.commit()
-            return cursor.lastrowid or 0
-
-    def get_tasks(self) -> list[dict]:
-        """获取所有定时任务"""
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM scheduled_tasks ORDER BY id"
-            ).fetchall()
-            return [dict(r) for r in rows]
-
-    def update_task(self, task_id: int, data: dict) -> None:
-        """更新定时任务"""
-        fields = []
-        values = []
-        for key in ("name", "cron_expression", "rating_filter", "enabled", "last_run_at", "next_run_at"):
-            if key in data:
-                fields.append(f"{key} = ?")
-                values.append(data[key])
-        if not fields:
-            return
-        values.append(task_id)
-        with self._connect() as conn:
-            conn.execute(
-                f"UPDATE scheduled_tasks SET {', '.join(fields)} WHERE id = ?",
-                values,
-            )
-            conn.commit()
-
-    def delete_task(self, task_id: int) -> None:
-        """删除定时任务"""
-        with self._connect() as conn:
-            conn.execute("DELETE FROM scheduled_tasks WHERE id = ?", (task_id,))
-            conn.commit()

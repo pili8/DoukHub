@@ -112,8 +112,14 @@
   width: 100%; min-height: 30px;
 }
 .switch-label { font-size: 13px; color: var(--text-primary); user-select: none; line-height: 1.35; }
-.switch-item {
-  position: relative; display: inline-block; flex-shrink: 0;
+/* ⚠️ 必须带 `.form-group` 前缀：它是 <label>，而 style.css 里 `.form-group label`
+   （特异性 11）比 `.switch-item`（特异性 10）高，会强行塞进一个 margin-bottom:6px。
+   `.switch-row` 是 align-items:center 的 flex，那 6px 计入外边距盒后
+   会让开关整体比右侧说明文字**高 3px**。
+   与 schedule.html 的 `.sched-mode` / `.sched-day` 属同一类坑：容器级规则 > 组件类单类。 */
+.switch-item,
+.form-group .switch-item {
+  position: relative; display: inline-block; flex-shrink: 0; margin-bottom: 0;
   width: 44px; height: 24px; cursor: pointer;
 }
 .switch-item input[type="checkbox"] {

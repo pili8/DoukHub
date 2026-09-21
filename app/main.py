@@ -11,7 +11,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 from urllib.parse import quote
 
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, Body
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -37,6 +37,7 @@ from .core import backup
 from .core import dedup
 from .core import maintenance
 from .core import presets
+from .core.scheduler import get_scheduler
 from .services.downloader import ServiceManager
 from .core.data_migration import DataMigration
 from .core.data_root import app_data_root, validate_target
@@ -234,6 +235,218 @@ def get_services() -> ServiceManager:
     return services
 
 
+# 定时任务「上次仍在跑」的判定宽限期。
+# 超过这个时长仍停在 running，视为进程崩溃留下的僵尸状态，放行下一次触发；
+# 否则该任务会被永久锁死，再也跑不起来。
+# 取 12 小时：远大于单次采集的合理耗时，又能当天自愈。
+SCHEDULE_STALE_HOURS = 12
+
+
+def _running_stale_minutes(last_run_at) -> float | None:
+    """返回上次触发距今的分钟数；解析失败返回 None（视为"不久之前"，走保守的跳过分支）。"""
+    if not last_run_at:
+        return None
+    try:
+        started = datetime.strptime(str(last_run_at)[:19], "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return None
+    return (datetime.now() - started).total_seconds() / 60
+
+
+async def _on_scheduled_task_trigger(task_id: int, ignore_enabled: bool = False):
+    """定时任务触发回调：执行关联的采集方案。
+
+    ignore_enabled=True 供「立即执行」使用：已禁用的任务也允许手动跑一次。
+
+    冲突处理：如果当前有采集正在运行，排队等待（通过 CollectionBatchManager
+    内部的队列机制自动处理 — start() 会在有活跃批次时抛 RuntimeError，
+    此处捕获后延迟重试）。
+    """
+    db = get_database()
+    task = db.get_scheduled_task(task_id)
+    if not task or (not task["enabled"] and not ignore_enabled):
+        logger.info(f"定时任务 #{task_id} 已禁用或不存在，跳过")
+        return
+
+    # ===== 任务堆叠保护 =====
+    # 上一次触发还停在 running（说明采集没结束），本次直接跳过，不排队、不重试。
+    # 为什么不是"排队等上一次"：定时任务的价值在于"按点跑一次"，迟到的第 N 次没有意义，
+    # 反而会和正常调度叠在一起把设备压满。手动「立即执行」是有意触发，不受此限制。
+    if task.get("last_run_status") == "running" and not ignore_enabled:
+        stale_min = _running_stale_minutes(task.get("last_run_at"))
+        if stale_min is not None and stale_min > SCHEDULE_STALE_HOURS * 60:
+            logger.warning(
+                f"定时任务 #{task_id} 上次执行已卡住 {int(stale_min)} 分钟，判定为僵尸状态，本次放行"
+            )
+        else:
+            logger.info(f"定时任务 #{task_id} 上一次仍在执行中，跳过本次触发")
+            db.update_scheduled_task(task_id, {"last_run_status": "skipped_busy"})
+            return
+
+    logger.info(f"定时任务 #{task_id} '{task['name']}' 开始触发")
+
+    # 更新状态为执行中
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.update_scheduled_task(task_id, {
+        "last_run_at": now_str,
+        "last_run_status": "running",
+    })
+
+    try:
+        # 执行前同步（如果配置了）
+        if task["sync_before"]:
+            fs = get_feishu_syncer()
+            if fs:
+                try:
+                    logger.info(f"定时任务 #{task_id}: 执行前同步云端...")
+                    fs.sync_incremental()
+                except Exception as e:
+                    logger.warning(f"定时任务 #{task_id}: 执行前同步失败（继续执行）: {e}")
+
+        # 读取关联的采集方案
+        preset = presets.get_preset(config, task["preset_id"])
+        if not preset:
+            raise ValueError(f"采集方案 #{task['preset_id']} 不存在")
+
+        # 检查服务是否可用
+        svc = get_services()
+        for s in svc.services:
+            if not s.running:
+                logger.warning(f"定时任务 #{task_id}: 服务 {s.name} 未运行，尝试启动...")
+                s.start()
+
+        # 等待服务就绪（最多等 30 秒）
+        import time as _time
+        for _ in range(30):
+            all_ready = all(s.running for s in svc.services)
+            if all_ready:
+                break
+            _time.sleep(1)
+
+        # 执行采集（复用现有批次链路）
+        manager = get_collection_batch_manager()
+        accounts = db.get_all_accounts()
+
+        # 存储方案
+        defaults = config.collection_defaults
+        folder_name = preset.get("folder_name", "")
+        name_format = preset.get("name_format", "")
+        storage_primary_id = preset.get("storage_primary_id") or ""
+        storage_secondary_id = preset.get("storage_secondary_id") or ""
+        legacy_choice = str(preset.get("storage_choice") or "")
+        if not storage_primary_id and legacy_choice.startswith("p:"):
+            storage_primary_id = legacy_choice[2:]
+
+        root_path = ""
+        active_profile = None
+        if not folder_name:
+            active_profile, _ = sp.resolve_pair(
+                config, "batch", storage_primary_id, storage_secondary_id
+            )
+            if active_profile is not None:
+                root_path = active_profile["path"] or ""
+        if not root_path and folder_name and Path(folder_name).is_absolute():
+            root_path = folder_name
+            folder_name = ""
+        if not folder_name:
+            folder_name = defaults.get("folder_name", "Download")
+        if not name_format:
+            name_format = sp.resolve_name_format(config, "batch", active_profile)
+            if not name_format:
+                name_format = defaults.get("name_format", "create_time type nickname desc")
+        engine_params = sp.resolve_engine_params(config, "batch", active_profile)
+        if engine_params is None:
+            engine_params = {
+                k: defaults.get(k) for k in
+                ("folder_mode", "music", "dynamic_cover", "static_cover", "max_size", "storage_format", "max_pages")
+                if k in defaults
+            }
+
+        platforms = (
+            ("douyin", "tiktok") if preset["platform"] == "all" else (preset["platform"],)
+        )
+        tags = preset["tags"].split(",") if preset["tags"] else []
+
+        # 重试逻辑：如果当前有活跃批次，等待后重试
+        max_retries = 12  # 最多等 12 次 × 5 分钟 = 1 小时
+        for attempt in range(max_retries + 1):
+            try:
+                batches = await manager.start(
+                    accounts=accounts,
+                    rating_min=preset["rating_min"],
+                    tags=tags,
+                    account_names=preset.get("account_names", ""),
+                    platforms=platforms,
+                    mode=preset["mode"],
+                    preset_name=preset["name"],
+                    folder_name=folder_name,
+                    root_path=root_path,
+                    name_format=name_format,
+                    account_created_after=preset.get("account_created_after", ""),
+                    skip_recent_days=int(preset.get("skip_recent_days", 0)),
+                    engine_params=engine_params,
+                    scheduled_task_id=task_id,
+                    preset_id=task["preset_id"],
+                )
+                logger.info(f"定时任务 #{task_id}: 采集已启动，批次 {len(batches)} 个")
+                # 更新状态为成功（采集已启动，不等完成）
+                db.update_scheduled_task(task_id, {
+                    "last_run_status": "success",
+                    "last_batch_ids": ",".join(b["id"] for b in batches),
+                })
+                # 一次性任务：本次是它唯一一次触发，跑完即自动停用并撤掉 job，
+                # 避免在列表里留一个永远不再触发的任务让用户困惑。
+                if task.get("cron_expression", "").startswith("@once:"):
+                    db.update_scheduled_task(task_id, {"enabled": 0})
+                    get_scheduler().remove_job_for_task(task_id)
+                    logger.info(f"定时任务 #{task_id}: 一次性任务已完成，自动停用")
+                break
+            except RuntimeError as e:
+                if "已有采集批次正在执行" in str(e) and attempt < max_retries:
+                    logger.info(
+                        f"定时任务 #{task_id}: 当前有采集正在运行，"
+                        f"等待 5 分钟后重试（第 {attempt + 1}/{max_retries} 次）"
+                    )
+                    await asyncio.sleep(300)
+                    continue
+                raise
+        else:
+            raise RuntimeError("等待超时，无法启动采集")
+
+    except Exception as e:
+        logger.error(f"定时任务 #{task_id} 执行失败: {e}", exc_info=True)
+        db.update_scheduled_task(task_id, {
+            "last_run_status": "failed",
+            "last_batch_ids": "",
+        })
+        _record_schedule_failure(task_id, task, e)
+
+
+def _record_schedule_failure(task_id: int, task: dict, error: Exception) -> None:
+    """定时任务执行失败时留痕，供「失败通知」展示。
+
+    复用 sync_history 表（task_type='scheduled_task'），不新增表：
+    该表已有 status / error / created_at，足够表达「哪个任务、什么时候、为什么失败」。
+    失败记录在用户点开后端任务面板时被标记为已读（见 /api/schedules/failures/ack）。
+    """
+    try:
+        db = get_database()
+        db.add_sync_history({
+            "task_type": "scheduled_task",
+            "status": "failed",
+            "total": 1,
+            "success": 0,
+            "failed": 1,
+            "skipped": 0,
+            # error 里带上任务名，前端无需再查一次任务表
+            "error": f"{task.get('name', '')}#{task_id}：{error}",
+            "started_at": task.get("last_run_at") or "",
+            "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+    except Exception as e:  # 通知失败绝不能再抛，否则会盖掉原始错误
+        logger.warning(f"记录定时任务失败通知时出错: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import threading
@@ -290,10 +503,33 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         logger.warning(f"回收区目录初始化失败（使用默认）: {_e}")
 
+    # 启动定时任务调度器
+    try:
+        sched = get_scheduler()
+        sched.set_trigger_callback(_on_scheduled_task_trigger)
+        sched.start()
+        # 全量加载定时任务到调度器
+        _db = get_database()
+        all_tasks = _db.get_scheduled_tasks()
+        sched.reload_all(all_tasks)
+        logger.info(f"已加载 {len(all_tasks)} 个定时任务到调度器")
+        # 检查错过的任务，补执行
+        missed_ids = sched.check_missed_tasks(all_tasks)
+        for mid in missed_ids:
+            logger.info(f"补执行错过的定时任务 #{mid}")
+            asyncio.create_task(_on_scheduled_task_trigger(mid))
+    except Exception as _e:
+        logger.error(f"定时任务调度器启动失败: {_e}", exc_info=True)
+
     yield
 
     # 关闭
     global single_work_client
+    # 关闭定时任务调度器
+    try:
+        get_scheduler().shutdown()
+    except Exception:
+        pass
     await get_collection_batch_manager().shutdown()
     svc.close()
     c = get_collector()
@@ -304,7 +540,7 @@ async def lifespan(app: FastAPI):
         single_work_client = None
 
 
-app = FastAPI(title="DoukHub", version="2.3.0", lifespan=lifespan)
+app = FastAPI(title="DoukHub", version="2.3.6", lifespan=lifespan)
 
 
 
@@ -945,6 +1181,15 @@ async def page_duplicates(request: Request):
     return templates.TemplateResponse(request, "duplicates.html", context={
         "request": request,
         "page": "duplicates",
+    })
+
+
+@app.get("/schedule", response_class=HTMLResponse)
+async def page_schedule(request: Request):
+    """定时任务页面"""
+    return templates.TemplateResponse(request, "schedule.html", context={
+        "request": request,
+        "page": "schedule",
     })
 
 
@@ -3921,6 +4166,337 @@ async def api_preview_collection_preset(preset_id: str):
     return {"success": True, **totals}
 
 
+# ========== 定时任务 ==========
+
+class ScheduleTaskRequest(BaseModel):
+    name: str
+    preset_id: int
+    cron_expression: str
+    enabled: bool = True
+    sync_before: bool = False
+
+
+# 定时采集两条红线：
+# - 最短间隔 1 小时（硬拦）。低于此值等于高频轮询平台接口，极易触发风控。
+# - 建议间隔 2 小时（只提示不拦）。前端给温和提醒，后端不拒绝。
+SCHEDULE_MIN_INTERVAL_MINUTES = 60
+
+
+def _expand_cron_field(field, low: int, high: int) -> list[int] | None:
+    """把一个 cron 字段展开成它可能取到的所有整数值。
+
+    apscheduler 的字段对象不提供 "列出所有取值" 的 API（只有 get_next_value 这种
+    逐步推进的接口），所以这里直接读它编译好的 expressions：
+    - AllExpression     → `*` 或 `*/n`，值是 low..high 上步长为 n 的等差数列
+    - RangeExpression   → `a`、`a-b`、`a-b/n`、`a/n`
+    展开不了（含月份名、星期名等）时返回 None，由调用方放弃判断。
+    """
+    values: set[int] = set()
+    for e in getattr(field, "expressions", []) or []:
+        step = getattr(e, "step", None) or 1
+        first = getattr(e, "first", None)
+        last = getattr(e, "last", None)
+        if first is None:
+            # AllExpression：从范围下界开始的等差数列
+            values.update(range(low, high + 1, step))
+        else:
+            lo = max(low, int(first))
+            hi = min(high, int(last)) if last is not None else high
+            if lo > hi:
+                return None
+            values.update(range(lo, hi + 1, step))
+    return sorted(values) if values else None
+
+
+def _estimate_min_interval_minutes(expr: str) -> float | None:
+    """估算 cron 表达式的「最小触发间隔」（分钟），无法判断时返回 None。
+
+    只处理常见的 5 段 cron（分 时 日 月 周）。判定思路：
+    把「时」「分」两个字段展开成一天内的触发时刻列表，取相邻两次的最小间隔
+    （含跨零点回到首个的那一段）。
+
+    这些情况直接返回 None（视为无需限速）：
+    - 不是 5 段表达式 / 无法解析
+    - 「日」或「周」字段有限制（如每周一、每月 1 号）→ 一天最多触发一次
+    - 一天只触发一次
+    """
+    parts = expr.split()
+    if len(parts) != 5:
+        return None
+    _minute_f, _hour_f, dom_f, _mon_f, dow_f = parts
+    # 只有"每天都可能触发"的任务才需要限速
+    if dom_f != "*" or dow_f != "*":
+        return None
+
+    try:
+        from apscheduler.triggers.cron import CronTrigger
+        trigger = CronTrigger.from_crontab(expr)
+    except Exception:
+        return None
+
+    fields = {f.name: f for f in trigger.fields}
+    minutes = _expand_cron_field(fields["minute"], 0, 59)
+    hours = _expand_cron_field(fields["hour"], 0, 23)
+    if not minutes or not hours:
+        return None
+
+    # 展开成一天内的分钟偏移，排序后取最小差值（含跨零点）
+    offsets = sorted(h * 60 + m for h in hours for m in minutes)
+    if len(offsets) < 2:
+        return None
+    gaps = [offsets[i + 1] - offsets[i] for i in range(len(offsets) - 1)]
+    gaps.append(1440 - offsets[-1] + offsets[0])  # 跨零点回到首个
+    return float(min(gaps))
+
+
+def _validate_schedule_expr(expr: str) -> str:
+    """校验调度表达式，返回错误信息；合法返回空串。
+
+    支持两种：
+    - 标准 5 段 cron（如 `0 2 * * *`）
+    - 一次性 `@once:YYYY-MM-DD HH:MM`（跑完自动停用）
+    """
+    from app.core.scheduler import parse_once_at, build_trigger
+
+    if not expr:
+        return "执行计划不能为空"
+    if expr.startswith("@once:"):
+        once_at = parse_once_at(expr)
+        if once_at is None:
+            return "一次性执行的时间格式不正确"
+        if once_at <= datetime.now():
+            return "一次性执行的时间必须晚于当前时间"
+        return ""
+    try:
+        from apscheduler.triggers.cron import CronTrigger
+        CronTrigger.from_crontab(expr)
+    except Exception:
+        return "无效的 cron 表达式"
+    # 频率下限：一天内多次触发时，相邻两次不能靠得太近
+    gap = _estimate_min_interval_minutes(expr)
+    if gap is not None and gap < SCHEDULE_MIN_INTERVAL_MINUTES:
+        return (
+            f"任务间隔不能短于 {SCHEDULE_MIN_INTERVAL_MINUTES} 分钟"
+            f"（当前最短间隔约 {int(gap)} 分钟），过于频繁会触发平台风控"
+        )
+    return ""
+
+
+@app.get("/api/schedules")
+async def api_list_schedules():
+    """获取所有定时任务"""
+    db = get_database()
+    tasks = db.get_scheduled_tasks()
+    # 附加 preset_name 和 next_run_at（从调度器获取）
+    sched = get_scheduler()
+    all_presets = presets.list_presets(config)
+    # ⚠️ 键必须转字符串：老库 scheduled_tasks.preset_id 是 TEXT 列，读回来是 "1"，
+    #    而方案 id 是数字 1。dict 查找靠 hash，hash("1") != hash(1) → 永远 miss。
+    #    （presets.get_preset() 用的是 ==，不受影响，所以任务实际能跑 —— 只有这里受影响。）
+    preset_map = {str(p["id"]): p["name"] for p in all_presets}
+    for t in tasks:
+        t["preset_name"] = preset_map.get(str(t["preset_id"]), "")
+        next_run = sched.get_next_run_time(t["id"])
+        t["next_run_at"] = next_run.strftime("%Y-%m-%d %H:%M:%S") if next_run else None
+        # enabled 在 SQLite 中是 0/1
+        t["enabled"] = bool(t.get("enabled"))
+        t["sync_before"] = bool(t.get("sync_before"))
+    return {"tasks": tasks}
+
+
+@app.post("/api/schedules")
+async def api_create_schedule(request: ScheduleTaskRequest):
+    """创建定时任务"""
+    db = get_database()
+    # 验证 preset 存在
+    preset = presets.get_preset(config, request.preset_id)
+    if not preset:
+        return JSONResponse({"success": False, "message": "采集方案不存在"}, status_code=400)
+    # 验证调度表达式（cron 或一次性）
+    err = _validate_schedule_expr(request.cron_expression)
+    if err:
+        return JSONResponse({"success": False, "message": err}, status_code=400)
+    task_id = db.add_scheduled_task(
+        name=request.name,
+        preset_id=request.preset_id,
+        cron_expression=request.cron_expression,
+        enabled=request.enabled,
+        sync_before=request.sync_before,
+    )
+    # 注册到调度器
+    if request.enabled:
+        get_scheduler().add_job_for_task(task_id, request.cron_expression, True)
+    return {"success": True, "task_id": task_id}
+
+
+@app.put("/api/schedules/{task_id}")
+async def api_update_schedule(task_id: int, request: Request):
+    """更新定时任务（支持部分字段更新）"""
+    db = get_database()
+    task = db.get_scheduled_task(task_id)
+    if not task:
+        return JSONResponse({"success": False, "message": "任务不存在"}, status_code=404)
+    data = await request.json()
+    # 验证调度表达式（如果传了）
+    cron_expr = data.get("cron_expression")
+    if cron_expr:
+        err = _validate_schedule_expr(cron_expr)
+        if err:
+            return JSONResponse({"success": False, "message": err}, status_code=400)
+    # 验证 preset（如果传了）
+    preset_id = data.get("preset_id")
+    if preset_id is not None:
+        preset = presets.get_preset(config, int(preset_id))
+        if not preset:
+            return JSONResponse({"success": False, "message": "采集方案不存在"}, status_code=400)
+    # 构建 update data
+    update_data = {}
+    for key in ("name", "preset_id", "cron_expression", "enabled", "sync_before"):
+        if key in data:
+            update_data[key] = data[key]
+    # bool 转 int
+    if "enabled" in update_data:
+        update_data["enabled"] = 1 if update_data["enabled"] else 0
+    if "sync_before" in update_data:
+        update_data["sync_before"] = 1 if update_data["sync_before"] else 0
+    db.update_scheduled_task(task_id, update_data)
+    # 更新调度器
+    sched = get_scheduler()
+    updated_task = db.get_scheduled_task(task_id)
+    if updated_task:
+        if updated_task["enabled"]:
+            sched.add_job_for_task(task_id, updated_task["cron_expression"], True)
+        else:
+            sched.remove_job_for_task(task_id)
+    return {"success": True}
+
+
+@app.delete("/api/schedules/{task_id}")
+async def api_delete_schedule(task_id: int):
+    """删除定时任务"""
+    db = get_database()
+    ok = db.delete_scheduled_task(task_id)
+    if not ok:
+        return JSONResponse({"success": False, "message": "任务不存在"}, status_code=404)
+    get_scheduler().remove_job_for_task(task_id)
+    return {"success": True}
+
+
+@app.get("/api/schedules/failures")
+async def api_schedule_failures(since_id: int = 0, limit: int = 20):
+    """定时任务失败通知（供后台任务面板/侧栏角标使用）。
+
+    since_id：只看 id 大于它的记录（前端用本地记录的最后一条 id 做增量拉取）。
+    """
+    db = get_database()
+    history = db.get_sync_history(task_type="scheduled_task", limit=max(limit, 1))
+    items = []
+    for h in history:
+        hid = h.get("id", 0)
+        if hid <= since_id:
+            continue
+        if h.get("status") != "failed":
+            continue
+        # 已读判定：命中显式 id 集合，或不超过"全部已读"时的水位线
+        if hid in _ack_schedule_failures or hid <= _ack_watermark:
+            continue
+        # error 形如「任务名#12：具体错误」
+        raw = h.get("error") or ""
+        name, _, detail = raw.partition("：")
+        items.append({
+            "id": hid,
+            "name": name,
+            "detail": detail or raw,
+            "at": h.get("finished_at") or h.get("created_at"),
+        })
+    return {"failures": items, "latest_id": max([h.get("id", 0) for h in history], default=0)}
+
+
+# 失败通知的"已读"状态。
+# 为什么不落库：这只是一个 UI 已读标记，重启后重新提醒一次反而更安全
+# （用户重启通常意味着"我要重新看一遍当前状态"），不值得为此加列或加表。
+#
+# ⚠️ 用「水位线 + 显式 id」两个变量，而不是一个 -1 哨兵：
+#    哨兵写法会让「清空记录」把**此后所有新失败**一并永久隐藏 —— 用户再也不知道任务挂过。
+#    水位线只盖住"点清空那一刻已存在的记录"，新失败 id 更大、必然穿透。
+_ack_schedule_failures: set[int] = set()
+_ack_watermark: int = 0
+
+
+@app.post("/api/schedules/failures/ack")
+async def api_schedule_failures_ack(payload: dict = Body(default={})):
+    """把失败通知标记为已读。
+
+    传 ids 时只标记指定记录；不传（或传空列表）表示「把当前已有的全部标为已读」。
+    注意是"当前已有"——之后新产生的失败仍会照常提醒。
+    """
+    global _ack_watermark
+    ids = payload.get("ids") or []
+    if ids:
+        _ack_schedule_failures.update(int(i) for i in ids)
+        return {"ack": len(ids)}
+    db = get_database()
+    history = db.get_sync_history(task_type="scheduled_task", limit=200)
+    _ack_watermark = max([h.get("id", 0) for h in history], default=_ack_watermark)
+    return {"ack": "all", "watermark": _ack_watermark}
+
+
+@app.get("/api/schedules/{task_id}/history")
+async def api_schedule_history(task_id: int, limit: int = 50):
+    """获取定时任务的执行历史。
+
+    精确匹配：优先按 collection_batches.scheduled_task_id = task_id 取；
+    老数据（该字段为空）回退到「任务名 == 方案名」的旧口径，仅用于兼容历史批次。
+    """
+    db = get_database()
+    task = db.get_scheduled_task(task_id)
+    if not task:
+        return JSONResponse({"success": False, "message": "任务不存在"}, status_code=404)
+    all_batches = db.list_collection_batches(limit=max(limit, 1))
+
+    def _row(b):
+        return {
+            "id": b["id"],
+            "platform": b.get("platform"),
+            "preset_name": b.get("preset_name"),
+            "status": b.get("status"),
+            "total_accounts": b.get("total_accounts", 0),
+            "success_accounts": b.get("success_accounts", 0),
+            "failed_accounts": b.get("failed_accounts", 0),
+            "skipped_accounts": b.get("skipped_accounts", 0),
+            "started_at": b.get("started_at"),
+            "finished_at": b.get("finished_at"),
+        }
+
+    matched = [b for b in all_batches if b.get("scheduled_task_id") == task_id]
+    if not matched:
+        # 兼容老批次：任务名与方案名一致时视为该任务的执行记录
+        matched = [
+            b for b in all_batches
+            if b.get("scheduled_task_id") is None
+            and b.get("preset_name")
+            and b.get("preset_name") == task["name"]
+        ]
+    return {"batches": [_row(b) for b in matched]}
+
+
+@app.post("/api/schedules/{task_id}/run")
+async def api_run_schedule_now(task_id: int):
+    """立即执行一次定时任务（不影响后续 cron 计划）。"""
+    db = get_database()
+    task = db.get_scheduled_task(task_id)
+    if not task:
+        return JSONResponse({"success": False, "message": "任务不存在"}, status_code=404)
+    if db.get_active_collection_batch():
+        return JSONResponse(
+            {"success": False, "message": "已有采集批次正在执行，请稍后再试"},
+            status_code=409,
+        )
+    # 后台执行，立刻返回，前端用轮询 /api/schedules 观察 last_run_status
+    asyncio.create_task(_on_scheduled_task_trigger(task_id, ignore_enabled=True))
+    return {"success": True, "message": "已开始执行"}
+
+
 # ========== 采集批次 ==========
 
 @app.post("/api/collection/batches")
@@ -4309,6 +4885,199 @@ async def api_stats():
     """获取统计数据"""
     h = get_history()
     return h.get_stats()
+
+
+# ---------- 磁盘卷识别（跨平台，2026-09-20 加） ----------
+# 为什么需要：判断"两个目录是不是同一块盘"**不能用盘符**（`Path().anchor`）——
+# Windows 下它给 `F:\` 能区分，POSIX（NAS/Docker）下**恒为 `/`**，会把所有挂载盘
+# 合并成一行、只显示先遇到的那块，名字还显示成 `/`。改用文件系统设备号 st_dev，
+# 语义两边一致：同一文件系统相同、不同分区/挂载源不同。
+_MOUNT_POINTS_CACHE = None
+
+
+def _parse_mount_points(text: str) -> list:
+    """解析 /proc/mounts 文本 → 挂载点列表（按长度降序）。纯函数，便于跨平台单测。"""
+    points = []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 2 or not parts[1].startswith("/"):
+            continue
+        # /proc/mounts 里空格等字符是八进制转义（如 \040）
+        point = (parts[1].replace(r"\040", " ").replace(r"\011", "\t")
+                 .replace(r"\012", "\n").replace(r"\134", "\\"))
+        points.append(point)
+    points.sort(key=len, reverse=True)
+    return points
+
+
+def _mount_point_for(points: list, raw: str) -> str:
+    """该路径落在哪个挂载点上（最长前缀匹配）；只有根挂载点 '/' 时视为无信息。
+
+    ⚠️ 只做纯字符串比较，**不要用 `os.path.isabs`/`Path.resolve` 做预处理** ——
+    本机实测：Windows 的 `isabs('/download')` 返回 False，会把 POSIX 路径
+    解析成 `D:/download` 而匹配失败（Linux 上才返回 True，是个平台陷阱）。
+    本函数只在 `_disk_volume` 的 Linux 分支被调用，入参必是 POSIX 路径。
+    """
+    target = raw.replace("\\", "/").rstrip("/") or "/"
+    for point in points:
+        if point == "/":
+            continue
+        base = point.rstrip("/") or "/"
+        if target == base or target.startswith(base + "/"):
+            return point
+    return ""
+
+
+def _mount_points() -> list:
+    """当前系统的挂载点表。只读一次 —— 容器生命周期内挂载表不会变。"""
+    global _MOUNT_POINTS_CACHE
+    if _MOUNT_POINTS_CACHE is None:
+        points: list = []
+        for name in ("/proc/self/mounts", "/proc/mounts", "/etc/mtab"):
+            try:
+                text = Path(name).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            points = _parse_mount_points(text)
+            break
+        _MOUNT_POINTS_CACHE = points
+    return _MOUNT_POINTS_CACHE
+
+
+def _disk_volume(raw: str) -> tuple:
+    """返回 (去重键, 显示名)。
+
+    - 去重键：`st_dev` 优先（跨平台正确）；`st_dev == 0` 的极端平台退回卷根做键，
+      至少不会把不同盘互吞。路径不存在/不可访问时返回空 → 调用方跳过该条。
+    - 显示名：Windows 用卷根（`F:\\`）；POSIX 用挂载点（`/download`），取不到挂载点
+      再退化为路径首段（避免整列都显示无意义的 `/`）。
+    """
+    import os as _os
+
+    try:
+        device = _os.stat(raw).st_dev
+    except OSError:
+        return "", ""
+    key = f"dev:{device}" if device else f"root:{(Path(raw).anchor or raw).lower()}"
+    anchor = Path(raw).anchor
+    if _os.name == "nt" or anchor != "/":
+        name = anchor or raw
+    else:
+        name = _mount_point_for(_mount_points(), raw)
+        if not name:
+            segments = [s for s in raw.replace("\\", "/").split("/") if s]
+            name = "/" + segments[0] if segments else "/"
+    return key, name
+
+
+@app.get("/api/disk")
+async def api_disk():
+    """磁盘空间：统计「存储方案」（storage_profiles）里实际会用到的目录所在卷 + 应用数据卷。
+
+    口径（2026-09-20 定稿）：
+    - 主体 = 存储方案中**已启用**的目录所在卷。没配进方案的盘不统计 —— 既不会
+      往里写、也没法在应用里操作，列出来只是噪音。每次请求实时读配置，
+      所以新增/停用方案后无需重启，下一次请求即反映（前端面板每次打开都重新拉）。
+    - 附加 = 应用数据目录（config.app_data_dir）所在卷，只作定位参考，
+      `writable=False` → 不参与告警转红（数据卷满不影响采集能否继续）。
+      与某个方案同卷时会合并成同一行，此时因方案来源而恢复参与告警。
+    侧栏磁盘图标靠它做「低于 5GB 转红」的常驻状态提示（阈值与采集启动前的
+    空间检查一致）。同一卷只报一次，标签标注来源（哪个区、哪个方案）。
+    """
+    import shutil as _shutil
+
+    # (作用区, 来源名, 目录路径, 是否参与告警)
+    targets: list[tuple[str, str, str, bool]] = []
+    scope_label = {"batch": "增量采集", "single": "单作品"}
+    state = config.storage_profiles if isinstance(config.storage_profiles, dict) else {}
+
+    for scope in ("batch", "single"):
+        item = state.get(scope) or {}
+        profiles = item.get("profiles") if isinstance(item, dict) else None
+        if not isinstance(profiles, list):
+            continue
+        for p in profiles:
+            if not isinstance(p, dict):
+                continue
+            raw = str(p.get("path") or "").strip()
+            # 没路径 = 草稿方案；disabled = 当前不会写入 → 两种都不算"用到的磁盘"
+            if not raw or not p.get("enabled", True):
+                continue
+            name = str(p.get("name") or "").strip() or "未命名方案"
+            targets.append((scope_label.get(scope, scope), name, raw, True))
+
+    # 兜底：一个方案都没配时不至于整个面板空白（沿用全局下载目录）
+    if not targets:
+        fallback = (config.get("local", {}) or {}).get("download_path") or ""
+        if fallback:
+            targets.append(("增量采集", "默认目录", fallback, True))
+
+    # 应用数据目录所在卷（2026-09-20 加）：只展示、不参与告警。
+    # 为什么不参与告警：数据卷写满不会让采集写不进去，让它跟着转红会把用户的
+    # 注意力引到错误的盘上；但它又是"程序自己的东西在哪"的必备参考信息，所以保留。
+    try:
+        targets.append(("应用数据", "数据目录", str(config.app_data_dir), False))
+    except Exception:
+        pass
+
+    # 按卷聚合。先收集"这个卷被哪些方案用到"，再统一生成标签 ——
+    # 若边扫边拼标签，同名方案（两个区都叫「本机F」）会拼出「增量采集 · 本机F、单作品 · 本机F」
+    # 这种重复啰嗦的文案，归并后才能压成「本机F（增量采集 / 单作品）」。
+    buckets: dict[str, dict] = {}
+    order: list[str] = []
+    for scope_lbl, name, raw, is_storage in targets:
+        if not raw:
+            continue
+        try:
+            usage = _shutil.disk_usage(raw)
+        except OSError:
+            # 网络盘不可达等场景：直接跳过，不让整个接口失败
+            continue
+        # 去重键 = 文件系统设备号（同一块盘上的多个目录只报一次）。
+        # ⚠️ 不能退回用盘符 anchor：POSIX 下恒为 '/'，NAS/Docker 里会把多块盘并成一行。
+        key, volume_name = _disk_volume(raw)
+        if not key:
+            continue
+        if key not in buckets:
+            order.append(key)
+            buckets[key] = {
+                "name": volume_name or raw,
+                "total_gb": round(usage.total / 1024**3, 1),
+                "used_gb": round((usage.total - usage.free) / 1024**3, 1),
+                "free_gb": round(usage.free / 1024**3, 2),
+                "writable": False,  # 由来源决定：只有存储方案用到的卷才参与告警
+                "sources": [],     # 该卷被哪些来源用到：[{scope, name, path}]
+            }
+        # 同一卷可能既被方案用到、又是应用数据卷 → 只要有一个"要写入的方案"就参与告警
+        if is_storage:
+            buckets[key]["writable"] = True
+        buckets[key]["sources"].append({"scope": scope_lbl, "name": name, "path": raw})
+
+    drives: list[dict] = []
+    for key in order:
+        d = buckets[key]
+        # 按方案名归并作用区：同名跨区 → 「本机F（增量采集 / 单作品）」
+        by_name: dict[str, list[str]] = {}
+        for s in d["sources"]:
+            scopes = by_name.setdefault(s["name"], [])
+            if s["scope"] not in scopes:
+                scopes.append(s["scope"])
+        d["label"] = "、".join(f"{nm}（{' / '.join(sc)}）" for nm, sc in by_name.items())
+        # 路径去重后返回，面板里能让用户核对"这个盘是哪些目录在用"
+        paths: list[str] = []
+        for s in d["sources"]:
+            if s["path"] not in paths:
+                paths.append(s["path"])
+        d["paths"] = paths
+        d["path"] = paths[0] if paths else d["name"]
+        drives.append(d)
+
+    low_gb = 5.0
+    return {
+        "drives": drives,
+        "low_gb": low_gb,
+        "any_low": any(d["writable"] and d["free_gb"] < low_gb for d in drives),
+    }
 
 
 # --- 设置 ---

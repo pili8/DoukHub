@@ -85,6 +85,8 @@ class CollectionBatchManager:
         account_created_after: str = "",
         skip_recent_days: int = 0,
         engine_params: dict | None = None,
+        scheduled_task_id: int | None = None,
+        preset_id: int | None = None,
     ) -> list[dict]:
         if self.db.get_active_collection_batch():
             if self._worker and not self._worker.done():
@@ -136,6 +138,8 @@ class CollectionBatchManager:
                 preset_name=preset_name,
                 log_path=str(log_path),
                 items=[{**vars(item), "account_record_id": item.record_id} for item in planned],
+                scheduled_task_id=scheduled_task_id,
+                preset_id=preset_id,
             )
             created.append(
                 {
