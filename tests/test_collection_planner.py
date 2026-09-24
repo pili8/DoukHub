@@ -84,7 +84,9 @@ def test_first_collection_is_full_and_next_is_incremental_with_overlap():
         mode="incremental",
         today=today,
     )
-    assert second[0].earliest == "2026/08/14"
+    # 采过的账号走「默认滚动窗口」：返回天数（引擎按"今天往前 N 天"理解），
+    # 不再锚在 last_collected_at 上 —— 否则窗口会被压成一天、把作品全筛掉。
+    assert second[0].earliest == 3
 
 
 def test_fixed_window_takes_precedence_and_full_mode_can_force_full():

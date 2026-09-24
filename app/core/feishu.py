@@ -210,18 +210,48 @@ class FeishuClient:
             headers=self._headers(),
             json=body,
         )
-        resp.raise_for_status()
-        return resp.json()
+        try:
+            data = resp.json()
+        except Exception:
+            resp.raise_for_status()
+            raise RuntimeError(f"创建字段失败: 响应无法解析 HTTP {resp.status_code}")
+        code = data.get("code")
+        if resp.status_code >= 400 or code not in self._FIELD_OK_CODES:
+            raise RuntimeError(
+                f"创建字段失败: HTTP {resp.status_code} code={code} "
+                f"msg={data.get('msg')} body={body}"
+            )
+        return data
+
+    # 更新字段接口可接受的业务码：0=成功，1254606=DataNotChange（值未变化，等价成功）
+    _FIELD_OK_CODES = (0, 1254606)
 
     def update_field(self, app_token: str, table_id: str, field_id: str, body: dict) -> dict:
-        """更新多维表格字段定义（可用于重命名字段）"""
+        """更新多维表格字段定义（重命名字段 / 补选项）
+
+        ⚠️ 飞书 PUT fields 接口**强制要求同时传 field_name 与 type**：
+        只传其中任一项都会返回 99992402 field validation failed
+        （field_violations: "field_name is required" / "type is required"）。
+        且该错误 HTTP 状态是 400、真实业务码在 body 里 —— 必须解析 body 再判断，
+        否则只看到 HTTPError 400，错误被静默吞掉。
+        """
         resp = self._client.put(
             f"{FEISHU_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/fields/{field_id}",
             headers=self._headers(),
             json=body,
         )
-        resp.raise_for_status()
-        return resp.json()
+        try:
+            data = resp.json()
+        except Exception:
+            resp.raise_for_status()
+            raise RuntimeError(f"更新字段失败: 响应无法解析 HTTP {resp.status_code}")
+        code = data.get("code")
+        if resp.status_code >= 400 or code not in self._FIELD_OK_CODES:
+            raise RuntimeError(
+                f"更新字段失败: HTTP {resp.status_code} code={code} "
+                f"msg={data.get('msg')} body={body}"
+            )
+        return data
 
     @staticmethod
     def _get_legacy_field_renames(table_type: str) -> list[tuple]:
@@ -322,11 +352,18 @@ class FeishuClient:
 
         # v2 字段重命名：把旧名改成新名
         renamed = []
+        conflicts = []   # 新旧字段名同时存在的（保留原样，仅提示）
         for old_name, new_name in self._get_legacy_field_renames(table_type):
             if old_name in existing_names and new_name not in existing_names:
                 field_id = existing_names[old_name]["field_id"]
+                cur_type = existing_names[old_name].get("type")
+                if cur_type is None:
+                    logger.warning(f"字段 {old_name} 缺少 type 信息，跳过重命名 {old_name}→{new_name}")
+                    continue
                 try:
-                    self.update_field(app_token, table_id, field_id, {"field_name": new_name})
+                    # 飞书改字段名必须带 type，否则 99992402 field validation failed
+                    self.update_field(app_token, table_id, field_id,
+                                      {"field_name": new_name, "type": cur_type})
                     renamed.append(f"{old_name}→{new_name}")
                     # 更新本地索引
                     existing_names[new_name] = existing_names.pop(old_name)
@@ -335,15 +372,15 @@ class FeishuClient:
                     # 重命名失败不阻断，继续创建新字段
                     logger.warning(f"重命名字段 {old_name}→{new_name} 失败: {e}")
             elif old_name in existing_names and new_name in existing_names:
-                # 新旧字段都存在（异常情况），把旧字段重命名为带 _legacy 后缀避免冲突
-                field_id = existing_names[old_name]["field_id"]
-                try:
-                    legacy_name = f"{old_name}_legacy"
-                    self.update_field(app_token, table_id, field_id, {"field_name": legacy_name})
-                    renamed.append(f"{old_name}→{legacy_name}（新字段已存在）")
-                    existing_names.pop(old_name)
-                except Exception as e:
-                    logger.warning(f"处理冲突字段 {old_name} 失败: {e}")
+                # 新旧字段名在云端同时存在：目标名已被占用，**没有冲突需要"让位"**。
+                # ⚠️ 这里原先会把旧字段自动改名为 <old>_legacy —— 那属于擅自改动用户的表结构，
+                # 飞书里若有视图/公式引用该字段就会失效。改为保留原样、只记录警告，
+                # 由用户自行决定是否清理。（改名的写法则已修正为必须带 type，见 update_field。）
+                conflicts.append(old_name)
+                logger.warning(
+                    f"字段「{old_name}」与「{new_name}」在云端同时存在，已保留原样未改动；"
+                    f"如需清理请手动在飞书表中处理"
+                )
 
         # 创建缺失字段
         created = []
@@ -390,6 +427,8 @@ class FeishuClient:
             msg_parts.append(f"跳过 {len(skipped)} 个已存在")
         if renamed:
             msg_parts.append(f"重命名 {len(renamed)} 个")
+        if conflicts:
+            msg_parts.append(f"字段名并存未改动 {len(conflicts)} 个（{'、'.join(conflicts)}）")
         if options_added:
             msg_parts.append(f"补充选项：{'、'.join(options_added)}")
         if lww_field_warning:
@@ -401,6 +440,7 @@ class FeishuClient:
             "created": created,
             "skipped": skipped,
             "renamed": renamed,
+            "field_conflicts": conflicts,
             "options_added": options_added,
         }
 
@@ -423,11 +463,19 @@ class FeishuClient:
         missing = [name for name in wanted if name not in have]
         if not missing:
             return []
+        if not field.get("field_name") or field.get("type") is None:
+            logger.warning(f"字段「{field.get('field_name')}」缺少 field_name/type，跳过补充选项")
+            return []
 
         prop = dict(field.get("property") or {})
         prop["options"] = [dict(o) for o in current if o.get("name")] + [
             {"name": name} for name in missing
         ]
-        self.update_field(app_token, table_id, field["field_id"], {"property": prop})
+        # 飞书 PUT fields 强制要求 field_name + type，否则 99992402（只传 property 必然失败）
+        self.update_field(app_token, table_id, field["field_id"], {
+            "field_name": field.get("field_name"),
+            "type": field.get("type"),
+            "property": prop,
+        })
         logger.info(f"字段「{field.get('field_name')}」补充选项: {missing}")
         return missing

@@ -311,6 +311,28 @@
         min-height: 32px; padding: 0 8px; margin: -6px -8px;
     }
     .sched-failure-clear:hover { color: var(--dh-accent); }
+    /* 任务历史卡片（后台任务 → 历史 tab）。外观写在这里而不是内联：
+       ⚠️ 内联的 border 会压过 :hover，整条可点的卡片就失去悬停反馈了 */
+    .task-hist-card {
+        display: block; color: inherit; text-decoration: none;
+        border: 1px solid var(--dh-border); border-radius: var(--dh-radius-sm);
+        padding: 10px; margin-bottom: 8px;
+        transition: background .15s ease, border-color .15s ease;
+    }
+    .task-hist-clickable:hover { background: var(--dh-surface-muted); border-color: var(--dh-border-strong); }
+    /* 失败原因用 danger 语义色 —— 深浅两套均已验证达标（同 .sched-failure-detail 的结论） */
+    .task-hist-error { font-size: 11px; color: var(--dh-danger); margin-bottom: 6px; line-height: 1.5; word-break: break-all; }
+    /* 非失败的说明性文字（自动备份：xxx / 服务已启动）—— 功能性信息，用 secondary 保证明暗双过线 */
+    .task-hist-note { font-size: 11px; color: var(--dh-text-secondary); margin-bottom: 6px; line-height: 1.5; word-break: break-all; }
+    /* 触发来源胶囊（手动 / 定时 / 补执行）：属于功能性信息，不能用 muted 前景 —— 
+       secondary 与卡片底在明暗两套主题下均达标 */
+    .task-hist-trigger {
+        display: inline-block; margin-left: 6px; padding: 1px 6px;
+        border: 1px solid var(--dh-border); border-radius: var(--dh-radius-sm);
+        background: var(--dh-surface-muted);
+        font-size: 10px; font-weight: 600; color: var(--dh-text-secondary);
+        vertical-align: middle;
+    }
     .sched-failure {
         border: 1px solid var(--dh-border); border-radius: var(--radius-sm);
         padding: 10px; margin-bottom: 8px;
@@ -1284,6 +1306,9 @@
             }
         }
         function updateActiveNav(url) {
+            // ⚠️ 先归一化：去掉 query / hash。否则带参数的地址（如 /collect?batch=xxx）
+            // 与导航里的 /collect 精确比较必然失配 —— 现象是"跳过去了但侧栏不高亮"。
+            url = String(url || '').split('?')[0].split('#')[0];
             document.querySelectorAll('.sidebar-nav a').forEach(a => {
                 const href = a.getAttribute('href');
                 if (a.classList.contains('nav-group-toggle')) {
@@ -1321,7 +1346,21 @@
         var _taskPanelOpen = false;
         var _taskPollTimer = null;
         var _lastTasks = [];
-        var TASK_TYPE_LABEL = {update_collection: '解析账号标识', sync_account: '生成账号表', refresh_accounts: '刷新账号资料', cloud_sync: '云端同步', cloud_sync_full: '全盘同步', collection_batch: '增量采集', dedup: '文件查重'};
+        var TASK_TYPE_LABEL = {import_collection: '导入分享表', update_collection: '解析账号标识', sync_account: '生成账号表', refresh_accounts: '刷新账号资料', cloud_sync: '云端同步', cloud_sync_full: '全盘同步', collection_batch: '增量采集', dedup: '文件查重', scheduled_task: '定时任务执行', feishu_sync: '飞书同步', backup: '数据库备份', service_start: '服务启动'};
+        // 触发来源（sync_history.trigger_source）→ 中文。缺失时不显示胶囊，不显示原始英文。
+        var TRIGGER_LABEL = {manual: '手动', schedule: '定时触发', catchup: '补执行', startup: '启动时自动', daily: '每日自动', sync_before: '任务前同步'};
+        // 任务类型 → 对应功能页：让「后台任务」面板里的条目能点进去看实际进度/结果。
+        // 只收录侧栏有入口的页面 —— 云同步（cloud_sync / cloud_sync_full）当前在导航里没有入口，
+        // 跳过去用户找不到回来的路，所以不收录，保持不可点。
+        var TASK_TYPE_PAGE = {
+            import_collection: '/sync/import',
+            update_collection: '/sync/resolve',
+            sync_account: '/sync/account',
+            refresh_accounts: '/sync/refresh',
+            collection_batch: '/collect',
+            dedup: '/dedup',
+            scheduled_task: '/schedule'
+        };
         var TASK_STATUS_LABEL = {pending: '排队', running: '运行', paused: '已暂停', cancelling: '取消中', done: '完成', failed: '失败', cancelled: '已取消'};
 
         async function pollTasks() {
@@ -1343,6 +1382,10 @@
         var _seenFailureId = 0;
         var _failureToastShown = {};
         var _failureUnread = false;
+        // 失败条目的标题：定时任务带「任务名#ID」，其它类型（导入 / 采集 / 账号表…）只有类型名
+        function _failureTitle(f) {
+            return f.name || TASK_TYPE_LABEL[f.type] || f.type || '任务';
+        }
         async function pollScheduleFailures() {
             try {
                 var data = await apiCall('/api/schedules/failures?since_id=' + _seenFailureId, 'GET');
@@ -1353,13 +1396,21 @@
                 _failureUnread = true;
                 renderFailureBadge();
                 // 首次拉到就弹 toast 提示（同一条只提醒一次，避免每轮重弹）
-                list.forEach(function (f) {
-                    if (_failureToastShown[f.id]) return;
+                // 每轮最多弹 2 条 toast：失败查询口径放开后，首次拉取可能一次带回几十条历史失败，
+                // 逐条弹会把屏幕刷满 —— 其余用一条汇总提示，明细交给「失败」tab 的列表
+                var pendingToast = list.filter(function (f) {
+                    if (_failureToastShown[f.id]) return false;
                     _failureToastShown[f.id] = true;
-                    showToast('定时任务「' + f.name + '」执行失败：' + f.detail, 'error');
+                    return true;
+                });
+                pendingToast.slice(0, 2).forEach(function (f) {
+                    showToast(_failureTitle(f) + ' 执行失败：' + f.detail, 'error');
                     // 「立即执行」触发时会同步弹成功 toast，与失败提醒可能重叠 → 精确记录时间戳便于排查
                     console.warn('[schedule] 失败通知', f.id, f.at);
                 });
+                if (pendingToast.length > 2) {
+                    showToast('另有 ' + (pendingToast.length - 2) + ' 条任务失败，见「后台任务 → 失败」', 'error');
+                }
             } catch (e) { /* 静默，下次重试 */ }
         }
         function renderFailureBadge() {
@@ -1368,8 +1419,8 @@
             var n = _scheduleFailures.length;
             btn.classList.toggle('has-schedule-failure', n > 0);
             if (n > 0) {
-                var names = _scheduleFailures.map(function (f) { return f.name; });
-                btn.title = '后台任务 · ' + n + ' 个定时任务执行失败：' + names.slice(-3).join('、');
+                var names = _scheduleFailures.map(_failureTitle);
+                btn.title = '后台任务 · ' + n + ' 个任务执行失败：' + names.slice(-3).join('、');
             }
             renderFailureDot();
             renderTaskPanel(_lastTasks);
@@ -1616,17 +1667,29 @@
             const body = document.getElementById('task-tab-content');
             if (!body) return;
             if (!_scheduleFailures.length) {
-                body.innerHTML = '<div class="empty-state compact"><i data-lucide="shield-check"></i><div class="es-title">暂无执行失败</div><div class="es-desc">定时任务执行失败时会记录在这里，并弹出提醒</div></div>';
+                body.innerHTML = '<div class="empty-state compact"><i data-lucide="shield-check"></i><div class="es-title">暂无执行失败</div><div class="es-desc">任务执行失败时会记录在这里，并弹出提醒</div></div>';
                 if (window._doukhubRefreshIcons) window._doukhubRefreshIcons(body);
                 return;
             }
             const rows = _scheduleFailures.slice().reverse().map(function (f) {
+                // 定时任务的失败带「任务名#ID」；其它类型（导入 / 采集 / 账号表…）只有类型名
+                const isSched = !f.type || f.type === 'scheduled_task';
+                const failName = f.name || (TASK_TYPE_LABEL[f.type] || f.type || '任务失败');
+                // ⚠️ 没有对应功能页的类型（如 feishu_sync）**不给链接** ——
+                // 否则会出现"前往「飞书同步」查看"却跳到 /schedule 这种文案与目标不符的假入口
+                const failPage = isSched ? '/schedule' : (TASK_TYPE_PAGE[f.type] || '');
+                const failPageName = isSched ? '定时任务' : (TASK_TYPE_LABEL[f.type] || f.type);
                 return '<div class="sched-failure">' +
                     '<div class="sched-failure-head">' +
-                    '<b class="sched-failure-name">' + f.name + '</b>' +
+                    '<b class="sched-failure-name">' + failName + '</b>' +
                     '<span class="sched-failure-time">' + (f.at || '') + '</span>' +
                     '</div>' +
                     '<div class="sched-failure-detail">' + (f.detail || '') + '</div>' +
+                    // 有页面才给入口：跳到"能看它执行历史"的那个页面，不再一律指向定时任务
+                    (failPage
+                        ? '<a href="' + failPage + '" onclick="closeTaskPanel()"' +
+                          ' style="display:inline-block;margin-top:6px;font-size:11px;color:var(--dh-accent);cursor:pointer;text-decoration:underline;">前往「' + failPageName + '」查看</a>'
+                        : '') +
                     '</div>';
             }).join('');
             const head = '<div class="sched-failure-bar">' +
@@ -1656,6 +1719,16 @@
             if (isBatch) {
                 if (t.status === 'running') batchOps = ' · <a onclick="pauseTask(\'' + t.task_id + '\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;font-size:11px;">暂停</a>';
                 else if (t.status === 'paused') batchOps = ' · <a onclick="resumeTask(\'' + t.task_id + '\')" style="color:var(--accent);cursor:pointer;text-decoration:underline;font-size:11px;">继续</a>';
+                // 采集批次 → 可跳「增量采集」看该批次的实际进度与账号明细
+                // （task_id 形如 batch_<批次ID>，与 /api/collection/batches/{id} 用的是同一个 ID）
+                batchOps += ' · <a href="/collect?batch=' + encodeURIComponent(batchId(t.task_id)) + '"' +
+                    ' onclick="closeTaskPanel()"' +
+                    ' style="color:var(--dh-accent);cursor:pointer;text-decoration:underline;font-size:11px;">查看采集</a>';
+            } else if (TASK_TYPE_PAGE[t.type]) {
+                // 其它类型（生成账号表 / 解析分享表 …）→ 跳到对应功能页看实际进度
+                batchOps = ' · <a href="' + TASK_TYPE_PAGE[t.type] + '" onclick="closeTaskPanel()"' +
+                    ' title="前往「' + typeLabel + '」"' +
+                    ' style="color:var(--dh-accent);cursor:pointer;text-decoration:underline;font-size:11px;">前往</a>';
             }
             return '<div style="border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;">' +
                 '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
@@ -1712,6 +1785,23 @@
                 const statusColor = statusColors[h.status] || 'var(--text-muted)';
                 const statusLabel = TASK_STATUS_LABEL[h.status] || h.status;
                 const typeLabel = TASK_TYPE_LABEL[h.task_type] || h.task_type;
+                // 触发来源：手动跑的还是定时触发的 —— 这是排查"这次到底是谁开的"的关键信息
+                const triggerHtml = TRIGGER_LABEL[h.trigger_source]
+                    ? '<span class="task-hist-trigger">' + TRIGGER_LABEL[h.trigger_source] + '</span>'
+                    : '';
+                // 带 ref_id 的记录直接进"具体那一次"的详情：采集批次 → 批次详情弹窗；
+                // 定时任务执行 → 同样直达它拉起的那个批次（失败时没有批次，落到 /schedule）
+                const hasBatchRef = !!h.ref_id &&
+                    (h.task_type === 'collection_batch' || h.task_type === 'scheduled_task');
+                const detailUrl = hasBatchRef ? '/collect?batch=' + encodeURIComponent(h.ref_id) : '';
+                const targetUrl = detailUrl || TASK_TYPE_PAGE[h.task_type] || '';
+                const goText = detailUrl ? '查看采集' : '前往';
+                // ⚠️ 这个箭头提示必须是 <span>：外层卡片本身已是 <a>，
+                // HTML 禁止 <a> 嵌套 <a> —— 浏览器会把它们拆开，页面上就多出空卡片
+                const goLink = targetUrl
+                    ? ' · <span title="前往「' + typeLabel + '」"' +
+                      ' style="color:var(--dh-accent);text-decoration:underline;font-size:11px;">' + goText + '</span>'
+                    : '';
                 const when = h.finished_at || h.created_at || '';
                 let logHtml = '';
                 try {
@@ -1721,15 +1811,36 @@
                         return '<div class="' + cls + '">' + l.message + '</div>';
                     }).join('');
                 } catch (e) {}
-                return '<div style="border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:10px;margin-bottom:8px;">' +
+                // 失败原因用 danger；成功/系统事件的说明性文字（如"自动备份：xxx"）只是记录，
+                // 同样用 danger 会让人一眼以为出错了 → 这类走 note（secondary 前景）
+                const errHtml = h.error
+                    ? '<div class="' + (h.status === 'failed' ? 'task-hist-error' : 'task-hist-note') + '">' + String(h.error).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>'
+                    : '';
+                // 有目标页 → 整张卡片可点（不只那个小链接），符合「条目即入口」的交互预期。
+                // ⚠️ 外观全部交给 .task-hist-card：border 若写在内联样式里会压过 :hover
+                const openTag = targetUrl
+                    ? '<a class="task-hist-card task-hist-clickable" href="' + targetUrl + '" onclick="closeTaskPanel()">'
+                    : '<div class="task-hist-card">';
+                const closeTag = targetUrl ? '</a>' : '</div>';
+                return openTag +
                     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
-                    '<b style="font-size:13px;">' + typeLabel + '</b>' +
-                    '<span style="font-size:11px;font-weight:600;color:' + statusColor + ';">' + statusLabel + '</span>' +
+                    '<b style="font-size:13px;">' + typeLabel + '</b>' + triggerHtml +
+                    '<span style="font-size:11px;font-weight:600;color:' + statusColor + ';">' + statusLabel + '</span>' + goLink +
                     '</div>' +
-                    '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">总 ' + (h.total || 0) + ' · 成功 ' + (h.success || 0) + ' · 失败 ' + (h.failed || 0) + (h.skipped ? ' · 跳过 ' + h.skipped : '') + (when ? ' · ' + when : '') + '</div>' +
-                    (logHtml ? '<a onclick="toggleHistoryLog(' + uid + ', this)" style="font-size:11px;color:var(--accent);cursor:pointer;">展开日志</a>' +
-                    '<div id="hist-log-' + uid + '" class="log-panel" style="display:none;margin-top:6px;max-height:200px;padding:6px 8px;font-size:11px;line-height:1.5;">' + logHtml + '</div>' : '') +
-                    '</div>';
+                    // 系统事件（服务启动 / 备份）本来就没有计数，硬塞"总 0 · 成功 0 · 失败 0"是纯噪音
+                    // → 只在真的有数时才渲染计数段
+                    '<div style="font-size:11px;color:var(--dh-text-secondary);margin-bottom:6px;">' +
+                    ((h.total || h.success || h.failed || h.skipped)
+                        ? ('总 ' + (h.total || 0) + ' · 成功 ' + (h.success || 0) + ' · 失败 ' + (h.failed || 0) + (h.skipped ? ' · 跳过 ' + h.skipped : '') + (when ? ' · ' + when : ''))
+                        : (when || '')) +
+                    '</div>' +
+                    errHtml +
+                    // 同上：卡片内不能再有 <a>。「展开日志」用 span，并掐掉冒泡
+                    // （否则点它会顺带触发外层卡片的跳转），日志区域同理
+                    (logHtml ? '<span onclick="event.preventDefault();event.stopPropagation();toggleHistoryLog(' + uid + ', this)"' +
+                    ' style="display:inline-block;font-size:11px;color:var(--dh-accent);cursor:pointer;text-decoration:underline;">展开日志</span>' +
+                    '<div onclick="event.preventDefault();event.stopPropagation();" id="hist-log-' + uid + '" class="log-panel" style="display:none;margin-top:6px;max-height:200px;padding:6px 8px;font-size:11px;line-height:1.5;">' + logHtml + '</div>' : '') +
+                    closeTag;
             }).join('') +
             (_historyHasMore ? '<div style="text-align:center;padding:8px;"><button class="btn btn-secondary btn-sm" onclick="loadHistory(false)">加载更多</button></div>' : '');
         }

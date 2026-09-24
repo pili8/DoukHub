@@ -68,7 +68,26 @@ def _is_tiktok_profile_url(value: str) -> bool:
         return False
 
 
+# 增量采集没设窗口天数时，默认往前看几天。
+# 注意：这里返回的是"天数"，引擎会理解成"今天往前 N 天"（锚点是今天），
+# 跟账号的 last_collected_at 无关 —— 这正是要的效果，见 _earliest_for 的说明。
+INCREMENT_DEFAULT_WINDOW_DAYS = 3
+
+
 def _earliest_for(row: dict, mode: str) -> str | int:
+    """算这个账号这次采集的起始日期，按优先级取第一个命中的：
+
+    1. 账号自己设了「采集窗口天数」→ 直接用这个天数；
+    2. 全量模式，或账号从没采过 → ""（不限，能翻多早就多早）；
+    3. 其余 → 默认 INCREMENT_DEFAULT_WINDOW_DAYS 天的滚动窗口。
+
+    为什么第 3 条不再用「上次采集日 − 1 天」：
+    那种写法把窗口锚在「上次采集时间」上，而账号只要没报错、状态为 success，
+    这个时间就会被刷成当天（见 collection_batch_manager._apply_marker），
+    哪怕一条作品都没下到。结果是窗口永远只有一天宽、逐轮往前滑，
+    慢一天发布的作品就永久漏掉。
+    改成固定天数后窗口锚在「今天」，不再受「上次采集时间」影响。
+    """
     window = row.get("collect_window_days")
     if window not in (None, ""):
         try:
@@ -77,10 +96,9 @@ def _earliest_for(row: dict, mode: str) -> str | int:
             pass
     if mode == "full":
         return ""
-    last = _last_date(row.get("last_collected_at"))
-    if last is None:
+    if _last_date(row.get("last_collected_at")) is None:
         return ""
-    return (last - timedelta(days=1)).strftime("%Y/%m/%d")
+    return INCREMENT_DEFAULT_WINDOW_DAYS
 
 
 def plan_collection(

@@ -1082,4 +1082,85 @@ class CollectionBatchManager:
             )
             conn.commit()
         self.db.update_collection_batch(batch_id, status=status, finished_at=now, message=message)
-        return self.db.refresh_collection_batch_counts(batch_id)
+        counts = self.db.refresh_collection_batch_counts(batch_id)
+        self._annotate_item_works(batch_id)
+        self._record_history(batch_id, status, message, counts, now)
+        return counts
+
+    def _annotate_item_works(self, batch_id: str) -> None:
+        """把笼统的「下载完成」补成实际条数，避免"显示成功、目录却空"的误导。
+
+        背景：TTD 只按"进程没抛异常"回报账号结果，模型层再据此写死「下载完成」，
+        于是"窗口把作品全筛掉了、一条没下"也显示成功 —— NAS 上就吃过这个亏。
+
+        work 标记是实时写库的，_finalize 时该批次的作品已全部落库，可以准确统计。
+        只覆盖成功项的话术，不动 status、不动计数；异常一律吞掉，不影响批次结算。
+        """
+        try:
+            for item in self.db.get_collection_batch_items(batch_id):
+                if item.get("status") != "success":
+                    continue
+                count = self.db.count_batch_account_works(
+                    batch_id,
+                    sec_user_id=str(item.get("sec_user_id") or ""),
+                    account_name=str(item.get("account_name") or ""),
+                )
+                self.db.update_collection_batch_item(
+                    item["id"],
+                    message=(f"下载 {count} 条" if count else "无新作品（窗口内 0 条）"),
+                )
+        except Exception:
+            logger.warning(f"[批次 {batch_id}] 补作品条数失败", exc_info=True)
+
+    # 批次终态 → 任务历史状态（sync_history.status 用的是 done/failed/cancelled 三值）
+    _HISTORY_STATUS = {"completed": "done", "failed": "failed", "cancelled": "cancelled"}
+
+    def _record_history(
+        self, batch_id: str, status: str, message: str, counts: dict, finished_at: str
+    ) -> None:
+        """批次结束后写一条任务历史，让「后台任务 → 历史」能看到采集、并点回批次详情。
+
+        采集批次原先只活在 collection_batches 表里，任务历史（sync_history）看不到它；
+        这里补一条摘要 + ref_id（批次 ID），前端凭 ref_id 生成 /collect?batch=<id> 链接。
+
+        幂等：同一批次只写一次 —— _finalize 在「取消收尾」「重启恢复」等路径可能重入。
+        best-effort：任何异常一律吞掉，绝不影响批次结算主流程（与 TaskManager._save_history 同一约定）。
+        """
+        try:
+            if not batch_id:
+                return
+            with self.db._connect() as conn:
+                dup = conn.execute(
+                    "SELECT 1 FROM sync_history WHERE task_type = 'collection_batch' AND ref_id = ? LIMIT 1",
+                    (batch_id,),
+                ).fetchone()
+            if dup:
+                return
+            batch = self.db.get_collection_batch(batch_id) or {}
+            success = int(counts.get("success") or 0)
+            failed = int(counts.get("failed") or 0)
+            skipped = int(counts.get("skipped") or 0)
+            started_at = batch.get("started_at") or ""
+            duration = None
+            if started_at and finished_at:
+                try:
+                    t0 = datetime.strptime(started_at[:19], "%Y-%m-%d %H:%M:%S")
+                    t1 = datetime.strptime(finished_at[:19], "%Y-%m-%d %H:%M:%S")
+                    duration = round((t1 - t0).total_seconds(), 1)
+                except ValueError:
+                    duration = None
+            self.db.add_sync_history({
+                "task_type": "collection_batch",
+                "status": self._HISTORY_STATUS.get(status, "failed"),
+                "total": success + failed + skipped,
+                "success": success,
+                "failed": failed,
+                "skipped": skipped,
+                "error": (message or "")[:500],
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "duration_sec": duration,
+                "ref_id": batch_id,
+            })
+        except Exception:
+            pass  # 留痕失败不影响批次结算

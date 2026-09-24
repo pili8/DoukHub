@@ -1,5 +1,207 @@
 # DoukHub 更新日志
 
+## 2026-09-23 v2.3.10 飞书同步修复：界面能看到结果了 + 字段操作不再静默失败
+
+本轮修掉三个「看着成功、实际没干活」的毛病，外加一次飞书侧数据归一。
+
+### 1. `/database` 的「增量同步」和两个「覆盖」按钮点了没反应
+
+后端 `/api/feishu/sync` 是**后台任务**：立刻返回 `{"task_id":…,"status":"pending"}`（JSON），
+任务在后台跑。前端却按 **SSE 流**解析（只认 `data: ` 开头的行）→ 整行 JSON 被跳过 →
+结果块**永不显示**，且**不报错**，界面永远停在「正在增量同步（本地与云端）…」。
+（任务本身其实是成功的，`sync_history` 有记录 —— 只是界面不告诉你，看起来像卡死。）
+
+改成**提交任务 + 轮询**（900ms 一次 `/api/tasks/{id}`）：进度条按 `[n/6]` 推进、日志逐行滚动、
+结束弹结果条；任务被清理时给出明确提示，不再空转到超时。
+
+| 位置 | 说明 |
+|---|---|
+| `database.html` → `feishuSyncSSE()` | 增量同步：提交 + 轮询 + 结果块 |
+| `database.html` → `fullSyncConfirm()` | 两个「覆盖」按钮，同一套解析，同修 |
+
+对照：`table.html` 的 Cookie 验证走的是**真 SSE** 接口（`/api/cookies/validate`），写法本来就对 ——
+本次是飞书链路独有的回归。
+
+### 2. 飞书字段接口静默失败（`core/feishu.py`）
+
+飞书改字段名的 `PUT .../fields/{field_id}` **强制要求同时带 `field_name` 和 `type`**，
+只传其一返回 `99992402 field validation failed`；而该接口 **HTTP 状态常为 200**，
+业务错误只藏在 `body.code` 里 —— 原先的 `update_field()` / `create_field()` 只 `raise_for_status()`，
+错误被完全吞掉。
+
+| 修复点 | 内容 |
+|---|---|
+| `update_field()` | 改字段名时带上 `type`；改完**显式检查 `body.code`**，非 0 抛可读错误 |
+| `create_field()` | 补业务码检查（同类静默失败）|
+| `_sync_field_options()` | 原先**只传 `property`**（少 `field_name`+`type`）→ 必然失败 → **从来没生效过**；补齐后「平台」字段的 `tiktok`/`xhs` 选项才真正落地 |
+| 容忍 `1254606 DataNotChange` | 值未变化等价成功，白名单放行，避免幂等调用误报 |
+
+### 3. `ensure_fields` 不再擅自改表结构
+
+字段改名的新旧同名冲突分支原本会把旧字段自动改名成 `xxx_legacy`。修复生效后它会开始真的执行 ——
+而冲突场景下目标名本来就已存在、**根本不需要让位**。改为**只记警告、不改名**，
+避免程序擅自动用户的表结构。
+
+### 4. 飞书侧「平台」字段：中英两套选项归一
+
+三表「平台」单选字段长期中英两套选项并存：`抖音/TikTok/小红书`（历史手工加）
++ `douyin/tiktok/xhs`（代码写入实际用值）。云端当时有 **97 条记录引用中文值**
+（分享表 10 / 账号表 84 / Cookie 表 3）——**直接删选项会清空这些值**。
+处理顺序：**先迁移值、再删选项**（选项定义已备份 `.tmp/feishu_platform_options_backup.json`）。
+
+| 表 | 迁移值 | 删除选项 | 复读选项 |
+|---|---|---|---|
+| 分享表 | 10 条 | 抖音 / TikTok / 小红书 | `douyin` / `tiktok` / `xhs` |
+| 账号表 | 84 条 | 抖音 / TikTok / 小红书 | `douyin` / `tiktok` / `xhs` |
+| Cookie 表 | 3 条 | 抖音 / TikTok / 小红书 / 通用 | `douyin` / `tiktok` / `xhs` |
+
+归一后三表取值与本地库 **100% 一致**（全 `douyin`）；同步复跑 **6/6 成功**、三表字段清单**零变化**。
+
+> ⚠️ 本地 SQLite 库本轮**未做任何改动**（全部以只读方式打开核对）。
+
+## 2026-09-21 v2.3.9 任务历史补全：失败全覆盖 + 定时任务执行日志 + 飞书/备份/启停留痕
+
+原先 `sync_history` 只被 4 个写入点填过（导入分享表、解析账号标识、生成账号表、刷新账号资料），
+加上一个"只在失败时写"的定时任务。结果是**后台任务三个 tab 各留一段缺口**：
+
+| 缺口 | 现状（v2.3.8 及以前） | 本次修法 |
+|---|---|---|
+| 失败 tab 只盯定时任务 | `/api/schedules/failures` 写死 `task_type='scheduled_task'` | 改为**扫全部失败**，并带上 `type` 供前端定位到对应功能页 |
+| 定时任务"成功不留痕" | 只在 `except` 分支写历史 | **成功也写**，历史从"失败清单"变成"执行日志" |
+| 不知道是谁触发的 | 无此信息 | 新增列 `trigger_source`（manual / schedule / catchup / startup / daily / sync_before）|
+| 飞书同步完全不写历史 | 它一直在失败，界面却毫无痕迹 | `FeishuSyncer.sync_incremental()` 收尾统一写一条汇总 |
+| 服务启停 / 备份无痕 | 只能翻 `server.log` | 启动写 `service_start`，备份完成写 `backup` |
+| 历史只增不删 | `cleanup_sync_history` 定义了却从没被调用 | 启动时清理，保留 **30 天** |
+
+### 1. 失败 tab：从"定时任务失败"扩成"任务失败"
+
+`/api/schedules/failures` 不再限定 `task_type`，手动采集失败、导入失败、账号表失败都会进来。
+「已读」语义不变（**水位线 + 显式 id 集合**，见 `/api/schedules/failures/ack`），
+但 ack 的取数窗口同步放开 —— 否则清空后其它类型的失败会在下一轮轮询又冒出来。
+
+顺带把硬编码文案改成通用：提醒角标、toast、空状态原先都写死"定时任务失败"。
+
+### 2. 定时任务：成功也写历史 + 记录触发来源
+
+`_record_schedule_failure()` → `_record_schedule_run(task_id, task, status, ...)`：
+
+- `status="success"` → `sync_history.status='done'`，`ref_id` 存本次拉起的**第一个批次 ID**
+- `trigger` 由调用点传入：`/api/schedules/{id}/run` 传 `manual`、启动补执行传 `catchup`、
+  调度器回调默认 `schedule`
+
+`_on_scheduled_task_trigger(task_id, ignore_enabled, trigger)` 新增第三个参数。
+
+### 3. 新增列 `sync_history.trigger_source`
+
+DDL 与 `add_columns` 同步追加在表末尾（与老库 `ADD COLUMN` 的物理位置一致）。
+前端把 `manual / schedule / catchup / startup / daily / sync_before` 渲染成小胶囊。
+
+### 4. 飞书同步写历史（并修掉一个致命 bug）
+
+⚠️ 修 `app/core/feishu_sync.py`：**3 处调用 `self._safe_text(...)`，而该方法从未存在**
+（重构时改名成 `_parse_text_value`，调用点漏改）→ `AttributeError`。
+致命点在于它在 `_sync_from_feishu` 的 `for record` 循环里、**无 per-record try/except** ——
+第一条记录就抛异常，**整个账号同步中断**（自 09-17 累计 70 次）。三处已改为 `_parse_text_value`。
+
+同文件新增 `_record_sync_history()`：把 6 步合并结果汇总成一条 `task_type='feishu_sync'` 历史
+（created+updated+deleted 计入成功，failed 计入失败，取每个 label 的第一条错误信息）。
+`sync_incremental(trigger=...)` 新增参数，启动自动同步传 `startup`、定时任务前置同步传 `sync_before`。
+
+### 5. 服务启停与备份留痕
+
+新增 `_record_system_event(task_type, status, message, trigger, dedupe_minutes)`：
+
+- 启动时写 `service_start`（**5 分钟去重**：托盘改 `.py` 会频繁重启，不去重会把历史刷屏，
+  真正有价值的"停机多久"反而看不见）
+- `check_daily_backup()` 成功写 `backup`（`trigger='daily'`）、手动备份接口写 `backup`（`trigger='manual'`）
+
+### 6. 前端（`base.html`）
+
+- 历史卡片：类型旁渲染触发来源胶囊；`total/success/failed/skipped` **全为 0 时不显示计数段**
+  （系统事件硬塞"总 0 · 成功 0 · 失败 0"是噪音）
+- 新增 `.task-hist-note`：成功条目里的说明性文字（"自动备份：xxx"）用 `secondary` 前景，
+  不再复用 `.task-hist-error` 的 `danger` —— 否则成功记录看起来像报错
+- 定时任务条目带 `ref_id` 时，与采集批次一样**整条可点**直达 `/collect?batch=<id>`
+- 类型字典补 `scheduled_task / feishu_sync / backup / service_start`；
+  `TASK_TYPE_PAGE` 补 `scheduled_task → /schedule`
+
+## 2026-09-21 v2.3.8 新增：采集批次写入任务历史（可点击回看）+ 历史卡片整条可点
+
+### 1. 采集批次进入「后台任务 → 历史」
+
+「历史」tab 读的是 `sync_history` 表，而**采集批次只写在 `collection_batches` 表** ——
+所以任务历史里看不到采集（进行中的能看到，那是 `/api/tasks` 额外附加的），已完成批次无处可查。
+
+现在在**批次结算的唯一出口** `CollectionBatchManager._finalize()` 补写一条历史：
+
+| 字段 | 取值 |
+|---|---|
+| `task_type` | `collection_batch` |
+| `status` | `completed→done` / `failed→failed` / `cancelled→cancelled` |
+| `total` / `success` / `failed` / `skipped` | 批次账号级计数（`total` = 三者之和，即实际处理数）|
+| `error` | 批次 message（失败原因，前端直接展示）|
+| `started_at` / `finished_at` / `duration_sec` | 批次起止与耗时 |
+| **`ref_id`**（新增列）| 批次 ID —— 前端据此生成 `/collect?batch=<id>` 直达链接 |
+
+- **幂等**：写前先查 `task_type='collection_batch' AND ref_id=?`，已有则跳过 ——
+  `_finalize()` 在「取消收尾」「重启恢复」路径存在重入可能。
+- **best-effort**：异常一律吞掉，不影响批次结算主流程（同 `TaskManager._save_history` 约定）。
+- **新增列** `sync_history.ref_id TEXT`：DDL 追加在**末尾**（与老库 `ADD COLUMN` 物理位置一致），
+  迁移复用既有 `add_columns`（幂等），无需手工改库。
+
+### 2. 历史条目「整条可点」
+
+- 采集批次：卡片整体即链接 → `/collect?batch=<ref_id>`，直接打开该批次详情弹窗；
+  右上角文案由「前往」改为「查看采集」。
+- 其它类型：按 `TASK_TYPE_PAGE` 跳对应功能页，卡片整体同样是链接。
+
+⚠️ 卡片外观移到 `.task-hist-card`（不再写内联）：**内联 `border` 会压过 `:hover`**，
+留在内联里就没有悬停反馈。hover 用 `--dh-surface-muted` + `--dh-border-strong`。
+
+### 3. 历史条目显示失败原因
+
+`error` 以 `--dh-danger` 小字展示在计数行下方（前端已转义 HTML）。
+
+## 2026-09-21 v2.3.7 修复：定时任务「触发了但第一行就崩」+ 任务条目可跳转
+
+### 1. 🔴 致命：所有定时任务的采集从未真正启动过
+
+11:10 实测：调度器**准时触发**，任务却在第一行抛异常：
+
+```
+File "app/main.py", line 314, in _on_scheduled_task_trigger
+    if not s.running:
+AttributeError: 'DownloaderService' object has no attribute 'running'. Did you mean: 'is_running'?
+```
+
+- **根因**：`DownloaderService` 的生命周期属性叫 **`is_running`**；`status()` 序列化出去给前端用的
+  **字典键**才叫 `"running"`。定时任务里混用了后者 → 任务状态被写成 `failed`，
+  界面上只显示"未执行"，看不出是"触发了但崩了"。
+- **修复**：`main.py` 两处 `s.running` → `s.is_running`。
+- **实测**：重启后手动触发，11:14:10 正常建出采集批次（挂在任务 #10 名下），任务状态 `failed` → `success`。
+
+### 2. ⚡ 消除定时任务启动时 ~90 秒的白等
+
+"等服务就绪"的循环把**内核未安装**的服务（尚未接入的小红书）也算在内：它永远不就绪，
+而 `is_running` 是 HTTP 探测（客户端超时 3 秒），30 轮 ≈ **90 秒纯等待**。
+现在只对 `source_exists`（内核已安装）的服务做启动与等待。
+
+### 3. 任务条目可跳转（补上缺失的交互）
+
+原先「定时任务 → 执行历史」的批次行、以及「后台任务」面板里的任务卡片都是死文字，
+看不到实际采集情况。现在：
+
+| 位置 | 行为 |
+|---|---|
+| 定时任务「执行历史」 | 整行可点 → `/collect?batch=<批次ID>`，带 hover 反馈与右箭头 |
+| 增量采集页 | 新增 `?batch=` 直达：打开即定位该批次（运行中 → 运行面板；已结束 → 流水弹窗）|
+| 后台任务「进行中」| 采集批次加「查看采集」；其它类型按任务类型映射加「前往」对应功能页 |
+| 后台任务「历史」| 按任务类型加「前往」；顺带补上缺失的 `import_collection`（导入分享表）中文名 |
+| 后台任务「失败」| 加「前往『定时任务』查看」|
+
+> 注：采集批次不写入 `sync_history`，所以「历史」里没有采集批次条目；采集批次的历史看
+> 「增量采集 → 批次历史」，或从「定时任务 → 执行历史」点进批次详情。
+
 ## 2026-09-21 v2.3.6 修复：`.form-group label` 抢样式，导致弹窗内多处控件文字贴顶 / 选中态失真
 
 ### 1. 🔴 根因：容器级规则压过组件类

@@ -264,9 +264,9 @@ class FeishuSyncer:
             v = self._safe_int(feishu_val)
             return v if v > 0 else None
         if field == "解析状态":
-            return self._safe_text(feishu_val)
+            return self._parse_text_value(feishu_val)
         if field == "获取状态":
-            return self._safe_text(feishu_val)
+            return self._parse_text_value(feishu_val)
         if field == "启用":
             return self._safe_bool(feishu_val)
         if field == "状态":
@@ -446,7 +446,7 @@ class FeishuSyncer:
         if ct:
             data["采集类型"] = self._parse_text_value(ct)
         if "获取状态" in fields:
-            data["获取状态"] = self._safe_text(fields.get("获取状态")) or "待获取"
+            data["获取状态"] = self._parse_text_value(fields.get("获取状态")) or "待获取"
         return data
 
     def _feishu_record_to_local_cookie(self, record):
@@ -482,6 +482,17 @@ class FeishuSyncer:
             local_tags = self._normalize_tags(local_val) or []
             feishu_tags = self._normalize_tags(feishu_val) or []
             return set(map(str, local_tags)) == set(map(str, feishu_tags))
+        # 验证时间：本地 "YYYY-MM-DD HH:MM:SS" 字符串 vs 飞书毫秒 int
+        if field == "验证时间":
+            try:
+                if isinstance(local_val, str) and local_val:
+                    lv = int(datetime.strptime(local_val, "%Y-%m-%d %H:%M:%S").timestamp() * 1000)
+                else:
+                    lv = int(local_val) if local_val else 0
+                fv = int(feishu_val) if feishu_val else 0
+                return lv == fv
+            except (ValueError, TypeError):
+                return False
         # 数值字段
         if field in ("等级", "粉丝数", "作品数"):
             return self._safe_int(local_val) == self._safe_int(feishu_val)
@@ -494,6 +505,30 @@ class FeishuSyncer:
         local_str = self._parse_text_value(local_val).strip() if local_val is not None else ""
         feishu_str = self._parse_text_value(feishu_val).strip() if feishu_val is not None else ""
         return local_str == feishu_str
+
+    def _serialize_for_feishu(self, field: str, value):
+        """本地值 → 飞书 API 写入格式（字段差异更新路径用）
+
+        根因修复：此前 _compute_field_updates 把本地原始值直接推给飞书——
+        标签是 JSON 字符串（多选字段要数组）→ MultiSelectFieldConvFail；
+        验证时间是 "YYYY-MM-DD HH:MM:SS" 字符串（日期字段要毫秒 int）→ DatetimeFieldConvFail。
+        新建路径 _build_*_fields 已各自转换，只有更新路径漏了，故在此统一序列化。
+        返回 None 表示该值无法序列化，跳过推送。
+        """
+        if value is None or value == "":
+            return None
+        if field == "标签":
+            return self._normalize_tags(value)  # JSON 字符串/其他 → list[str]
+        if field == "验证时间":
+            try:
+                if isinstance(value, str):
+                    return int(datetime.strptime(value, "%Y-%m-%d %H:%M:%S").timestamp() * 1000)
+                return int(value)
+            except (ValueError, TypeError):
+                return None
+        if field == "启用":
+            return bool(value)  # 与 _build_*_fields 的 bool() 口径一致
+        return value
 
     def _compute_field_updates(self, db_table: str, local_record: dict, feishu_record: dict) -> tuple[dict, dict]:
         """按字段归属计算需要更新到两端的数据（方案 B：LWW）
@@ -523,7 +558,9 @@ class FeishuSyncer:
             if not self._values_equal(field, local_val, feishu_val):
                 # 只有本地有值或飞书为空时才推送（避免覆盖飞书的非空值）
                 if local_val not in (None, "", 0) or feishu_val in (None, "", 0):
-                    to_feishu[field] = local_val
+                    serialized = self._serialize_for_feishu(field, local_val)
+                    if serialized is not None:
+                        to_feishu[field] = serialized
 
         # === Step 2: LWW 字段（按时间戳判断） ===
         local_ts = self._parse_local_timestamp(local_record.get("local_updated_at"))
@@ -555,7 +592,9 @@ class FeishuSyncer:
             if winner == "local":
                 # 本地赢，推送本地值到飞书
                 if local_val not in (None, "", 0):
-                    to_feishu[field] = local_val
+                    serialized = self._serialize_for_feishu(field, local_val)
+                    if serialized is not None:
+                        to_feishu[field] = serialized
             else:
                 # 飞书赢，更新本地
                 parsed = self._extract_field_value(field, feishu_val)
@@ -1012,29 +1051,73 @@ class FeishuSyncer:
 
     # ========== 公开入口：增量同步（双向 6 步） ==========
 
-    def sync_incremental(self) -> dict:
+    def _record_sync_history(self, all_results: dict, started: datetime, trigger: str = "manual") -> None:
+        """把一次飞书同步的合并结果写进任务历史（best-effort，绝不影响同步主流程）。
+
+        飞书同步原先**完全不写历史** —— 它一直在失败（调用点漏改的 _safe_text），
+        用户在「后台任务 → 历史 / 失败」里却什么都看不到，只能翻日志。
+        """
+        try:
+            total = success = failed = 0
+            errors: list[str] = []
+            for label, r in (all_results or {}).items():
+                r = r or {}
+                f = int(r.get("failed") or 0)
+                c = int(r.get("created") or 0)
+                u = int(r.get("updated") or 0)
+                d = int(r.get("deleted") or 0)
+                failed += f
+                success += c + u + d
+                total += c + u + d + f
+                for err in (r.get("errors") or [])[:1]:
+                    errors.append(f"{label}: {err}")
+            finished = datetime.now()
+            self.db.add_sync_history({
+                "task_type": "feishu_sync",
+                "status": "failed" if failed else "done",
+                "total": total,
+                "success": success,
+                "failed": failed,
+                "skipped": 0,
+                "error": "；".join(errors)[:500],
+                "started_at": started.strftime("%Y-%m-%d %H:%M:%S"),
+                "finished_at": finished.strftime("%Y-%m-%d %H:%M:%S"),
+                "duration_sec": round((finished - started).total_seconds(), 1),
+                "trigger_source": trigger,
+            })
+        except Exception:
+            pass  # 留痕失败不影响同步
+
+    def sync_incremental(self, trigger: str = "manual") -> dict:
         """增量双向同步（6 步：3 表 × 2 方向）
 
         返回 {label: result} 形式的合并结果（用于启动时自动同步等不显示进度的场景）
         UI 调用应使用 get_incremental_steps() 拆分为 6 个独立步骤以获得进度展示
+
+        trigger：写进任务历史的 trigger_source（startup / sync_before / manual …）
         """
+        started = datetime.now()
         all_results = {}
-        # 本地 → 飞书（3 表）
-        for db_table in ("share_cache", "account_cache", "cookie_cache"):
-            cfg = self.TABLE_CONFIG[db_table]
-            label = f"本地 → 云端：{cfg['label']}"
-            try:
-                all_results[label] = self._sync_to_feishu(db_table)
-            except Exception as e:
-                all_results[label] = {"failed": 1, "errors": [str(e)]}
-        # 飞书 → 本地（3 表）
-        for db_table in ("share_cache", "account_cache", "cookie_cache"):
-            cfg = self.TABLE_CONFIG[db_table]
-            label = f"云端 → 本地：{cfg['label']}"
-            try:
-                all_results[label] = self._sync_from_feishu(db_table)
-            except Exception as e:
-                all_results[label] = {"failed": 1, "errors": [str(e)]}
+        try:
+            # 本地 → 飞书（3 表）
+            for db_table in ("share_cache", "account_cache", "cookie_cache"):
+                cfg = self.TABLE_CONFIG[db_table]
+                label = f"本地 → 云端：{cfg['label']}"
+                try:
+                    all_results[label] = self._sync_to_feishu(db_table)
+                except Exception as e:
+                    all_results[label] = {"failed": 1, "errors": [str(e)]}
+            # 飞书 → 本地（3 表）
+            for db_table in ("share_cache", "account_cache", "cookie_cache"):
+                cfg = self.TABLE_CONFIG[db_table]
+                label = f"云端 → 本地：{cfg['label']}"
+                try:
+                    all_results[label] = self._sync_from_feishu(db_table)
+                except Exception as e:
+                    all_results[label] = {"failed": 1, "errors": [str(e)]}
+        except Exception as e:  # 兜底：单表异常已被内层吞掉，这里防的是更外层的意外
+            all_results["同步中断"] = {"failed": 1, "errors": [str(e)]}
+        self._record_sync_history(all_results, started, trigger)
         return all_results
 
     def get_incremental_steps(self) -> list:

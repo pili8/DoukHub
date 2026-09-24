@@ -532,50 +532,6 @@
     <div class="settings-group" id="group-service">
     <div class="settings-group-label"><i data-lucide="cpu"></i> 内核服务</div>
 
-    <!-- 卡片:云端配置 -->
-    <div class="card settings-card">
-        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
-            <i data-lucide="cloud"></i><span class="card-title">云端配置</span>
-            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
-        </button>
-        <div class="settings-card-body">
-            <div class="form-group">
-                <label>App ID</label>
-                <input type="text" name="feishu.app_id" value="{{ config.feishu.app_id or '' }}">
-            </div>
-            <div class="form-group">
-                <label>App Secret</label>
-                <input type="password" name="feishu.app_secret" value="{{ config.feishu.app_secret or '' }}">
-            </div>
-            <div class="form-group">
-                <label>多维表格 App Token</label>
-                <input type="text" name="feishu.app_token" value="{{ config.feishu.app_token or '' }}" placeholder="从表格 URL 中获取">
-            </div>
-            <div class="form-group">
-                <label>分享表 Table ID</label>
-                <input type="text" name="feishu.collection_table_id" value="{{ config.feishu.collection_table_id or '' }}" placeholder="原始数据源表">
-            </div>
-            <div class="form-group">
-                <label>账号表 Table ID</label>
-                <input type="text" name="feishu.account_table_id" value="{{ config.feishu.account_table_id or '' }}" placeholder="同步后的账号信息表">
-            </div>
-            <div class="form-group">
-                <label>Cookie 表 Table ID</label>
-                <input type="text" name="feishu.cookie_table_id" value="{{ config.feishu.cookie_table_id or '' }}" placeholder="Cookie 池表（可选）">
-            </div>
-            <div class="settings-actions">
-                <button type="button" class="btn btn-secondary" onclick="testFeishu()"><i data-lucide="plug-zap"></i> 测试连接</button>
-                <button type="button" class="btn btn-primary" onclick="ensureFields('all')"><i data-lucide="wrench"></i> 一键创建所有表字段</button>
-                <div class="btn-group">
-                    <button type="button" class="btn btn-secondary size-settings" onclick="ensureFields('collection')">分享表</button>
-                    <button type="button" class="btn btn-secondary size-settings" onclick="ensureFields('account')">账号表</button>
-                    <button type="button" class="btn btn-secondary size-settings" onclick="ensureFields('cookie')">Cookie表</button>
-                </div>
-                <span id="feishu-status"></span>
-            </div>
-        </div>
-    </div>
-
     <!-- 卡片:内核服务 -->
     <div class="card settings-card">
         <button type="button" class="settings-card-head" onclick="toggleCard(this)">
@@ -660,6 +616,50 @@
     <!-- ═══ 分组: 功能配置 ═══ -->
     <div class="settings-group" id="group-feature">
     <div class="settings-group-label"><i data-lucide="webhook"></i> 功能配置</div>
+
+    <!-- 卡片:云端配置 -->
+    <div class="card settings-card">
+        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
+            <i data-lucide="cloud"></i><span class="card-title">云端配置</span>
+            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="settings-card-body">
+            <div class="form-group">
+                <label>App ID</label>
+                <input type="text" name="feishu.app_id" value="{{ config.feishu.app_id or '' }}">
+            </div>
+            <div class="form-group">
+                <label>App Secret</label>
+                <input type="password" name="feishu.app_secret" value="{{ config.feishu.app_secret or '' }}">
+            </div>
+            <div class="form-group">
+                <label>多维表格 App Token</label>
+                <input type="text" name="feishu.app_token" value="{{ config.feishu.app_token or '' }}" placeholder="从表格 URL 中获取">
+            </div>
+            <div class="form-group">
+                <label>分享表 Table ID</label>
+                <input type="text" name="feishu.collection_table_id" value="{{ config.feishu.collection_table_id or '' }}" placeholder="原始数据源表">
+            </div>
+            <div class="form-group">
+                <label>账号表 Table ID</label>
+                <input type="text" name="feishu.account_table_id" value="{{ config.feishu.account_table_id or '' }}" placeholder="同步后的账号信息表">
+            </div>
+            <div class="form-group">
+                <label>Cookie 表 Table ID</label>
+                <input type="text" name="feishu.cookie_table_id" value="{{ config.feishu.cookie_table_id or '' }}" placeholder="Cookie 池表（可选）">
+            </div>
+            <div class="settings-actions">
+                <button type="button" class="btn btn-secondary" onclick="testFeishu()"><i data-lucide="plug-zap"></i> 测试连接</button>
+                <button type="button" class="btn btn-primary" onclick="ensureFields('all')"><i data-lucide="wrench"></i> 一键创建所有表字段</button>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-secondary size-settings" onclick="ensureFields('collection')">分享表</button>
+                    <button type="button" class="btn btn-secondary size-settings" onclick="ensureFields('account')">账号表</button>
+                    <button type="button" class="btn btn-secondary size-settings" onclick="ensureFields('cookie')">Cookie表</button>
+                </div>
+                <span id="feishu-status"></span>
+            </div>
+        </div>
+    </div>
 
     <!-- 卡片:API 模式 -->
     <div class="card settings-card">

@@ -241,6 +241,16 @@ def get_services() -> ServiceManager:
 # 取 12 小时：远大于单次采集的合理耗时，又能当天自愈。
 SCHEDULE_STALE_HOURS = 12
 
+# 任务历史（sync_history）保留天数。启动时清理一次。
+# 为什么给 30 天而不是默认的 7 天：定时任务现在"成功也写历史"，
+# 记录量比原来大一个量级，7 天会让用户想复盘上周的执行节奏时查不到。
+SYNC_HISTORY_KEEP_DAYS = 30
+
+# 服务启动事件的最小留痕间隔（分钟）。
+# 托盘在改 .py 时会自动重启，开发期一次会话可能重启十几次 ——
+# 不去重的话「服务启动」会把历史刷屏，真正有价值的"停机多久"反而看不见。
+SERVICE_START_DEDUPE_MINUTES = 5
+
 
 def _running_stale_minutes(last_run_at) -> float | None:
     """返回上次触发距今的分钟数；解析失败返回 None（视为"不久之前"，走保守的跳过分支）。"""
@@ -253,10 +263,14 @@ def _running_stale_minutes(last_run_at) -> float | None:
     return (datetime.now() - started).total_seconds() / 60
 
 
-async def _on_scheduled_task_trigger(task_id: int, ignore_enabled: bool = False):
+async def _on_scheduled_task_trigger(
+    task_id: int, ignore_enabled: bool = False, trigger: str = "schedule"
+):
     """定时任务触发回调：执行关联的采集方案。
 
     ignore_enabled=True 供「立即执行」使用：已禁用的任务也允许手动跑一次。
+    trigger：触发来源，写进任务历史的 trigger_source ——
+             "manual" 手动立即执行 / "schedule" 定时触发 / "catchup" 启动时补执行。
 
     冲突处理：如果当前有采集正在运行，排队等待（通过 CollectionBatchManager
     内部的队列机制自动处理 — start() 会在有活跃批次时抛 RuntimeError，
@@ -299,7 +313,7 @@ async def _on_scheduled_task_trigger(task_id: int, ignore_enabled: bool = False)
             if fs:
                 try:
                     logger.info(f"定时任务 #{task_id}: 执行前同步云端...")
-                    fs.sync_incremental()
+                    fs.sync_incremental(trigger="sync_before")
                 except Exception as e:
                     logger.warning(f"定时任务 #{task_id}: 执行前同步失败（继续执行）: {e}")
 
@@ -309,17 +323,21 @@ async def _on_scheduled_task_trigger(task_id: int, ignore_enabled: bool = False)
             raise ValueError(f"采集方案 #{task['preset_id']} 不存在")
 
         # 检查服务是否可用
+        # ⚠️ 只处理「内核已安装」的服务：未安装的内核（如尚未接入的小红书）永远不可能就绪，
+        # 拉它只会白等满整轮等待，没有任何意义 —— 直接排除在等待集合之外。
         svc = get_services()
-        for s in svc.services:
-            if not s.running:
+        needed = [s for s in svc.services if s.source_exists]
+        for s in needed:
+            if not s.is_running:
                 logger.warning(f"定时任务 #{task_id}: 服务 {s.name} 未运行，尝试启动...")
                 s.start()
 
         # 等待服务就绪（最多等 30 秒）
+        # ⚠️ is_running 是 HTTP 探测（客户端超时 3 秒），未就绪时每轮实际耗时 ≥3 秒，
+        # 30 轮就是 ~90 秒。排除未安装的内核后，这段等待才真的只等"该等的服务"。
         import time as _time
         for _ in range(30):
-            all_ready = all(s.running for s in svc.services)
-            if all_ready:
+            if all(s.is_running for s in needed):
                 break
             _time.sleep(1)
 
@@ -394,6 +412,12 @@ async def _on_scheduled_task_trigger(task_id: int, ignore_enabled: bool = False)
                     "last_run_status": "success",
                     "last_batch_ids": ",".join(b["id"] for b in batches),
                 })
+                # 成功也写一条任务历史：历史才会从「失败清单」变成「执行日志」
+                _record_schedule_run(
+                    task_id, task, "success",
+                    batch_ids=[b["id"] for b in batches],
+                    trigger=trigger,
+                )
                 # 一次性任务：本次是它唯一一次触发，跑完即自动停用并撤掉 job，
                 # 避免在列表里留一个永远不再触发的任务让用户困惑。
                 if task.get("cron_expression", "").startswith("@once:"):
@@ -419,32 +443,92 @@ async def _on_scheduled_task_trigger(task_id: int, ignore_enabled: bool = False)
             "last_run_status": "failed",
             "last_batch_ids": "",
         })
-        _record_schedule_failure(task_id, task, e)
+        _record_schedule_run(task_id, task, "failed", error=e, trigger=trigger)
 
 
-def _record_schedule_failure(task_id: int, task: dict, error: Exception) -> None:
-    """定时任务执行失败时留痕，供「失败通知」展示。
+def _record_schedule_run(
+    task_id: int,
+    task: dict,
+    status: str,
+    error: Exception | None = None,
+    batch_ids: list[str] | None = None,
+    trigger: str = "schedule",
+) -> None:
+    """定时任务每次执行都留痕（成功也写），供「失败通知」与「任务历史」共用。
 
     复用 sync_history 表（task_type='scheduled_task'），不新增表：
-    该表已有 status / error / created_at，足够表达「哪个任务、什么时候、为什么失败」。
+    该表已有 status / error / created_at，足够表达「哪个任务、什么时候、结果如何」。
     失败记录在用户点开后端任务面板时被标记为已读（见 /api/schedules/failures/ack）。
+
+    ⚠️ 成功也要写：原先只在失败时写，历史就退化成「失败清单」——
+       用户问"今天 12:10 到底跑没跑"在历史里查不到，也没法复盘执行节奏。
+
+    trigger：本次是谁触发的（manual / schedule / catchup），写入 trigger_source。
+    batch_ids：本次拉起的采集批次，第一条写进 ref_id，前端据此直达批次详情。
     """
     try:
         db = get_database()
+        ok = status == "success"
+        ids = [b for b in (batch_ids or []) if b]
         db.add_sync_history({
             "task_type": "scheduled_task",
-            "status": "failed",
+            "status": "done" if ok else "failed",
             "total": 1,
-            "success": 0,
-            "failed": 1,
+            "success": 1 if ok else 0,
+            "failed": 0 if ok else 1,
             "skipped": 0,
-            # error 里带上任务名，前端无需再查一次任务表
-            "error": f"{task.get('name', '')}#{task_id}：{error}",
+            # error 里带上任务名，前端无需再查一次任务表（形如「任务名#12：具体错误」）
+            "error": "" if ok else f"{task.get('name', '')}#{task_id}：{error}",
             "started_at": task.get("last_run_at") or "",
             "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            # 只记第一条批次：一个任务一次触发通常只拉 1 个批次（平台=全部 时才有 2 个）
+            "ref_id": ids[0] if ids else "",
+            "trigger_source": trigger,
         })
     except Exception as e:  # 通知失败绝不能再抛，否则会盖掉原始错误
-        logger.warning(f"记录定时任务失败通知时出错: {e}")
+        logger.warning(f"记录定时任务执行历史时出错: {e}")
+
+
+def _record_system_event(
+    task_type: str,
+    status: str = "done",
+    message: str = "",
+    trigger: str = "startup",
+    dedupe_minutes: int = 0,
+) -> None:
+    """记录一条「系统事件」历史（服务启停、每日备份等），让这些动作在任务历史里留痕。
+
+    原先这些事件完全无痕：想知道"服务几点起来的、中间断了多久"只能去翻 server.log。
+    best-effort：任何异常一律吞掉，绝不能影响启动流程。
+    dedupe_minutes：距上一条同类型记录不足该分钟数则跳过。
+    """
+    try:
+        db = get_database()
+        now = datetime.now()
+        if dedupe_minutes > 0:
+            latest = db.get_sync_history(task_type, limit=1)
+            prev = (latest[0].get("finished_at") if latest else "") or ""
+            if prev:
+                try:
+                    gap = now - datetime.strptime(str(prev)[:19], "%Y-%m-%d %H:%M:%S")
+                    if 0 <= gap.total_seconds() < dedupe_minutes * 60:
+                        return
+                except ValueError:
+                    pass  # 解析不了就不去重 —— 宁可多一条，也别把真事件吞掉
+        db.add_sync_history({
+            "task_type": task_type,
+            "status": status,
+            "total": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+            "error": message,
+            "started_at": "",
+            "finished_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "trigger_source": trigger,
+        })
+    except Exception as e:
+        logger.warning(f"记录系统事件历史失败（{task_type}）: {e}")
 
 
 @asynccontextmanager
@@ -478,7 +562,7 @@ async def lifespan(app: FastAPI):
         def _bg_sync():
             try:
                 logger.info("启动时自动增量同步开始...")
-                fs.sync_incremental()
+                fs.sync_incremental(trigger="startup")
                 logger.info("启动时自动增量账号处理完成")
             except Exception as e:
                 logger.warning(f"启动时自动增量账号处理失败（不影响使用）: {e}")
@@ -494,6 +578,11 @@ async def lifespan(app: FastAPI):
         _bkp = backup.check_daily_backup()
         if _bkp.get("success"):
             logger.info(f"启动时自动备份：{_bkp.get('filename')}")
+            _record_system_event(
+                "backup", "done",
+                message=f"自动备份：{_bkp.get('filename')}",
+                trigger="daily",
+            )
     except Exception as _e:
         logger.warning(f"启动备份检查失败（不影响使用）: {_e}")
 
@@ -517,9 +606,24 @@ async def lifespan(app: FastAPI):
         missed_ids = sched.check_missed_tasks(all_tasks)
         for mid in missed_ids:
             logger.info(f"补执行错过的定时任务 #{mid}")
-            asyncio.create_task(_on_scheduled_task_trigger(mid))
+            asyncio.create_task(_on_scheduled_task_trigger(mid, trigger="catchup"))
     except Exception as _e:
         logger.error(f"定时任务调度器启动失败: {_e}", exc_info=True)
+
+    # 任务历史清理：cleanup_sync_history 早就定义了，却从来没被调用过 → 历史只增不删
+    try:
+        _removed = get_database().cleanup_sync_history(days=SYNC_HISTORY_KEEP_DAYS)
+        if _removed:
+            logger.info(f"已清理 {_removed} 条超过 {SYNC_HISTORY_KEEP_DAYS} 天的任务历史")
+    except Exception as _e:
+        logger.warning(f"任务历史清理失败（不影响使用）: {_e}")
+
+    # 服务启动留痕：这样才回答得了"服务几点起的、中间断了多久"（原先只能翻 server.log）
+    _record_system_event(
+        "service_start", "done",
+        trigger="startup",
+        dedupe_minutes=SERVICE_START_DEDUPE_MINUTES,
+    )
 
     yield
 
@@ -540,7 +644,7 @@ async def lifespan(app: FastAPI):
         single_work_client = None
 
 
-app = FastAPI(title="DoukHub", version="2.3.6", lifespan=lifespan)
+app = FastAPI(title="DoukHub", version="2.3.10", lifespan=lifespan)
 
 
 
@@ -868,6 +972,11 @@ async def api_backup_create():
     result = backup.create_backup(reason="手动备份")
     if result["success"]:
         backup.cleanup_old_backups()
+        _record_system_event(
+            "backup", "done",
+            message=f"手动备份：{result.get('filename')}",
+            trigger="manual",
+        )
     return result
 
 
@@ -4384,12 +4493,17 @@ async def api_delete_schedule(task_id: int):
 
 @app.get("/api/schedules/failures")
 async def api_schedule_failures(since_id: int = 0, limit: int = 20):
-    """定时任务失败通知（供后台任务面板/侧栏角标使用）。
+    """任务失败通知（供后台任务面板/侧栏角标使用）。
 
     since_id：只看 id 大于它的记录（前端用本地记录的最后一条 id 做增量拉取）。
+
+    ⚠️ 覆盖 sync_history 里的**全部**失败，不再只盯 task_type='scheduled_task'：
+       手动采集、导入分享表、账号表同步失败原先只进「历史」、不进「失败」——
+       用户会以为"没失败过"，其实只是没提醒。
     """
     db = get_database()
-    history = db.get_sync_history(task_type="scheduled_task", limit=max(limit, 1))
+    # 多取一些：下面还要按 status 过滤，直接用 limit 当窗口会把失败漏在窗口之外
+    history = db.get_sync_history(limit=max(limit * 5, 100))
     items = []
     for h in history:
         hid = h.get("id", 0)
@@ -4400,11 +4514,14 @@ async def api_schedule_failures(since_id: int = 0, limit: int = 20):
         # 已读判定：命中显式 id 集合，或不超过"全部已读"时的水位线
         if hid in _ack_schedule_failures or hid <= _ack_watermark:
             continue
-        # error 形如「任务名#12：具体错误」
+        # 定时任务的 error 形如「任务名#12：具体错误」；其它类型就是一句原始错误
         raw = h.get("error") or ""
-        name, _, detail = raw.partition("：")
+        name, sep, detail = raw.partition("：")
+        if not sep:
+            name, detail = "", raw
         items.append({
             "id": hid,
+            "type": h.get("task_type") or "",
             "name": name,
             "detail": detail or raw,
             "at": h.get("finished_at") or h.get("created_at"),
@@ -4436,7 +4553,9 @@ async def api_schedule_failures_ack(payload: dict = Body(default={})):
         _ack_schedule_failures.update(int(i) for i in ids)
         return {"ack": len(ids)}
     db = get_database()
-    history = db.get_sync_history(task_type="scheduled_task", limit=200)
+    # 口径必须与 /api/schedules/failures 一致：水位线要盖住「清空那一刻已存在的全部失败」，
+    # 只取 scheduled_task 会漏掉其它类型，下次轮询它们又会冒出来
+    history = db.get_sync_history(limit=200)
     _ack_watermark = max([h.get("id", 0) for h in history], default=_ack_watermark)
     return {"ack": "all", "watermark": _ack_watermark}
 
@@ -4493,7 +4612,7 @@ async def api_run_schedule_now(task_id: int):
             status_code=409,
         )
     # 后台执行，立刻返回，前端用轮询 /api/schedules 观察 last_run_status
-    asyncio.create_task(_on_scheduled_task_trigger(task_id, ignore_enabled=True))
+    asyncio.create_task(_on_scheduled_task_trigger(task_id, ignore_enabled=True, trigger="manual"))
     return {"success": True, "message": "已开始执行"}
 
 

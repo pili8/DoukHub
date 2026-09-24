@@ -1634,8 +1634,15 @@ window._spaCleanup = function() {
 };
 
 // 启动
-loadPresets();
-refreshCollectionBatches();
+// 支持从外部直达某批次详情（定时任务「执行历史」、后台任务面板点进来）：
+// URL 形如 /collect?batch=<批次ID>。base.html 的 SPA 跳转会「先更新 URL 再执行页面脚本」，
+// 所以这里读到的就是目标地址的参数；等批次列表就绪后再打开，便于判断"运行中"还是"历史批次"。
+(async function () {
+    try { await loadPresets(); } catch (e) { /* 方案加载失败不阻塞直达详情 */ }
+    try { await refreshCollectionBatches(); } catch (e) { /* 列表加载失败时仍尝试按 ID 拉详情 */ }
+    var batchFromUrl = new URLSearchParams(location.search).get('batch');
+    if (batchFromUrl) showBatchDetail(batchFromUrl);
+})();
 collectionPollTimer = setInterval(function() {
     if (document.hidden) return;
     refreshCollectionBatches();

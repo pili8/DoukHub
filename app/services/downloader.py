@@ -151,6 +151,11 @@ class DownloaderService:
 
     def health_check(self) -> dict:
         """Heartbeat: restart service after 2 consecutive HTTP failures"""
+        # 内核源码未安装（目录不存在）：不参与心跳轮询，避免每 30 秒一轮的
+        # "失败 → 重启" 空转噪音。装上之后 source_exists 变 True，下一轮自动恢复。
+        if not self.source_exists:
+            self._fail_count = 0
+            return {"healthy": True, "skipped": "not_installed"}
         if self.is_running:
             self._fail_count = 0
             return {"healthy": True}

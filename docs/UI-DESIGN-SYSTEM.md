@@ -234,7 +234,8 @@
 | 日志面板 | `.log-panel` / `.workflow-log` | L2 米色底 + 等宽字体 + 语义色行；**禁止深色黑底**（"终端感"靠等宽字体与语义色行表达，不靠黑底） |
 | 空状态 | `.empty-state` | 三段式：`es-title`（14px/600）+ `es-desc`（12px muted，可省）+ `es-action`（主/次按钮，可省）；小容器加 compact 变体；图标居中 |
 | 区块卡头 | `.card h3` | 图标 chip 化：accent-soft 圆角小底 + accent 图标 + 标题，右侧留动作区；全局统一，不再各页自定义 |
-| 指标卡 | `.db-stats-enhanced .stats-card` | 左侧语义色竖条（`--sc-color` 注入）+ 大数字（tabular-nums）+ 次级说明；悬停轻微浮起 |
+| 指标卡 | `.db-stats-enhanced .stats-card` | 左侧竖条 + 大数字（tabular-nums）+ 次级说明贴卡片底边（`margin-top:auto`）；悬停轻微浮起。**2026-09-24 更新**：竖条统一 `--dh-accent`、大数字用 `--dh-text`，不再逐卡注入语义色（详见 §24） |
+| 功能面板卡 | `.dh-panel` | 卡头（`.dh-panel-head`，chip 图标 + 标题 + 右侧 `.dh-panel-meta` 状态）+ 米色行条（`.dh-panel-row`：左 `.dh-panel-info` 标题/说明 + 右按钮）+ 可选危险区（`.dh-panel-danger`）。云同步、表浏览等"功能块"一律用这套，不另写内联 flex 横幅 |
 | 全局进度浮条 | `.global-progress-chip` | 胶囊造型 + 呼吸图标 + 细进度条；暂停态加 `.is-paused`（图标转警告黄、停止呼吸） |
 | 折叠卡 | `.settings-card` | chevron 旋转 90° + 高度过渡动画；展开态才显示 `.open` |
 | 筛选弹窗 | `.tbl-filter-popup` | L1 白底 + 分组小标题（排序 / 筛选值）+ 头部分隔线 + 检索内嵌清空按钮 + 底部主按钮加宽加粗 |
@@ -852,6 +853,158 @@ for (const sheet of document.styleSheets) {
 多时段表达式必须能**还原**成时间点 chip（`0 2,8,14,20 * * *` → 4 个时间输入），
 否则用户改一次计划就把原排期冲掉。回填判定：`日 == * 且 周 == *`，
 且时或分字段含 `,` `/` `-` `*` 之一。
+
+## 20. 跨页跳转与导航高亮（2026-09-21 沉淀，强制）
+
+### 20.1 站内跳转一律写成 `<a href>`
+
+`base.html` 有一个 **document 级点击拦截器**：捕获所有同源 `<a>` → `preventDefault()` + `loadPage(href)`，
+转成 SPA 跳转（不整页刷新、侧栏与轮询不中断）。
+
+- ✅ `<a class="sched-hist-item" href="/collect?batch=xxx">…</a>`
+- ❌ `<div onclick="location.href='/collect'">` —— 绕开拦截器 → 整页刷新、丢 SPA 体验。
+
+拦截器**有意排除**的情况（仍走原生行为）：修饰键点击（Cmd/Ctrl/Shift/Alt）、`target="_blank"`、
+`download`、外链（`http(s)://`、`//`）、`mailto:`、`javascript:`、`#` 锚点。
+
+### 20.2 传参用查询串，不要自造路由
+
+`loadPage` 的顺序是「**先 `history.pushState` 更新 URL → 再执行目标页脚本**」（源码有注释说明原因），
+所以**目标页脚本里 `location.search` 读到的就是目标地址的参数**：
+
+```js
+// 目标页（如 collect.html）末尾
+var id = new URLSearchParams(location.search).get('batch');
+if (id) showBatchDetail(id);   // 先 await 页面基础数据，再打开详情
+```
+
+这就是 `/collect?batch=<批次ID>` 能直达批次详情的**全部机制**，不需要新增路由或全局状态。
+
+### 20.3 目标页是"带浮层的页面"时，记得关浮层
+
+弹窗层（`#task-panel-overlay`、模态框）**不在 `#main-content` 内**（或需手动收），
+而 SPA 只替换 main-content → 不关就成了"跳过去了、浮层还盖着"。
+→ 在链接上挂 `onclick="closeXxx()"`（它先于 document 拦截器执行，顺序无冲突）。
+
+### 20.4 ⚠️ `updateActiveNav` 是精确比较：带参数的地址会不高亮
+
+```js
+// base.html
+function updateActiveNav(url) {
+  url = String(url || '').split('?')[0].split('#')[0];   // ← 必须归一化（2026-09-21 补）
+  ...
+  a.classList.toggle('active', href === url);            // 导航里的 href 是 /collect
+}
+```
+
+不归一化时，`/collect?batch=xxx` 与 `/collect` **精确比较必然失配** →
+现象是"**页面跳过去了，侧栏那一项却没亮**"（2026-09-21 实测 `activeNav: ''`）。
+
+**自检**：任何新增的带参数跳转，都要验一次"跳转后 `.nav-submenu a.active` 是不是目标页"。
+
+## 21. 整条可点的卡片：⚠️ 绝不能嵌套 `<a>`（2026-09-21 实测，强制）
+
+把"一个条目"做成整条可点时，最自然的写法是外层包 `<a href>`。但**卡片内部往往已有链接**
+（如「展开日志」「前往」）—— HTML 规范禁止 `<a>` 嵌套 `<a>`，浏览器解析时会**把它们拆开**：
+
+```
+<a href=/x>标题 <a>展开日志</a></a>     ← 源码
+<a href=/x>标题 </a><a>展开日志</a>     ← 实际进入 DOM：两个并列元素
+```
+
+**实测现象**（后台任务 → 历史 tab，v2.3.8 首测）：3 条数据渲染出 **6 张卡片**，
+其中 3 张是**空卡片**（只剩边框、没有文字）—— 页面上凭空多出一排空框。
+
+**判定用代码**（比看截图可靠）：
+
+```js
+// 空卡片数必须为 0；卡片数应等于数据条数
+Array.from(document.querySelectorAll('.task-hist-card')).filter(c => !c.textContent.trim()).length
+```
+
+**正确写法**：
+- 外层：只允许**一个** `<a class="…" href="…">`（或 `<div onclick>`）。
+- 内部所有交互件改 `<span>`，并**掐掉冒泡与默认行为**，否则点它会顺带触发外层跳转：
+
+```js
+'<span onclick="event.preventDefault();event.stopPropagation();toggleLog(id, this)">展开日志</span>' +
+'<div onclick="event.preventDefault();event.stopPropagation();">…日志内容…</div>'
+```
+
+⚠️ `<a>` 内可以放 `<div>` / `<span>`（HTML5 允许流内容），**禁止**放 `<a>`、`<button>` 等交互元素。
+
+**另一条**：卡片 `border` **不要写内联样式** —— 内联优先级高于 `:hover`，写了 hover 就没反馈。
+外观统一交给 CSS 类（`.task-hist-card` + `.task-hist-clickable:hover`）。
+
+## 22. 历史条目的颜色基线（2026-09-21 实测）
+
+后台任务「历史」条目实测对比度（背景 = 卡片 `--dh-surface`）：
+
+| 元素 | 令牌 | 暗色 | 明色 |
+|---|---|---|---|
+| 类型标题 | `--dh-text` | 9.38 | 6.49 |
+| 计数 / 时间行 | **`--dh-text-secondary`** | 9.38 | 6.49 |
+| 失败原因 | `--dh-danger` | 6.7 | 4.63 |
+
+⚠️ 计数行原先用 `--text-muted`（旧令牌）→ **明色只有 2.38:1**，11px 小字基本看不清。
+"总 N · 成功 N · 失败 N · 时间"是**功能性信息**，按 §14 必须 ≥4.5 → 一律 `--dh-text-secondary`。
+
+## 23. 历史/事件条目的信息密度（2026-09-21 沉淀，强制）
+
+后台任务「历史」在 v2.3.9 后同时承载**任务记录**（导入 / 采集 / 定时任务）与**系统事件**
+（服务启动、备份），两者信息结构不同，前端必须分支渲染：
+
+1. **计数段只在真的有数时渲染**。系统事件（服务启动、备份）没有计数，硬塞
+   "总 0 · 成功 0 · 失败 0" 是纯噪音 —— 此时只显示时间。
+2. **失败原因用 `--dh-danger`，成功 / 系统事件的说明文字用 `--dh-text-secondary`。**
+   语义色不能挪用：`备份完成：xxx.db` 用红色显示，用户一眼会以为备份失败了。
+   对应类：`.task-hist-error`（danger）/ `.task-hist-note`（secondary）。
+3. **触发来源胶囊**（`.task-hist-trigger`）：只在 `TRIGGER_LABEL` 里有中文映射时才渲染，
+   没映射的值**不显示**，绝不裸露英文原始值。
+4. **批量告警不得逐条弹 toast。** 失败查询口径放开后，首次拉取可能一次带回几十条历史失败；
+   toast 每轮**最多 2 条 + 1 条汇总**，明细交给列表。
+   这与「徽章不装静态信息」是同一思路：提醒负责指向"去哪看"，而不是把内容倒给用户。
+5. **没有对应功能页的条目不给链接。** 宁可没有入口，也不要出现
+   `前往「飞书同步」查看` 却跳到 `/schedule` 这种**文案与目标不符的假入口** ——
+   类型 → 页面映射（`TASK_TYPE_PAGE`）里查不到就不渲染 `<a>`。
+
+---
+
+## 24. 数据概览页（`/database`）与全站成套（2026-09-24 落地）
+
+> 背景：用户反馈「这个页面重新设计，跟其他页面成套」。渲染态对比 `/status`（首页范式）后定位出 4 处
+> "外来感"，全部为 templates + CSS 改动，**未触碰后端 / 数据 / 查询逻辑**。
+
+### 24.1 四处不一致与修法
+
+| # | 问题（改造前实测） | 修法 |
+|---|---|---|
+| 1 | **页头只有标题、没有 `.page-sub`** —— 全站 11 个页面都有副标题，只有本页没有 | 补 `.page-title-wrap` + `.page-sub`（照 `dedup.html` 范本） |
+| 2 | **5 张指标卡各用一色**（accent / success / warning / info / purple）—— 绿=成功、橙=警告被当作分类装饰色，用户会把「账号表 990」读成状态，违反 §11.4 / §14.1 | 竖条统一 `--dh-accent`、大数字改 `--dh-text`；删掉 JS 里 5 处内联 `style="color:var(--accent/success/warning/info)"`（旧令牌，且与 CSS 的 `--sc-color` 重复） |
+| 3 | **「表浏览」卡是内联 flex 横幅**（`style="display:flex…"` + `--text-muted` 旧令牌 + 第二个实心蓝按钮），与「云端同步」卡不是一套语言 | 重做成同构卡：chip 卡头 + 米色行条；按钮降级 `.btn-secondary` |
+| 4 | **一屏 2 个实心蓝按钮**（立即同步 + 前往表浏览），违反 §11.2 | 「前往表浏览」降级为描边，实心蓝只留本页主操作「立即同步」（实测 2 → **1**） |
+
+### 24.2 顺手做的泛化
+
+`.dh-cloud*` 系列（原为云端同步卡专有）**改名为 `.dh-panel*`** 并提升为通用功能面板组件（见 §11.5）：
+云端同步 / 表浏览 两张卡现在共用同一套 `head + row + danger` 结构。
+JS 依赖的 id 同步改名 `dh-cloud-last` → `dh-panel-meta`（`loadLastSync()` 内 3 处）。
+
+### 24.3 指标卡"说明基线对齐"的做法
+
+卡片改 `display:flex; flex-direction:column`，说明行 `.stats-sub { margin-top:auto; padding-top:12px }` 贴底。
+理由：5 张卡的说明项数天然不等（账号表 4 项 / 采集历史 1 项），**拉平 sub 高度解决不了** ——
+让说明块从卡片底边向上生长，才能同时做到"数字同一水平线 + 说明底线同一水平线"。
+
+**实测判据**（1440px / 明暗各一遍）：5 张卡高度同为 `151.8px`、`.stats-sub` 底边同为 `235.8px`、
+竖条色唯一、数字色唯一（浅 `rgb(31,27,23)` / 深 `rgb(247,243,236)`）。
+「采集历史」卡原为空说明，补一行结构性文案「已归档采集批次」（接口只给 `total`，**不编造额外数据**）。
+
+### 24.4 回归结果
+
+明暗双模式 + 375 / 768 / 1440 三档视口：无控制台错误、无横向溢出、深色下无纯黑文字；
+点「前往表浏览」→ `location.pathname = /table` 且侧栏高亮 `/table`（SPA 跳转正常）。
+窄屏 375px 下行条自动堆叠（按钮独占第二行，行条高 147.3px），说明文字未被挤成逐字竖排。
 
 
 

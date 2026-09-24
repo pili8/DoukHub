@@ -212,4 +212,80 @@ SCHEDULE_MIN_INTERVAL_MINUTES = 60   # 硬拦；< 此值直接拒
 ⚠️ **通用教训**：从旧表 `RENAME COLUMN` 迁移过来的字段，**类型可能与建表 DDL 不符**。
 凡是跨越「DB ↔ Python ↔ JS」比对的 id，一律显式转字符串。
 
+## 任务历史（`sync_history`）的写入点（2026-09-21 v2.3.9 补全）
+
+「后台任务 → 历史」读的就是这张表。写入点：
+
+| `task_type` | 写入位置 | 时机 |
+|---|---|---|
+| `import_collection` | `main.py` 导入分享表接口 | 导入完成 |
+| `update_collection` / `sync_account` / `refresh_accounts` / `cloud_sync` / `dedup` | `core/tasks.py` → `TaskManager._save_history()` | 后台任务结束（**best-effort**，异常静默）|
+| `collection_batch` | `core/collection_batch_manager.py` → `_record_history()` | 批次结算时（**v2.3.8 新增**）|
+| `scheduled_task` | `main.py` → `_record_schedule_run()` | **每次执行都写**（v2.3.9 起含成功；此前仅失败）|
+| `feishu_sync` | `core/feishu_sync.py` → `_record_sync_history()` | `sync_incremental()` 收尾（**v2.3.9 新增**）|
+| `service_start` / `backup` | `main.py` → `_record_system_event()` | 服务启动 / 备份完成（**v2.3.9 新增**）|
+
+**两列关联字段**（都追加在表末尾 —— 与老库 `ADD COLUMN` 的物理位置一致）：
+
+- `ref_id`（v2.3.8）：**关联对象 ID**。采集批次写批次 ID；`scheduled_task` 写本次拉起的
+  **第一个批次 ID**。前端据此把条目做成 `/collect?batch=<ref_id>` 直达链接。
+- `trigger_source`（v2.3.9）：**谁触发的**。取值 `manual` / `schedule` / `catchup` /
+  `startup` / `daily` / `sync_before`，前端渲染成小胶囊；**字典里没有的值不显示**（不裸露英文）。
+
+**`_record_history()` 的三条约定**（其它写入点同理）：
+1. **幂等** —— 写前查 `task_type='collection_batch' AND ref_id=?`；`_finalize()` 在
+   「取消收尾」「重启恢复」「worker 兜底」路径都可能重入，不查就会写重复条目。
+2. **best-effort** —— 异常一律吞掉，绝不影响主流程（`_record_schedule_run` /
+   `_record_sync_history` / `_record_system_event` 同此约定）。
+3. **`total` = `success + failed + skipped`**（实际处理数），不是批次的 `total_accounts`（计划数）；
+   批次被取消时两者会差很多，历史里要表达"实际跑了多少"。
+
+⚠️ **`service_start` 必须去重**（`SERVICE_START_DEDUPE_MINUTES = 5`）：托盘见 `.py` 变化就自动重启，
+开发期一次会话能重启十几次，不去重历史会被刷屏，真正有价值的"停机多久"反而看不见。
+
+**失败通知（`/api/schedules/failures`）的口径**：扫**全部** `status='failed'`，不再限定
+`task_type='scheduled_task'`（手动采集、导入、账号表失败原先都只进历史、不进失败）。
+已读语义不变 —— **水位线 + 显式 id 集合**，别用 `-1` 哨兵。
+⚠️ **ack 接口的取数窗口必须与它一致**（`get_sync_history(limit=200)`，不带 `task_type`），
+否则清空后其它类型的失败会在下一轮轮询又冒出来。
+⚠️ 口径放开后首次拉取可能一次带回几十条历史失败 → 前端 toast **每轮最多 2 条 + 1 条汇总**，
+不能逐条弹（会刷满屏幕）。
+
+**历史清理**：`cleanup_sync_history(days=SYNC_HISTORY_KEEP_DAYS)` 挂在 lifespan，保留 **30 天**。
+（v2.3.9 前该函数定义了却从未被调用 → 历史只增不删，最早可追到 2026-08-13。）
+注意 `created_at` 是 SQLite `CURRENT_TIMESTAMP`（**UTC**）而清理也用 `datetime('now')`（UTC）——
+两边口径一致所以比较正确；但**跨端显示**这条时间会差 8 小时，`finished_at` 才是本地时间。
+
+---
+
+## 飞书「字段定义」接口（bitable fields）—— 三个已修的坑（2026-09-23）
+
+**① PUT fields 强制要求 `field_name` + `type` 同时传。** 只传 `property`（改选项）或只传 `field_name`（改名）
+都返回 `99992402 field validation failed`，`field_violations` 会写明 `field_name is required` / `type is required`。
+正确写法 `{field_name, type, property}`，`type` 从 `list_fields()` 的 items 里取。
+
+**② 该接口 HTTP 状态常是 400，真实业务码在 body 里。** 只 `raise_for_status()` 只能看到 `HTTPError 400`、
+**看不到 99992402** → 错误被静默吞掉。必须**先解析 body 再判断**。
+白名单 `_FIELD_OK_CODES = (0, 1254606)`：**`1254606 = DataNotChange`（值未变化）等价成功**，
+幂等重跑（传原值）必然返回它，当失败会误报。`create_field` / `update_field` 都照此检查。
+
+**③ 修好一个"静默失败"，必须排查它以前替谁兜底。** `ensure_fields` 的冲突分支（新旧字段名并存）
+原会把旧字段改名成 `<old>_legacy`，因 ① 一直失败；修好后会**真的改名**，等于擅自改用户表结构
+（飞书视图/公式引用会失效）。但目标名本来已占用、**没有冲突需要让位** →
+改为**只 `logger.warning`、保留原样**，返回值新增 `field_conflicts` 供前端提示。
+
+**三处调用点**：`ensure_fields` 的两处 legacy 改名、`_sync_field_options`（补单选/多选选项）、`create_field`。
+⚠️ 补选项时 `property.options` 是**整体替换**，必须把现有项**连同 `id` 原样回传**，
+否则飞书会把旧选项当新选项重建，引用它的单元格数据会错位。
+
+## 云端同步按钮的反馈方式：提交任务 + 轮询，不是 SSE
+
+`/api/feishu/sync` 与 `/api/feishu/sync/full` 都是**后台任务模式**：立即返回 JSON `{task_id, status:"pending"}`，
+过程日志写进任务对象（`tm.add_log`）。前端必须**轮询** `GET /api/tasks/{task_id}` 渲染。
+⚠️ 曾误按 **SSE 流**解析（只认 `data: ` 开头的行）→ 整行 JSON 被跳过 → `complete` 分支永不执行
+**且不报错** → 界面永远停在「正在同步…」（任务其实成功）。
+判据：**该接口返回 `application/json` 就不是 SSE**；`table.html` 的 `/api/cookies/validate` 才是真 SSE。
+前端统一执行器 `runSyncTask()`（`database.html`）：轮询 900ms、`cursor` 记已渲染的**绝对日志行号**
+（兼容 `log_total` 截断）、连续 5 次查不到才报错、30 分钟超时。
+
 

@@ -249,7 +249,13 @@
   display:flex;align-items:center;justify-content:space-between;gap:12px;
   padding:11px 13px;border:1px solid var(--dh-border);border-radius:var(--dh-radius-sm);
   background:var(--dh-surface);
+  /* 整行可点：跳转到「增量采集」看这次批次的实际情况 */
+  text-decoration:none;color:inherit;cursor:pointer;
+  transition:border-color .15s,background .15s;
 }
+.sched-hist-item:hover { border-color:var(--dh-accent);background:var(--dh-accent-soft); }
+.sched-hist-go { flex-shrink:0;font-size:15px;color:var(--dh-text-muted);transition:color .15s; }
+.sched-hist-item:hover .sched-hist-go { color:var(--dh-accent); }
 .sched-hist-main { min-width:0;display:flex;flex-direction:column;gap:4px; }
 .sched-hist-time { font-size:13px;color:var(--dh-text);font-variant-numeric:tabular-nums; }
 .sched-hist-meta { display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--dh-text-secondary); }
@@ -1293,7 +1299,11 @@ async function showHistory(taskId) {
         } else {
             body.innerHTML = '<div class="sched-hist">' + batches.map(function(b) {
                 var meta = STATUS_META[b.status] || { cls: 'pending', label: b.status || '-', icon: 'help-circle' };
-                return '<div class="sched-hist-item">' +
+                var bid = String(b.id || '');
+                // 整行就是链接 → 跳「增量采集」看这次批次的实际情况；
+                // base.html 的全局点击拦截器会把站内 <a> 转成 SPA 跳转，这里不用手写 loadPage。
+                return '<a class="sched-hist-item" href="/collect?batch=' + encodeURIComponent(bid) + '"' +
+                       ' title="在「增量采集」中查看该批次详情" onclick="closeHistoryModal()">' +
                     '<div class="sched-hist-main">' +
                         '<span class="sched-hist-time">' + fmtDatetime(b.started_at) + '</span>' +
                         '<span class="sched-hist-meta">' +
@@ -1310,7 +1320,8 @@ async function showHistory(taskId) {
                         '<span class="bad">失败 <b>' + (b.failed_accounts || 0) + '</b></span>' +
                         '<span>跳过 <b>' + (b.skipped_accounts || 0) + '</b></span>' +
                     '</div>' +
-                '</div>';
+                    '<i data-lucide="chevron-right" class="sched-hist-go"></i>' +
+                '</a>';
             }).join('') + '</div>';
         }
     } catch(e) {

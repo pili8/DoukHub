@@ -789,3 +789,108 @@ def test_worker_survives_read_failure_and_processes_next_batch(
     assert db.get_collection_batch("good")["status"] == "completed"
     assert manager._active_batch_id is None
     assert manager._active_process is None
+
+
+def test_finalize_marks_zero_works_instead_of_bare_success(db, manager):
+    """状态如实：TTD 没报错但一条没下到时，别再显示「下载完成」。
+
+    这正是 NAS 上踩过的坑 —— 窗口把作品筛光、目录空空，页面却显示成功。
+    """
+    insert_douyin_account(db)
+    batches = asyncio.run(
+        manager.start(
+            db.get_all_accounts(),
+            rating_min=3,
+            platforms=("douyin",),
+            mode="incremental",
+        )
+    )
+    batch_id = batches[0]["id"]
+    item = db.find_collection_batch_item(batch_id, "sec1")
+
+    assert manager._apply_marker(
+        batch_id,
+        {
+            "type": "account_result",
+            "sec_user_id": "sec1",
+            "status": "success",
+            "message": "下载完成",
+        },
+    )
+    assert db.get_collection_batch_item_by_id(item["id"])["message"] == "下载完成"
+
+    manager._finalize(batch_id, "completed", 0)
+
+    saved = db.get_collection_batch_item_by_id(item["id"])
+    assert saved["status"] == "success"
+    assert saved["message"] == "无新作品（窗口内 0 条）"
+
+
+def test_finalize_reports_actual_downloaded_work_count(db, manager):
+    """状态如实：真下到东西时，话术给出准确条数。"""
+    insert_douyin_account(db)
+    batches = asyncio.run(
+        manager.start(
+            db.get_all_accounts(),
+            rating_min=3,
+            platforms=("douyin",),
+            mode="incremental",
+        )
+    )
+    batch_id = batches[0]["id"]
+    item = db.find_collection_batch_item(batch_id, "sec1")
+
+    assert manager._apply_marker(
+        batch_id,
+        {
+            "type": "account_result",
+            "sec_user_id": "sec1",
+            "status": "success",
+            "message": "下载完成",
+        },
+    )
+    for index in range(3):
+        db.upsert_collection_work(
+            batch_id,
+            sec_user_id="sec1",
+            account_name="一号",
+            platform="douyin",
+            aweme_id=f"aweme{index}",
+            file_name=f"作品{index}.mp4",
+        )
+
+    manager._finalize(batch_id, "completed", 0)
+
+    assert db.get_collection_batch_item_by_id(item["id"])["message"] == "下载 3 条"
+
+
+def test_finalize_keeps_failed_item_message(db, manager):
+    """状态如实：失败项不参与改写，原有错误信息保留。"""
+    insert_douyin_account(db)
+    batches = asyncio.run(
+        manager.start(
+            db.get_all_accounts(),
+            rating_min=3,
+            platforms=("douyin",),
+            mode="incremental",
+        )
+    )
+    batch_id = batches[0]["id"]
+    item = db.find_collection_batch_item(batch_id, "sec1")
+
+    assert manager._apply_marker(
+        batch_id,
+        {
+            "type": "account_result",
+            "sec_user_id": "sec1",
+            "status": "failed",
+            "message": "TTD 返回账号处理失败",
+        },
+    )
+
+    manager._finalize(batch_id, "failed", 1)
+
+    assert (
+        db.get_collection_batch_item_by_id(item["id"])["message"]
+        == "TTD 返回账号处理失败"
+    )

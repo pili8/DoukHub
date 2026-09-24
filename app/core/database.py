@@ -195,7 +195,9 @@ class Database:
                     started_at TEXT,
                     finished_at TEXT,
                     duration_sec REAL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    ref_id TEXT,
+                    trigger_source TEXT
                 )
             """)
 
@@ -429,6 +431,19 @@ class Database:
             ("last_run_status", "TEXT DEFAULT ''"),
             ("last_batch_ids", "TEXT"),
         ])
+
+        # v2.3.8：任务历史的「关联对象 ID」
+        # 采集批次历史用它存批次 ID，前端据此把整条记录做成可点击 → 直达 /collect?batch=<ref_id>
+        # 刻意追加在末尾（而非插在中间），与老库 ADD COLUMN 的物理位置保持一致
+        add_columns.setdefault("sync_history", []).append(
+            ("ref_id", "TEXT"),
+        )
+
+        # v2.3.9：任务历史的「触发来源」（manual / schedule / catchup / startup / daily / sync_before）
+        # 用于回答"这次到底是谁开的" —— 手动点的、定时触发的、还是启动时补执行的
+        add_columns.setdefault("sync_history", []).append(
+            ("trigger_source", "TEXT"),
+        )
 
         # 执行 v1 业务字段重命名
         for table, renames in rename_map.items():
@@ -943,6 +958,31 @@ class Database:
             ).fetchone()
             return int(row[0]) if row else 0
 
+    def count_batch_account_works(
+        self, batch_id: str, sec_user_id: str = "", account_name: str = ""
+    ) -> int:
+        """统计某批次里某个账号**实际落库**的作品条数。
+
+        用于把笼统的「下载完成」补成真实条数，避免"显示成功、目录却空"的误导。
+        优先按 sec_user_id 匹配；没有则退回账号名；两者都没有则返回 0。
+        """
+        conds = ["batch_id = ?"]
+        params: list = [batch_id]
+        if sec_user_id:
+            conds.append("sec_user_id = ?")
+            params.append(sec_user_id)
+        elif account_name:
+            conds.append("account_name = ?")
+            params.append(account_name)
+        else:
+            return 0
+        with self._connect() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM collection_works WHERE {' AND '.join(conds)}",
+                params,
+            ).fetchone()
+            return int(row[0]) if row else 0
+
     def list_batch_works(self, batch_id: str) -> list[dict]:
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row
@@ -1239,18 +1279,29 @@ class Database:
     # ========== 统计和查询 ==========
 
     def get_table_counts(self) -> dict:
-        """获取各表记录数"""
+        """获取各表记录数
+
+        ⚠️ 键名需覆盖前端统计卡读取的全部键（含 collection_history / scheduled_tasks），
+        否则 `/api/database/stats` 这条降级分支会让卡片显示 0。
+        """
         tables = [
             "share_cache",
             "account_cache",
             "cookie_cache",
             "sync_history",
+            "collection_batches",
+            "scheduled_tasks",
         ]
         counts = {}
         with self._connect() as conn:
             for table in tables:
-                row = conn.execute(f"SELECT COUNT(*) as count FROM {table}").fetchone()
-                counts[table] = row["count"] if row else 0
+                try:
+                    row = conn.execute(f"SELECT COUNT(*) as count FROM {table}").fetchone()
+                    counts[table] = row["count"] if row else 0
+                except Exception:
+                    counts[table] = 0
+        # 前端「采集历史」卡读的是 collection_history 键，值取自采集批次表
+        counts["collection_history"] = counts.get("collection_batches", 0)
         return counts
 
     def search_table(self, table: str, keyword: str, field: Optional[str] = None) -> list[dict]:
@@ -1953,33 +2004,69 @@ class Database:
             return results
 
     def get_stats_detailed(self) -> dict:
-        """获取各表的详细统计（含同步状态、启用状态等细分）"""
+        """获取各表的详细统计（含同步状态、启用状态等细分）
+
+        ⚠️ 口径说明（2026-09-23 修正）：此前这里用的枚举值（'已就绪' / '解析失败'）
+        是 v3 迁移前的旧口径，迁移后真实值多了「已生成 / 链接失效 / 非主页链接」等，
+        导致前端「已解析 0 / 未解析 1052」这种明显错误。真实枚举以
+        `share_cache.解析状态` 与 `feishu.py` 的字段定义为准：
+        - 分享表：待解析 / 已就绪 / 已生成 / 已删除 / 解析失败 / 链接失效 / 非主页链接 / 暂不支持
+          已解析 = 已就绪 + 已生成（拿到 sec_user_id 即算成功）
+          未解析 = 待解析（尚未处理）
+          解析失败 = 解析失败 + 链接失效 + 非主页链接 + 暂不支持
+        - 账号表：待获取 / 已获取 / 获取失败
+          未获取 = 待获取；获取失败单列
+        ⚠️ 键名 `collection_history` / `scheduled_tasks` 是**前端统计卡读取的键**，
+        必须与 `templates/database.html` 的 refreshStats() 保持一致。
+        """
         stats = {}
         with self._connect() as conn:
+            def one(sql: str, default: int = 0) -> int:
+                """单值计数；表不存在等异常时返回 default（不打断整块统计）"""
+                try:
+                    row = conn.execute(sql).fetchone()
+                    return row[0] if row else default
+                except Exception:
+                    return default
+
             # 分享表
             stats["share_cache"] = {
-                "total": conn.execute("SELECT COUNT(*) FROM share_cache").fetchone()[0],
-                "resolved": conn.execute("SELECT COUNT(*) FROM share_cache WHERE 解析状态='已就绪'").fetchone()[0],
-                "not_synced": conn.execute("SELECT COUNT(*) FROM share_cache WHERE 解析状态 != '已就绪'").fetchone()[0],
-                "has_error": conn.execute("SELECT COUNT(*) FROM share_cache WHERE 解析状态 = '解析失败'").fetchone()[0],
+                "total": one("SELECT COUNT(*) FROM share_cache"),
+                "resolved": one("SELECT COUNT(*) FROM share_cache WHERE 解析状态 IN ('已就绪','已生成')"),
+                "not_synced": one("SELECT COUNT(*) FROM share_cache WHERE 解析状态='待解析'"),
+                "has_error": one(
+                    "SELECT COUNT(*) FROM share_cache "
+                    "WHERE 解析状态 IN ('解析失败','链接失效','非主页链接','暂不支持')"
+                ),
             }
             # 账号表
             stats["account_cache"] = {
-                "total": conn.execute("SELECT COUNT(*) FROM account_cache").fetchone()[0],
-                "enabled": conn.execute("SELECT COUNT(*) FROM account_cache WHERE 启用=1").fetchone()[0],
-                "disabled": conn.execute("SELECT COUNT(*) FROM account_cache WHERE (启用=0 OR 启用 IS NULL)").fetchone()[0],
-                "not_fetched": conn.execute("SELECT COUNT(*) FROM account_cache WHERE 获取状态 != '已获取'").fetchone()[0],
+                "total": one("SELECT COUNT(*) FROM account_cache"),
+                "enabled": one("SELECT COUNT(*) FROM account_cache WHERE 启用=1"),
+                "disabled": one("SELECT COUNT(*) FROM account_cache WHERE (启用=0 OR 启用 IS NULL)"),
+                "not_fetched": one("SELECT COUNT(*) FROM account_cache WHERE 获取状态='待获取'"),
+                "fetch_failed": one("SELECT COUNT(*) FROM account_cache WHERE 获取状态='获取失败'"),
             }
             # Cookie表
             stats["cookie_cache"] = {
-                "total": conn.execute("SELECT COUNT(*) FROM cookie_cache").fetchone()[0],
-                "normal": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE 状态='正常'").fetchone()[0],
-                "invalid": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE 状态='失效'").fetchone()[0],
-                "enabled": conn.execute("SELECT COUNT(*) FROM cookie_cache WHERE 启用=1").fetchone()[0],
+                "total": one("SELECT COUNT(*) FROM cookie_cache"),
+                "normal": one("SELECT COUNT(*) FROM cookie_cache WHERE 状态='正常'"),
+                "invalid": one("SELECT COUNT(*) FROM cookie_cache WHERE 状态='失效'"),
+                "enabled": one("SELECT COUNT(*) FROM cookie_cache WHERE 启用=1"),
             }
             # 同步历史
             stats["sync_history"] = {
-                "total": conn.execute("SELECT COUNT(*) FROM sync_history").fetchone()[0],
+                "total": one("SELECT COUNT(*) FROM sync_history"),
+            }
+            # 采集历史（前端「采集历史」卡）—— 真实数据源是采集批次表
+            # ⚠️ 另有一张同名的 collection_history 表，属废弃表（0 行常量），勿用
+            stats["collection_history"] = {
+                "total": one("SELECT COUNT(*) FROM collection_batches"),
+            }
+            # 定时任务（前端「定时任务」卡）
+            stats["scheduled_tasks"] = {
+                "total": one("SELECT COUNT(*) FROM scheduled_tasks"),
+                "enabled": one("SELECT COUNT(*) FROM scheduled_tasks WHERE enabled=1"),
             }
         return stats
 

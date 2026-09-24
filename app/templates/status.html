@@ -49,8 +49,19 @@
 }
 .status-info { flex: 1; min-width: 0; }
 .status-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
-.status-message { font-size: 13px; color: var(--text-muted); }
-.status-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .status-message { font-size: 13px; color: var(--text-muted); }
+    /* 卡片第三行：次要小字（上次同步时间等），色用主题令牌，不抢状态主信息 */
+    .status-meta { font-size: 12px; color: var(--dh-text-muted); margin-top: 4px; }
+    .status-meta:empty { display: none; }
+    .status-actions { display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+
+    /* 窄屏：按钮区换到第二行独占整宽。
+       ⚠️ 没有这条时，.status-card 是 nowrap 的 flex，按钮会把 .status-info（flex:1 + min-width:0）
+       压到几十像素 → 「云端 API」「连接成功」被拆成逐字竖排（移动端实测复现，加第二个按钮后触发）。 */
+    @media (max-width: 768px) {
+        .status-card { flex-wrap: wrap; gap: 12px; }
+        .status-actions { width: 100%; flex-wrap: wrap; }
+    }
 </style>
 
 <div class="page-head">
@@ -99,8 +110,10 @@
         <div class="status-info">
             <div class="status-name">云端 API</div>
             <div class="status-message" id="feishu-message">检测中...</div>
+            <div class="status-meta" id="feishu-last-sync"></div>
         </div>
         <div class="status-actions">
+            <a class="btn btn-secondary btn-sm" href="/database"><i data-lucide="refresh-cw"></i> 前往同步</a>
             <button class="btn btn-secondary btn-sm" onclick="testFeishu()"><i data-lucide="plug-zap"></i> 测试连接</button>
         </div>
     </div>
@@ -153,6 +166,37 @@
         } catch (e) {
             console.error('获取状态失败:', e);
         }
+        loadFeishuLastSync();
+    }
+
+    // 云端 API 卡片第三行：最近一次云端同步的时间与结果。
+    // 复用 /api/sync/history/cloud_sync（与 /database 的「上次同步」同一数据源），零后端改动。
+    async function loadFeishuLastSync() {
+        const el = document.getElementById('feishu-last-sync');
+        if (!el) return;
+        try {
+            const data = await apiCall('/api/sync/history/cloud_sync', 'GET');
+            const h = (data.history || [])[0];
+            if (!h) { el.textContent = '暂无同步记录'; return; }
+            const ok = (h.success != null && h.total != null) ? ` · 成功 ${h.success}/${h.total}` : '';
+            el.textContent = `上次同步 ${_relTime(h.finished_at || h.started_at)}${ok}`;
+        } catch (e) {
+            el.textContent = '';   // 取不到就整行隐藏（CSS: .status-meta:empty）
+        }
+    }
+
+    // 相对时间：刚刚 / N 分钟前 / N 小时前 / N 天前（与 database.html / schedule.html 同语义）
+    function _relTime(ts) {
+        if (!ts) return '';
+        const t = new Date(String(ts).replace(' ', 'T'));
+        if (isNaN(t.getTime())) return '';
+        const diff = Math.floor((Date.now() - t.getTime()) / 1000);
+        if (diff < 0) return '';
+        if (diff < 60) return '刚刚';
+        if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+        if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+        if (diff < 86400 * 30) return Math.floor(diff / 86400) + ' 天前';
+        return '';
     }
 
     function updateStatusCard(name, status) {
