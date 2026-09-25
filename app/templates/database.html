@@ -104,6 +104,14 @@
     font-size: 12px; font-weight: 600; margin-bottom: 3px; color: var(--dh-text-secondary);
 }
 .db-stats-enhanced .stats-card .stats-title i { font-size: 14px; color: var(--sc-color); }
+/* 云端对账徽章：统计卡标题右侧的「云端 N」 */
+.db-stats-enhanced .stats-card .stats-cloud {
+    margin-left: auto; font-weight: 500; font-size: 11px;
+    display: inline-flex; align-items: center; gap: 2px;
+    color: var(--dh-text-muted);
+}
+.db-stats-enhanced .stats-card .stats-cloud.ok { color: var(--dh-success); }
+.db-stats-enhanced .stats-card .stats-cloud.err { color: var(--dh-danger); }
 /* 数字与说明同一行基线：紧凑排版不再上下堆叠 */
 .db-stats-enhanced .stats-card .stats-num {
     font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums;
@@ -347,6 +355,16 @@
                 ? '<i class="ph ph-check-circle" style="color: var(--dh-success);"></i>'
                 : '<i class="ph ph-warning-circle" style="color: var(--dh-danger);"></i>';
             el.innerHTML = head + chips;
+            // 回填顶部统计卡的「云端 N」徽章
+            d.tables.forEach(t => {
+                const b = document.getElementById('cloud-badge-' + t.key);
+                if (!b) return;
+                b.className = 'stats-cloud ' + (t.match ? 'ok' : 'err');
+                b.title = '飞书端行数' + (t.match ? '，与本地一致' : '，与本地不一致！');
+                b.innerHTML = '<i class="ph ph-cloud"></i>云端 ' + t.cloud + (t.match
+                    ? ' <i class="ph ph-check-bold"></i>'
+                    : ' <i class="ph ph-x-bold"></i>');
+            });
         } catch (e) {
             el.innerHTML = '<i class="ph ph-cloud-slash"></i> 数据对账读取失败';
         }
@@ -360,7 +378,7 @@
             let html = '';
             const coll = s.share_cache || {};
             html += `<div class="stats-card">
-                <div class="stats-title"><i class="ph ph-clipboard-text"></i> 分享表</div>
+                <div class="stats-title"><i class="ph ph-clipboard-text"></i> 分享表<span class="stats-cloud" id="cloud-badge-share_cache"></span></div>
                 <div class="stats-num">${coll.total || 0}</div>
                 <div class="stats-sub">
                     <span class="ok">已解析 ${coll.resolved || 0}</span>
@@ -370,7 +388,7 @@
             </div>`;
             const acc = s.account_cache || {};
             html += `<div class="stats-card">
-                <div class="stats-title"><i class="ph ph-user"></i> 账号表</div>
+                <div class="stats-title"><i class="ph ph-user"></i> 账号表<span class="stats-cloud" id="cloud-badge-account_cache"></span></div>
                 <div class="stats-num">${acc.total || 0}</div>
                 <div class="stats-sub">
                     <span class="ok">启用 ${acc.enabled || 0}</span>
@@ -381,7 +399,7 @@
             </div>`;
             const ck = s.cookie_cache || {};
             html += `<div class="stats-card">
-                <div class="stats-title"><i class="ph ph-cookie"></i> Cookie表</div>
+                <div class="stats-title"><i class="ph ph-cookie"></i> Cookie表<span class="stats-cloud" id="cloud-badge-cookie_cache"></span></div>
                 <div class="stats-num">${ck.total || 0}</div>
                 <div class="stats-sub">
                     <span class="ok">正常 ${ck.normal || 0}</span>
