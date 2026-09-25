@@ -21,27 +21,36 @@
     <div class="dh-panel-head">
         <h3><i class="ph ph-cloud-arrow-up"></i> 云端同步</h3>
         <span class="dh-panel-meta" id="dh-panel-meta"></span>
+        <label class="sync-gate" title="关闭后为纯本地模式：所有自动与手动同步都会停用">
+            <input type="checkbox" id="sync-gate-check" onchange="toggleAutoSync(this.checked)">
+            <span class="sync-gate-track"><span class="sync-gate-knob"></span></span>
+            <span class="sync-gate-text" id="sync-gate-text">已启用</span>
+        </label>
     </div>
 
-    <div class="dh-panel-row">
+    <div class="dh-panel-row" id="sync-main-area">
         <div class="dh-panel-info">
             <div class="dh-panel-info-title">增量同步</div>
-            <p class="dh-panel-info-desc">双向同步本地与云端；按字段归属自动合并冲突 —— 人工字段以云端为准，接口字段以本地为准。</p>
+            <p class="dh-panel-info-desc">双向同步本地与云端；两端都改过的行按修改时间新旧自动取舍，其余各自跟随。本地改动约 1 分钟内自动推送，云端变化按设定间隔自动检查。</p>
         </div>
-        <button class="btn btn-primary" onclick="feishuSyncSSE('/api/feishu/sync', '增量同步（本地与云端）')" id="btn-incremental"><i class="ph ph-lightning"></i> 立即同步</button>
     </div>
+    <button class="sync-big-btn" onclick="feishuSyncRun('/api/feishu/sync', '增量同步（本地与云端）')" id="btn-incremental"><i class="ph ph-lightning"></i> <span>立即同步</span></button>
+    <p class="sync-hint">点一下就跑，无需确认 · 关闭开关即进入纯本地模式</p>
 
-    <div class="dh-panel-danger">
-        <div class="dh-panel-danger-title">
-            <i class="ph ph-warning"></i> 全盘同步
-            <span>数据混乱时的托底手段</span>
+    <details class="sync-adv" id="sync-adv-area">
+        <summary><i class="ph ph-wrench"></i> 高级恢复（纠偏用，日常不用）</summary>
+        <div class="dh-panel-danger">
+            <div class="dh-panel-danger-title">
+                <i class="ph ph-warning"></i> 全盘同步
+                <span>数据混乱时的托底手段</span>
+            </div>
+            <p class="dh-panel-danger-desc">以选定一方为准，逐行覆盖另一方（差异覆盖，不清空重建）。属于纠偏/恢复工具，日常无需使用。</p>
+            <div class="btn-group">
+                <button class="btn btn-warning" onclick="fullSyncConfirm('to-feishu')" id="btn-full-to"><i class="ph ph-cloud-arrow-up"></i> 以本地覆盖云端</button>
+                <button class="btn btn-warning" onclick="fullSyncConfirm('from-feishu')" id="btn-full-from"><i class="ph ph-cloud-arrow-down"></i> 以云端覆盖本地</button>
+            </div>
         </div>
-        <p class="dh-panel-danger-desc">选定一方作为基准，强制覆盖另一方 —— <strong>目标端数据会被全部清空后重建</strong>。使用前务必备份。</p>
-        <div class="btn-group">
-            <button class="btn btn-warning" onclick="fullSyncConfirm('to-feishu')" id="btn-full-to"><i class="ph ph-cloud-arrow-up"></i> 以本地覆盖云端</button>
-            <button class="btn btn-warning" onclick="fullSyncConfirm('from-feishu')" id="btn-full-from"><i class="ph ph-cloud-arrow-down"></i> 以云端覆盖本地</button>
-        </div>
-    </div>
+    </details>
 
     <div id="feishu-sync-status" class="dh-panel-status"></div>
     <div id="feishu-sync-progress" class="dh-panel-progress" style="display:none;">
@@ -192,6 +201,41 @@
     .dh-panel .dh-panel-danger .btn-group { display: flex; flex-direction: column; align-items: stretch; }
     .dh-panel .dh-panel-danger .btn { width: 100%; justify-content: center; }
 }
+
+/* ===== 云同步总闸开关 ===== */
+.sync-gate { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+.sync-gate input { display: none; }
+.sync-gate-track { width: 40px; height: 22px; border-radius: 11px; background: var(--dh-border-strong, #b4b2a9); position: relative; transition: background .2s; flex-shrink: 0; }
+.sync-gate input:checked + .sync-gate-track { background: var(--dh-accent); }
+.sync-gate-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .2s; }
+.sync-gate input:checked + .sync-gate-track .sync-gate-knob { left: 20px; }
+.sync-gate-text { font-size: 13px; color: var(--dh-text-secondary); }
+
+/* ===== 通栏大同步按钮 ===== */
+.sync-big-btn {
+    width: 100%; height: 44px; margin-top: 4px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: var(--dh-accent); color: #fff; border: none; border-radius: var(--dh-radius);
+    font-size: 14px; font-weight: 500; cursor: pointer; transition: opacity .15s;
+}
+.sync-big-btn:hover { opacity: .9; }
+.sync-big-btn:disabled { opacity: .45; cursor: not-allowed; }
+.sync-big-btn i { font-size: 17px; }
+.sync-hint { font-size: 12px; color: var(--dh-text-muted); text-align: center; margin: 8px 0 0; }
+
+/* ===== 高级恢复折叠区 ===== */
+.sync-adv { margin-top: 14px; border-top: 0.5px solid var(--dh-border); padding-top: 10px; }
+.sync-adv summary {
+    list-style: none; cursor: pointer; font-size: 13px; color: var(--dh-text-secondary);
+    display: flex; align-items: center; gap: 6px; padding: 4px 0; user-select: none;
+}
+.sync-adv summary::-webkit-details-marker { display: none; }
+.sync-adv summary i { transition: transform .2s; }
+.sync-adv[open] summary i { transform: rotate(90deg); }
+.sync-adv[open] .dh-panel-danger { margin-top: 8px; }
+
+/* 总闸关闭时的半透明态 */
+.sync-panel-off .sync-big-btn, .sync-panel-off .sync-adv { opacity: .4; pointer-events: none; }
 </style>
 
 {% endblock %}
@@ -307,7 +351,7 @@
     // 真正的过程在后台任务里跑，日志写进任务对象 —— 所以这里必须轮询，不能按 SSE 流解析。
     async function runSyncTask(url, title, payload, opts) {
         const o = opts || {};
-        const btns = document.querySelectorAll('[onclick*="feishuSyncSSE"], [onclick*="fullSyncConfirm"]');
+        const btns = document.querySelectorAll('[onclick*="feishuSyncRun"], [onclick*="fullSyncConfirm"]');
         btns.forEach(b => b.disabled = true);
         const status = document.getElementById('feishu-sync-status');
         const result = document.getElementById('feishu-sync-result');
@@ -419,17 +463,50 @@
         }
     }
 
-    async function feishuSyncSSE(url, title) {
-        if (!await confirmDialog('确定要执行 ' + title + ' 吗？', { title: '操作确认', confirmText: '执行', danger: false })) return;
+    async function feishuSyncRun(url, title) {
+        // 增量同步是安全操作（删除保护 + 行级 LWW），高频动作不弹确认
         return runSyncTask(url, title, {}, { barColor: 'var(--dh-accent)' });
     }
+
+    // ===== 云同步总闸开关 =====
+    function applyGateState(on) {
+        const panel = document.querySelector('.dh-panel');
+        document.getElementById('sync-gate-text').textContent = on ? '已启用' : '已关闭';
+        if (panel) panel.classList.toggle('sync-panel-off', !on);
+    }
+
+    async function toggleAutoSync(checked) {
+        try {
+            const resp = await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ feishu: { auto_sync: checked } }),
+            });
+            const r = await resp.json();
+            if (!r.success) throw new Error(r.message || '保存失败');
+            applyGateState(checked);
+            showToast(checked ? '云同步已开启' : '云同步已关闭，进入纯本地模式', 'success');
+        } catch (e) {
+            showToast('保存失败: ' + e.message, 'error');
+            document.getElementById('sync-gate-check').checked = !checked;
+        }
+    }
+
+    (async function initGate() {
+        try {
+            const cfg = await (await fetch('/api/settings')).json();
+            const on = cfg && cfg.feishu ? cfg.feishu.auto_sync !== false : true;
+            document.getElementById('sync-gate-check').checked = on;
+            applyGateState(on);
+        } catch (e) { /* 配置读取失败时保持默认开 */ }
+    })();
 
     async function fullSyncConfirm(direction) {
         const isToFeishu = direction === 'to-feishu';
         const actionText = isToFeishu ? '以本地覆盖云端' : '以云端覆盖本地';
         const targetText = isToFeishu ? '云端（飞书）表的所有数据' : '本地数据库的所有数据';
         const sourceText = isToFeishu ? '本地数据库' : '云端（飞书）';
-        const msg1 = `危险操作: ${actionText}\n\n这将会:\n1. 清空 ${targetText}\n2. 用 ${sourceText} 的数据完全覆盖\n\n此操作不可逆! 请确认你已备份重要数据。`;
+        const msg1 = `${actionText}\n\n这将会:\n1. 以 ${sourceText} 为基准\n2. 逐行覆盖 ${targetText}\n\n此操作不可逆! 请确认你已备份重要数据。`;
         if (!await confirmDialog(msg1, { title: '危险操作', confirmText: '继续' })) return;
         const typed = await confirmDialog('请输入「确认」以执行' + actionText + '(核武器操作):', { title: '最后确认', confirmText: '执行', requireText: '确认' });
         if (!typed) { showToast('已取消: 未输入"确认"', 'info'); return; }

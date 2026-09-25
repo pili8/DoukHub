@@ -24,6 +24,8 @@ DEFAULT_CONFIG = {
         "collection_table_id": "",   # 分享表
         "account_table_id": "",      # 账号表
         "cookie_table_id": "",       # Cookie 表
+        "auto_sync": True,           # 云同步总闸：False = 纯本地模式（所有自动/手动同步短路）
+        "poll_minutes": 30,          # 云端变更兜底检查间隔（分钟，10~240）
     },
     "downloader": {
         "tiktok_downloader_path": "./TikTokDownloader",

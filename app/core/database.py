@@ -1238,6 +1238,24 @@ class Database:
 
     _SYNC_TABLES = {"share_cache", "account_cache", "cookie_cache"}
 
+    def get_sync_fingerprint(self) -> str:
+        """三张同步表的变更指纹：MAX(local_updated_at) + 行数。
+
+        任何写入都会刷新 local_updated_at（增/改），删除会改变行数 ——
+        两者组合即可零侵入覆盖全部写路径，供自动同步循环检测本地变更。
+        """
+        parts = []
+        with self._connect() as conn:
+            for tbl in ("share_cache", "account_cache", "cookie_cache"):
+                try:
+                    mx, cnt = conn.execute(
+                        f'SELECT IFNULL(MAX(local_updated_at),"") , COUNT(*) FROM "{tbl}"'
+                    ).fetchone()
+                except Exception:
+                    mx, cnt = "", 0
+                parts.append(f"{tbl}:{mx}:{cnt}")
+        return "|".join(parts)
+
     def get_deleted_ids(self, table: str) -> list[str]:
         """已改为硬删除，不再有墓碑记录。保留接口兼容，始终返回空列表。"""
         return []

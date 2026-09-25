@@ -307,10 +307,10 @@ async def _on_scheduled_task_trigger(
     })
 
     try:
-        # 执行前同步（如果配置了）
+        # 执行前同步（如果配置了；总闸关闭时跳过）
         if task["sync_before"]:
             fs = get_feishu_syncer()
-            if fs:
+            if fs and config.get("feishu.auto_sync", True):
                 try:
                     logger.info(f"定时任务 #{task_id}: 执行前同步云端...")
                     fs.sync_incremental(trigger="sync_before")
@@ -532,6 +532,71 @@ def _record_system_event(
 
 
 @asynccontextmanager
+def _auto_sync_loop():
+    """自动同步后台线程（Syncthing 模式）：
+
+    - 本地变更即时同步：指纹（MAX(local_updated_at)+行数）变化 → 去抖 60 秒 → 触发
+    - 云端变更兜底轮询：每 poll_minutes 分钟查一次飞书「修改时间」最大值，有变 → 触发
+    - 总闸 feishu.auto_sync=False 时完全空转（纯本地模式）
+    """
+    import time as _t
+    _t.sleep(120)  # 等启动同步跑完、服务稳定
+    last_fp = None
+    last_feishu_max = None
+    last_feishu_check = 0.0
+    dirty_since = None
+    while True:
+        try:
+            if not config.get("feishu.auto_sync", True):
+                last_fp = None
+                dirty_since = None
+                _t.sleep(30)
+                continue
+            fs = get_feishu_syncer()
+            if not fs:
+                _t.sleep(30)
+                continue
+
+            now = _t.time()
+            fp = get_database().get_sync_fingerprint()
+
+            if last_fp is None:
+                # 首轮只建立基线，不触发
+                last_fp = fp
+                last_feishu_check = now
+                _t.sleep(15)
+                continue
+
+            if fp != last_fp:
+                if dirty_since is None:
+                    dirty_since = now
+                if now - dirty_since >= 60:
+                    logger.info("检测到本地数据变更，自动增量同步开始...")
+                    fs.sync_incremental(trigger="auto_local")
+                    last_fp = get_database().get_sync_fingerprint()
+                    dirty_since = None
+                    last_feishu_check = now
+                    last_feishu_max = None
+                    logger.info("本地变更自动同步完成")
+            else:
+                dirty_since = None
+                interval_min = max(10, min(240, int(config.get("feishu.poll_minutes", 30) or 30)))
+                if now - last_feishu_check >= interval_min * 60:
+                    last_feishu_check = now
+                    mx = fs.get_feishu_max_modified()
+                    if mx and mx != last_feishu_max:
+                        if last_feishu_max is not None:
+                            logger.info("检测到云端数据变更，自动增量同步开始...")
+                            fs.sync_incremental(trigger="auto_remote")
+                            last_fp = get_database().get_sync_fingerprint()
+                            logger.info("云端变更自动同步完成")
+                        last_feishu_max = mx
+            _t.sleep(15)
+        except Exception as e:
+            logger.warning(f"自动同步循环异常（不影响使用，60 秒后重试）: {e}")
+            _t.sleep(60)
+
+
 async def lifespan(app: FastAPI):
     import threading
 
@@ -540,7 +605,6 @@ async def lifespan(app: FastAPI):
     if config.downloader.get("auto_start_services", True):
         logger.info("正在后台启动 Downloader 服务...")
         threading.Thread(target=svc.start_all, daemon=True).start()
-
     # TTD/XHS 心跳监控：30秒检查一次，连续2次失败自动重启（可通过 keep_services_alive 开关关闭）
     def _health_loop():
         import time as _t
@@ -558,7 +622,7 @@ async def lifespan(app: FastAPI):
 
     # 启动后自动增量同步（不阻塞 UI）
     fs = get_feishu_syncer()
-    if fs:
+    if fs and config.get("feishu.auto_sync", True):
         def _bg_sync():
             try:
                 logger.info("启动时自动增量同步开始...")
@@ -567,6 +631,9 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning(f"启动时自动增量账号处理失败（不影响使用）: {e}")
         threading.Thread(target=_bg_sync, daemon=True).start()
+
+    # 自动同步循环：本地变更即时 + 云端兜底轮询（受 feishu.auto_sync 总闸控制）
+    threading.Thread(target=_auto_sync_loop, daemon=True).start()
 
     _batch_manager = get_collection_batch_manager()
     _batch_manager.recover_interrupted_batches()
@@ -3048,6 +3115,8 @@ async def api_database_stats_detailed():
 @app.post("/api/feishu/sync")
 async def api_feishu_sync():
     """增量同步：本地 ↔ 云端 双向 6 步 — 后台任务"""
+    if not config.get("feishu.auto_sync", True):
+        return JSONResponse({"success": False, "message": "云同步已关闭（纯本地模式），请在同步面板打开开关"}, status_code=400)
     fs = get_feishu_syncer()
     if not fs:
         return JSONResponse({"success": False, "message": "云端未配置"}, status_code=400)

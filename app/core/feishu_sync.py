@@ -37,6 +37,9 @@ from typing import Callable, Optional
 from .database import Database
 from .feishu import FeishuClient
 
+# 增量同步防重入锁：手动 / 自动循环 / 定时任务可能并发触发
+_SYNC_LOCK = __import__("threading").Lock()
+
 logger = logging.getLogger("doukhub.feishu_sync")
 
 # 飞书侧自动维护的时间字段（毫秒 int）。v4 起统一用「修改时间」。
@@ -261,7 +264,7 @@ class FeishuSyncer:
         fields = {
             "分享码": record.get("share_code", ""),
             "平台": record.get("平台", ""),
-            "等级": record.get("等级", 3),
+            "等级": int(record.get("等级", 3) or 3),
             "解析状态": record.get("解析状态") or "待解析",
         }
         tags = self._normalize_tags(record.get("标签"))
@@ -286,7 +289,7 @@ class FeishuSyncer:
             "账号名称": record.get("账号名称", ""),
             "平台": record.get("平台", ""),
             "sec_user_id": record.get("sec_user_id", ""),
-            "等级": record.get("等级", 3),
+            "等级": int(record.get("等级", 3) or 3),
             "获取状态": record.get("获取状态") or "待获取",
         }
         if record.get("链接"):
@@ -866,7 +869,17 @@ class FeishuSyncer:
         """增量双向同步（3 表，每表一次全量拉取 + 行级 LWW）
 
         返回 {label: result} 形式的合并结果。
+        防重入：已有同步在跑时直接返回 busy（手动/自动/定时可能并发触发）。
         """
+        if not _SYNC_LOCK.acquire(blocking=False):
+            logger.warning("已有同步任务在跑，本次触发跳过（防重入）")
+            return {"_busy": True}
+        try:
+            return self._sync_incremental_inner(trigger)
+        finally:
+            _SYNC_LOCK.release()
+
+    def _sync_incremental_inner(self, trigger: str = "manual") -> dict:
         started = datetime.now()
         all_results = {}
         for db_table in ("share_cache", "account_cache", "cookie_cache"):
@@ -878,6 +891,26 @@ class FeishuSyncer:
                 all_results[label] = {"failed": 1, "errors": [str(e)]}
         self._record_sync_history(all_results, started, trigger)
         return all_results
+
+    def get_feishu_max_modified(self) -> str:
+        """三张飞书表的行级「修改时间」最大值（云端变更兜底检查，轻量探测）。
+
+        返回 "表1:最大毫秒|表2:..." 字符串；任何一端行被增/删/改都会变化。
+        """
+        parts = []
+        for db_table in ("share_cache", "account_cache", "cookie_cache"):
+            table_id = self._get_table_id(db_table)
+            mx = 0
+            try:
+                for rec in self.feishu.get_all_records(self.app_token, table_id):
+                    ts = rec.get("fields", {}).get(FEISHU_TS_FIELD)
+                    if isinstance(ts, (int, float)) and ts > mx:
+                        mx = int(ts)
+            except Exception as e:
+                logger.warning(f"云端修改时间检查失败（{db_table}）: {e}")
+                return ""  # 检查失败时返回空串，本轮不触发
+            parts.append(f"{db_table}:{mx}")
+        return "|".join(parts)
 
     def get_incremental_steps(self) -> list:
         """获取同步的 3 个独立步骤（用于后台任务进度展示）
