@@ -37,6 +37,8 @@
 
     <div class="sync-meta-line" id="dh-panel-meta"><i class="ph ph-spinner ph-spin"></i> 正在读取同步状态…</div>
 
+    <div class="sync-reconcile" id="sync-reconcile"><i class="ph ph-spinner ph-spin"></i> 正在对账…</div>
+
     <details class="sync-adv" id="sync-adv-area">
         <summary><i class="ph ph-wrench"></i> 高级恢复（纠偏用，日常不用）</summary>
         <div class="dh-panel-danger">
@@ -153,6 +155,27 @@
 .sync-meta-line.err { color: var(--dh-danger); }
 .sync-meta-line.run { color: var(--dh-accent); }
 
+/* 数据对账行：本地 ↔ 云端行数比对 chip */
+.sync-reconcile {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-top: 10px; padding: 0 2px;
+    font-size: 12px; color: var(--dh-text-secondary);
+}
+.sync-reconcile > i { font-size: 14px; }
+.recon-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px;
+    border: 1px solid var(--dh-border);
+    border-radius: 999px;
+    background: var(--dh-surface-muted);
+    color: var(--dh-text-secondary);
+    white-space: nowrap;
+}
+.recon-chip b { font-weight: 600; }
+.recon-chip b.ok { color: var(--dh-success); }
+.recon-chip b.err { color: var(--dh-danger); }
+.recon-chip b.na { color: var(--dh-text-muted); }
+
 /* 危险区：浅底 + 细左边，不与日常区抢视觉权重 */
 .dh-panel .dh-panel-danger {
     margin-top: 12px; padding: 13px 15px;
@@ -239,9 +262,14 @@
 .sync-adv[open] summary i { transform: rotate(90deg); }
 .sync-adv[open] .dh-panel-danger { margin-top: 8px; }
 
-/* 总闸关闭时的半透明态 */
-.sync-panel-off .dh-panel-row, .sync-panel-off .sync-adv, .sync-panel-off .sync-meta-line { opacity: .4; pointer-events: none; }
-.sync-panel-off .sync-gate-text { color: var(--dh-text-muted); }
+/* 总闸关闭：卡片级警示态（虚线边框 + 内容降透明度） */
+#sync-panel.sync-panel-off {
+    border: 1px dashed var(--dh-warning);
+    background: var(--dh-surface);
+    background: linear-gradient(0deg, color-mix(in srgb, var(--dh-warning-soft) 40%, transparent), color-mix(in srgb, var(--dh-warning-soft) 40%, transparent)), var(--dh-surface);
+}
+.sync-panel-off .dh-panel-row, .sync-panel-off .sync-adv, .sync-panel-off .sync-meta-line, .sync-panel-off .sync-reconcile { opacity: .45; pointer-events: none; }
+.sync-panel-off .sync-gate-text { color: var(--dh-warning); font-weight: 600; }
 </style>
 
 {% endblock %}
@@ -252,6 +280,7 @@
     // SPA 友好:直接调用(脚本在 body 末尾,DOM 已就绪;SPA 二次进入由 rebindScripts 重执行)
     refreshStats();
     loadLastSync();
+    loadReconcile();
 
     // 上次同步摘要：复用现有 /api/sync/history/{task_type}，零后端改动。
     // ⚠️ 历史里可能存在 running 僵尸记录（托盘重启把同步进程拦腰砍断，状态永远停在 running），
@@ -296,6 +325,31 @@
         } catch (e) {
             el.className = 'sync-meta-line';
             el.textContent = '同步状态读取失败';
+        }
+    }
+
+    // 数据对账：本地 ↔ 云端行数比对（后端 60s 缓存，页面随便刷）
+    async function loadReconcile() {
+        const el = document.getElementById('sync-reconcile');
+        if (!el) return;
+        try {
+            const d = await (await fetch('/api/feishu/reconcile')).json();
+            if (!d.feishu_ok) {
+                el.innerHTML = '<i class="ph ph-cloud-slash"></i> 数据对账不可用：' + (d.message || '云端未配置');
+                return;
+            }
+            const chips = d.tables.map(t => {
+                const badge = t.match
+                    ? '<b class="ok"><i class="ph ph-check-circle"></i> 一致</b>'
+                    : `<b class="err"><i class="ph ph-warning-circle"></i> 差 ${Math.abs(t.local - t.cloud)}</b>`;
+                return `<span class="recon-chip">${t.label} 本地 ${t.local} ↔ 云端 ${t.cloud} ${badge}</span>`;
+            }).join('');
+            const head = d.match_all
+                ? '<i class="ph ph-check-circle" style="color: var(--dh-success);"></i>'
+                : '<i class="ph ph-warning-circle" style="color: var(--dh-danger);"></i>';
+            el.innerHTML = head + chips;
+        } catch (e) {
+            el.innerHTML = '<i class="ph ph-cloud-slash"></i> 数据对账读取失败';
         }
     }
 
@@ -470,6 +524,7 @@
                 }
                 refreshStats();
                 loadLastSync();
+                loadReconcile();
                 return;
             }
         } catch (e) {

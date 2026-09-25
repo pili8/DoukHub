@@ -3134,6 +3134,62 @@ async def api_feishu_sync():
     return {"task_id": task.task_id, "status": "pending", "message": "已加入队列"}
 
 
+_RECONCILE_CACHE: tuple[float, dict] | None = None
+
+
+@app.get("/api/feishu/reconcile")
+async def api_feishu_reconcile():
+    """本地 ↔ 云端数据对账：三表行数比对（飞书侧 page_size=1 取 total，结果缓存 60s）"""
+    global _RECONCILE_CACHE
+    import time
+
+    now = time.time()
+    if _RECONCILE_CACHE and now - _RECONCILE_CACHE[0] < 60:
+        return _RECONCILE_CACHE[1]
+
+    db = get_database()
+    labels = {"share_cache": "分享表", "account_cache": "账号表", "cookie_cache": "Cookie表"}
+    local_counts: dict[str, int] = {}
+    with db._connect() as conn:
+        for t in labels:
+            try:
+                local_counts[t] = conn.execute(
+                    f"SELECT COUNT(*) FROM {t} WHERE IFNULL(is_deleted,0)=0"
+                ).fetchone()[0]
+            except Exception:
+                local_counts[t] = 0
+
+    result: dict = {"success": True, "feishu_ok": False, "tables": [], "match_all": False}
+    fs = get_feishu_syncer()
+    if not fs:
+        result["message"] = "云端未配置"
+    else:
+        try:
+            for t, label in labels.items():
+                table_id = {
+                    "share_cache": fs.collection_table_id,
+                    "account_cache": fs.account_table_id,
+                    "cookie_cache": fs.cookie_table_id,
+                }.get(t, "")
+                cloud = 0
+                if table_id:
+                    resp = fs.feishu.list_records(fs.app_token, table_id, page_size=1)
+                    if resp.get("code") == 0:
+                        cloud = int(resp.get("data", {}).get("total") or 0)
+                result["tables"].append({
+                    "key": t, "label": label,
+                    "local": local_counts[t], "cloud": cloud,
+                    "match": local_counts[t] == cloud,
+                })
+            result["feishu_ok"] = True
+            result["match_all"] = all(x["match"] for x in result["tables"])
+        except Exception as e:
+            result["message"] = f"云端不可达: {str(e)[:120]}"
+
+    _RECONCILE_CACHE = (now, result)
+    return result
+
+
 @app.post("/api/feishu/sync/full")
 async def api_feishu_sync_full(request: Request):
     """全盘同步：以一端为基准覆盖另一端 — 后台任务"""
