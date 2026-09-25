@@ -1,18 +1,31 @@
-"""飞书双向同步 v3 - 本地数据库 <-> 飞书表
+"""飞书双向同步 v4 —— 行级 LWW + 本地映射表
 
-设计原则（方案 B：LWW 真双向同步）：
+核心设计（取代 v3 的字段分类 LWW + 墓碑 + synced 推断）：
 
-1. 字段命名：业务字段中文与飞书 100% 一致，系统字段英文（record_id/is_deleted/synced/local_updated_at 等）
-2. 冲突解决（LWW）：人工字段（等级/标签/备注/启用/采集类型/状态）两端都能改，比较最后修改时间，谁新谁赢
-   API 字段（账号名称/粉丝数/作品数/签名/头像/sec_user_id/链接）仍为本地赢（DoukHub 是权威源）
-3. 业务唯一键去重：分享表=share_code，账号表=sec_user_id，Cookie表=Cookie
-4. 删除同步：
-   - 飞书端直接删，本地通过差集反推感知（依赖 synced=1 标记）
-   - 本地端软删除（is_deleted=1），推送墓碑到飞书，飞书删除后清本地墓碑
-   - 删除优先：删除冲突时删除胜出
-5. 增量同步：LWW 字段比较两端时间戳，其他字段基于值差异比对
-6. 全盘同步：以一端为基准清空+重建
-7. 安全保护：synced 过滤 + 空结果保护 + 50% 比例保护
+1. 时间基准：飞书表加一个原生「修改时间」字段（类型 1002，飞书自动维护，毫秒）。
+   本地基准是业务表自带的 local_updated_at（database.py 自动维护）。
+   两端时间戳都恒有值，LWW 比较才真正成立（v3 的死穴：缺时间戳默认飞书赢）。
+
+2. 行级 LWW：不再逐字段分类归属。整行比较，谁最后修改谁赢：
+   - 本地后改 → 整行推送到飞书（含空值显式清空）
+   - 飞书后改 → 整行写回本地（含清空 + local_updated_at 对齐飞书时间）
+   判断"谁改过"依据映射表记录的上次同步时间戳，而不是猜测。
+
+3. 本地映射表 feishu_sync_map（database.py）：
+   (table_type, local_key) → (record_id, feishu_ts, local_ts)
+   - record_id 显式保存，不再存在业务表里靠差集反推 → synced 孤儿问题消失
+   - 删除传播：映射在、本地行没了 → 删飞书；映射在、飞书记录没了 → 删本地
+   - 两向删除都有 50% 比例保护（防 API 截断误删全表）
+
+4. 业务唯一键：分享表=share_code(飞书:分享码)，账号表=sec_user_id，Cookie表=Cookie
+
+5. 全盘覆盖改造：不再"清空+重建"（中途失败留空表、record_id 全变）。
+   改为按键差异覆盖：本地多的推上去/飞书多的删掉（to-feishu），反向同理。
+   record_id 稳定，任何时刻中断都只是"部分完成"，不会出现空表。
+
+6. 兼容性：保留 v3 的公开接口签名（sync_incremental / get_incremental_steps /
+   get_full_steps / sync_full_* / 6 个单表方法 / _merge_results / 结果 schema），
+   main.py 的后台任务与 UI 无需改动。
 """
 import json
 import logging
@@ -26,9 +39,14 @@ from .feishu import FeishuClient
 
 logger = logging.getLogger("doukhub.feishu_sync")
 
+# 飞书侧自动维护的时间字段（毫秒 int）。v4 起统一用「修改时间」。
+FEISHU_TS_FIELD = "修改时间"
+# 推送/比较时排除的字段（同步动作自己维护，不参与行级 LWW）
+_SYNC_EXCLUDED_FIELDS = {"同步时间", FEISHU_TS_FIELD}
+
 
 class FeishuSyncer:
-    """飞书双向同步器 v2"""
+    """飞书双向同步器 v4（行级 LWW + 映射表）"""
 
     # 业务唯一键（跨端去重用）
     BUSINESS_KEYS = {
@@ -42,41 +60,7 @@ class FeishuSyncer:
         "share_cache": "分享码",
     }
 
-    # 业务字段（与飞书同步的字段，排除系统字段）
-    # 按字段归属分组（方案 B：LWW 真双向同步）：
-    # - lww：两端都能改，比较最后修改时间，谁新谁赢（原方案 A 的 feishu_wins 字段全部改为此类型）
-    # - local_wins：DoukHub 是权威源，总是推送（API 字段、状态字段）
-    # - immutable：创建后不变，不参与冲突
-    # - sync_generated：同步动作产生的字段（同步时间等）
-    #
-    # 方案 B 取消了「feishu_wins」类型，原 feishu_wins 字段全部改为 lww。
-    # Cookie 表的「状态」字段从 local_wins 改为 lww（两端都可能修改）。
-    FIELD_OWNERSHIP = {
-        "share_cache": {
-            # LWW 字段：两端都能改，比较时间戳谁新谁赢
-            "lww": ["等级", "标签", "备注", "账号名称", "粉丝数", "作品数"],
-            # 本地赢字段：DoukHub 是权威源
-            "local_wins": ["sec_user_id", "解析状态"],
-            # 元数据：创建后不变
-            "immutable": ["share_code", "平台"],
-            # 同步产生
-            "sync_generated": ["同步时间"],
-        },
-        "account_cache": {
-            "lww": ["等级", "标签", "备注", "启用", "采集类型", "账号名称"],
-            "local_wins": ["sec_user_id", "粉丝数", "作品数", "签名", "头像", "链接", "获取状态"],
-            "immutable": ["平台"],
-            "sync_generated": ["同步时间"],
-        },
-        "cookie_cache": {
-            "lww": ["启用", "备注", "状态"],
-            "local_wins": ["验证时间"],
-            "immutable": ["Cookie", "平台"],
-            "sync_generated": ["同步时间"],
-        },
-    }
-
-    # 三张同步表的配置（表名 → 飞书 table_id 字段名 + 业务键 + 转换函数）
+    # 三张同步表的配置（本地表名 → 飞书 table_id 属性名 + 转换/读写方法名）
     TABLE_CONFIG = {
         "share_cache": {
             "table_id_key": "collection_table_id",
@@ -113,8 +97,19 @@ class FeishuSyncer:
         },
     }
 
-    # 删除同步的安全阈值：飞书返回数量小于本地的 50% 时跳过删除
+    # 删除同步安全阈值：待删数量 > 映射数的 50% 时跳过删除（防 API 截断误删全表）
     DELETE_SAFETY_RATIO = 0.5
+
+    # 本地行整行覆盖时允许显式清空的字段（飞书→本地）。None = 置 NULL。
+    _LOCAL_CLEARABLE = {
+        "share_cache": ["备注", "账号名称", "sec_user_id", "标签", "粉丝数", "作品数"],
+        "account_cache": ["备注", "签名", "头像", "链接", "标签", "采集类型", "粉丝数", "作品数"],
+        "cookie_cache": ["备注", "验证时间"],
+    }
+
+    # 推送时允许显式清空的飞书字段（本地→飞书）。文本清空用 ""，多选用 []。
+    _FEISHU_CLEAR_TEXT = {"备注", "账号名称", "签名", "状态", "解析状态", "采集类型"}
+    _FEISHU_CLEAR_MULTI = {"标签"}
 
     def __init__(self, feishu: FeishuClient, config: dict):
         self.feishu = feishu
@@ -176,16 +171,7 @@ class FeishuSyncer:
 
     @staticmethod
     def _normalize_tags(tags):
-        """标签字段标准化：飞书是多选数组，本地是 JSON 字符串
-
-        支持的输入：
-        - None / 空 → None
-        - JSON 字符串 → 解析为 list
-        - 普通字符串 → 单元素 list
-        - list → 转换为纯字符串 list
-          - 飞书多选返回 [{"text": "标签1"}, {"text": "标签2"}]
-          - 普通数组 ["标签1", "标签2"]
-        """
+        """标签字段标准化：飞书是多选数组，本地是 JSON 字符串"""
         if not tags:
             return None
         if isinstance(tags, str):
@@ -198,7 +184,6 @@ class FeishuSyncer:
             except (json.JSONDecodeError, ValueError):
                 return [tags]
         if isinstance(tags, list):
-            # 飞书多选可能是 [{"text": "标签1"}] 格式
             result = []
             for t in tags:
                 if isinstance(t, dict):
@@ -219,15 +204,11 @@ class FeishuSyncer:
                 return ck
         return None
 
-    # ========== 方案 B：LWW 时间戳辅助方法 ==========
+    # ========== 时间戳辅助 ==========
 
     @staticmethod
     def _parse_local_timestamp(ts) -> int:
-        """本地时间戳（字符串）转毫秒 int
-
-        用于 LWW 比较：将本地的 local_updated_at（秒级字符串）
-        转换为毫秒级 int，与飞书的「最后更新时间」（毫秒）比较。
-        """
+        """本地 local_updated_at（秒级字符串）→ 毫秒 int；解析失败返回 0"""
         if not ts:
             return 0
         try:
@@ -238,47 +219,27 @@ class FeishuSyncer:
         except Exception:
             return 0
 
-    def _get_feishu_timestamp(self, feishu_record: dict) -> int:
-        """从飞书记录提取「最后更新时间」（毫秒）
+    @staticmethod
+    def _ms_to_local_str(ms: int) -> str:
+        """毫秒时间戳 → 本地 "YYYY-MM-DD HH:MM:SS"（秒精度，向下取整）"""
+        return datetime.fromtimestamp(int(ms) // 1000).strftime("%Y-%m-%d %H:%M:%S")
 
-        注意：飞书可能没建此字段（首次部署），返回 0。
+    def _get_feishu_timestamp(self, feishu_record: dict) -> int:
+        """从飞书记录提取「修改时间」（毫秒）。
+
+        字段缺失或未建时返回 0：此时视为"飞书侧改动不可知"，
+        本地改动照常推送，飞书端改动暂不回写（不会误覆盖）。
         """
         fields = feishu_record.get("fields", {})
-        ts = fields.get("最后更新时间", 0)
+        ts = fields.get(FEISHU_TS_FIELD, 0)
         try:
             return int(ts) if ts else 0
         except (TypeError, ValueError):
             return 0
 
-    def _extract_field_value(self, field: str, feishu_val):
-        """从飞书值提取并转换为本地格式
-
-        用于 LWW 飞书赢时，将飞书值解析为本地可存储的格式。
-        """
-        if feishu_val is None:
-            return None
-        if field == "标签":
-            parsed = self._normalize_tags(feishu_val)
-            return json.dumps(parsed, ensure_ascii=False) if parsed else None
-        if field in ("等级", "粉丝数", "作品数"):
-            v = self._safe_int(feishu_val)
-            return v if v > 0 else None
-        if field == "解析状态":
-            return self._parse_text_value(feishu_val)
-        if field == "获取状态":
-            return self._parse_text_value(feishu_val)
-        if field == "启用":
-            return self._safe_bool(feishu_val)
-        if field == "状态":
-            v = self._parse_text_value(feishu_val)
-            return v if v else None
-        # 默认文本
-        v = self._parse_text_value(feishu_val)
-        return v if v else None
-
     @staticmethod
     def _merge_results(*results: dict) -> dict:
-        """合并多个同步结果 dict，累加 failed/errors，分别取最大值"""
+        """合并多个同步结果 dict，累加计数与错误"""
         merged = {
             "created": 0, "updated": 0, "deleted": 0,
             "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0,
@@ -293,7 +254,7 @@ class FeishuSyncer:
             merged["errors"].extend(r.get("errors", []))
         return merged
 
-    # ========== 字段构建：本地 → 飞书 ==========
+    # ========== 字段构建：本地 → 飞书（整行） ==========
 
     def _build_collection_fields(self, record: dict) -> dict:
         """本地分享记录 → 飞书字段"""
@@ -362,10 +323,7 @@ class FeishuSyncer:
         if platform:
             fields["平台"] = platform
         status = cookie.get("状态", "")
-        if status:
-            fields["状态"] = status
-        else:
-            fields["状态"] = "正常"
+        fields["状态"] = status if status else "正常"
         enabled = cookie.get("启用")
         if enabled is not None:
             fields["启用"] = bool(enabled)
@@ -382,10 +340,9 @@ class FeishuSyncer:
         fields["同步时间"] = int(_time.time() * 1000)
         return fields
 
-    # ========== 飞书记录 → 本地数据 ==========
+    # ========== 飞书记录 → 本地数据（整行） ==========
 
     def _feishu_record_to_local_collection(self, record):
-        """飞书分享记录 → 本地数据"""
         fields = record.get("fields", {})
         share = self._parse_text_value(fields.get("分享码", ""))
         if not share.strip():
@@ -394,7 +351,7 @@ class FeishuSyncer:
             "share_code": share,
             "平台": self._parse_text_value(fields.get("平台", "")),
             "等级": self._safe_int(fields.get("等级", 3), 3),
-            "解析状态": fields.get("解析状态") or "待解析",
+            "解析状态": self._parse_text_value(fields.get("解析状态")) or "待解析",
         }
         if fields.get("sec_user_id"):
             data["sec_user_id"] = self._parse_text_value(fields.get("sec_user_id"))
@@ -412,7 +369,6 @@ class FeishuSyncer:
         return data
 
     def _feishu_record_to_local_account(self, record):
-        """飞书账号记录 → 本地数据"""
         fields = record.get("fields", {})
         sec = self._parse_text_value(fields.get("sec_user_id", ""))
         if not sec.strip():
@@ -450,7 +406,6 @@ class FeishuSyncer:
         return data
 
     def _feishu_record_to_local_cookie(self, record):
-        """飞书 Cookie 记录 → 本地数据"""
         fields = record.get("fields", {})
         cookie_value = self._parse_text_value(fields.get("Cookie", ""))
         if not cookie_value.strip():
@@ -473,590 +428,409 @@ class FeishuSyncer:
                 pass
         return data
 
-    # ========== 字段差异比对 ==========
+    # ========== 行级比较（v4 核心） ==========
 
-    def _values_equal(self, field: str, local_val, feishu_val) -> bool:
-        """判断本地值和飞书值是否等价（处理类型差异）"""
-        # 标签字段：本地 JSON 字符串 vs 飞书数组
-        if field == "标签":
-            local_tags = self._normalize_tags(local_val) or []
-            feishu_tags = self._normalize_tags(feishu_val) or []
-            return set(map(str, local_tags)) == set(map(str, feishu_tags))
-        # 验证时间：本地 "YYYY-MM-DD HH:MM:SS" 字符串 vs 飞书毫秒 int
-        if field == "验证时间":
-            try:
-                if isinstance(local_val, str) and local_val:
-                    lv = int(datetime.strptime(local_val, "%Y-%m-%d %H:%M:%S").timestamp() * 1000)
-                else:
-                    lv = int(local_val) if local_val else 0
-                fv = int(feishu_val) if feishu_val else 0
-                return lv == fv
-            except (ValueError, TypeError):
-                return False
-        # 数值字段
-        if field in ("等级", "粉丝数", "作品数"):
+    def _row_push_fields(self, db_table: str, local: dict, feishu_fields: dict) -> dict:
+        """本地行 → 待推送的飞书整行字段（含空值显式清空）。
+
+        - build_fn 产出非空字段
+        - 飞书有值而本地为空的"可清空字段"，显式补 ""/[] 让飞书清掉
+          （修复 v3"字段清空永远无法同步"的问题）
+        """
+        fields = getattr(self, self.TABLE_CONFIG[db_table]["build_fields"])(local)
+        for k in self._FEISHU_CLEAR_TEXT:
+            if k not in fields and self._parse_text_value(feishu_fields.get(k, "")).strip():
+                fields[k] = ""
+        for k in self._FEISHU_CLEAR_MULTI:
+            if k not in fields and self._normalize_tags(feishu_fields.get(k)):
+                fields[k] = []
+        return fields
+
+    def _field_equal(self, key: str, local_val, feishu_val) -> bool:
+        """单个字段等价比较（本地已序列化成飞书形状后比较）"""
+        if key == "标签":
+            lt = set(map(str, self._normalize_tags(local_val) or []))
+            ft = set(map(str, self._normalize_tags(feishu_val) or []))
+            return lt == ft
+        if key == "验证时间":
             return self._safe_int(local_val) == self._safe_int(feishu_val)
-        # 布尔字段
-        if field in ("解析状态", "获取状态"):
-            return str(local_val) == str(feishu_val)
-        if field == "启用":
+        if key in ("等级", "粉丝数", "作品数"):
+            return self._safe_int(local_val) == self._safe_int(feishu_val)
+        if key == "启用":
             return self._safe_bool(local_val) == self._safe_bool(feishu_val)
-        # 文本字段：去空格比较
-        local_str = self._parse_text_value(local_val).strip() if local_val is not None else ""
-        feishu_str = self._parse_text_value(feishu_val).strip() if feishu_val is not None else ""
-        return local_str == feishu_str
+        # 其余（含 URL / 文本 / 单选）：统一转文本去空格比较
+        return self._parse_text_value(local_val).strip() == self._parse_text_value(feishu_val).strip()
 
-    def _serialize_for_feishu(self, field: str, value):
-        """本地值 → 飞书 API 写入格式（字段差异更新路径用）
+    def _fields_equal(self, local_fields: dict, feishu_fields: dict) -> bool:
+        """整行等价比较（排除同步动作自维护字段）"""
+        keys = (set(local_fields) | set(feishu_fields)) - _SYNC_EXCLUDED_FIELDS
+        for k in keys:
+            if k not in local_fields:
+                # 本地没有且不可显式清空的字段（URL/日期/数值）：跳过，
+                # 避免因"无法表示空值"造成的永远不等与反复推送
+                if k in self._FEISHU_CLEAR_TEXT or k in self._FEISHU_CLEAR_MULTI:
+                    return False
+                continue
+            if not self._field_equal(k, local_fields.get(k), feishu_fields.get(k)):
+                return False
+        return True
 
-        根因修复：此前 _compute_field_updates 把本地原始值直接推给飞书——
-        标签是 JSON 字符串（多选字段要数组）→ MultiSelectFieldConvFail；
-        验证时间是 "YYYY-MM-DD HH:MM:SS" 字符串（日期字段要毫秒 int）→ DatetimeFieldConvFail。
-        新建路径 _build_*_fields 已各自转换，只有更新路径漏了，故在此统一序列化。
-        返回 None 表示该值无法序列化，跳过推送。
+    def _row_pull_data(self, db_table: str, feishu_record: dict) -> dict:
+        """飞书行 → 本地整行数据（含清空），用于飞书赢时整行写回本地"""
+        data = getattr(self, self.TABLE_CONFIG[db_table]["from_feishu"])(feishu_record) or {}
+        for k in self._LOCAL_CLEARABLE.get(db_table, []):
+            if k not in data:
+                data[k] = None
+        return data
+
+    # ========== 同步核心：单表双向（v4） ==========
+
+    def _empty_result(self) -> dict:
+        return {"created": 0, "updated": 0, "deleted": 0,
+                "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0,
+                "failed": 0, "errors": []}
+
+    def _sync_table(self, db_table: str) -> dict:
+        """单表双向同步（行级 LWW + 映射表）
+
+        流程：
+        1. 拉飞书全表（一次）+ 读本地全表（一次）+ 读映射表（一次）
+        2. 逐行 LWW：相等→跳过；一方改→该方赢；双方都改→时间戳新者赢
+        3. 删除传播（双向，带 50% 比例保护）+ 映射表 GC
         """
-        if value is None or value == "":
-            return None
-        if field == "标签":
-            return self._normalize_tags(value)  # JSON 字符串/其他 → list[str]
-        if field == "验证时间":
-            try:
-                if isinstance(value, str):
-                    return int(datetime.strptime(value, "%Y-%m-%d %H:%M:%S").timestamp() * 1000)
-                return int(value)
-            except (ValueError, TypeError):
-                return None
-        if field == "启用":
-            return bool(value)  # 与 _build_*_fields 的 bool() 口径一致
-        return value
-
-    def _compute_field_updates(self, db_table: str, local_record: dict, feishu_record: dict) -> tuple[dict, dict]:
-        """按字段归属计算需要更新到两端的数据（方案 B：LWW）
-
-        返回 (to_feishu_updates, to_local_updates)
-        - to_feishu_updates: 需要推送到飞书的字段（本地赢 + LWW 本地后改）
-        - to_local_updates: 需要更新到本地的字段（LWW 飞书后改）
-
-        LWW 逻辑：
-        1. local_wins 字段：总是推送本地值到飞书（不变）
-        2. lww 字段：比较两端最后修改时间，谁新谁赢
-           - 本地后改 → 推送本地值到飞书
-           - 飞书后改 → 更新本地
-           - 时间戳都缺失 → 默认飞书赢（保守）
-        3. 值相同时跳过（不比较时间戳）
-        """
-        ownership = self.FIELD_OWNERSHIP.get(db_table, {})
-        feishu_fields = feishu_record.get("fields", {})
-
-        to_feishu = {}
-        to_local = {}
-
-        # === Step 1: 本地赢字段（不变，总是推送） ===
-        for field in ownership.get("local_wins", []):
-            local_val = local_record.get(field)
-            feishu_val = feishu_fields.get(field)
-            if not self._values_equal(field, local_val, feishu_val):
-                # 只有本地有值或飞书为空时才推送（避免覆盖飞书的非空值）
-                if local_val not in (None, "", 0) or feishu_val in (None, "", 0):
-                    serialized = self._serialize_for_feishu(field, local_val)
-                    if serialized is not None:
-                        to_feishu[field] = serialized
-
-        # === Step 2: LWW 字段（按时间戳判断） ===
-        local_ts = self._parse_local_timestamp(local_record.get("local_updated_at"))
-        feishu_ts = self._get_feishu_timestamp(feishu_record)
-
-        for field in ownership.get("lww", []):
-            local_val = local_record.get(field)
-            feishu_val = feishu_fields.get(field)
-            if self._values_equal(field, local_val, feishu_val):
-                continue  # 值相同，跳过
-
-            # 时间戳缺失时的兜底处理
-            # 飞书时间戳缺失时默认飞书赢（保守）：无法确定飞书最后修改时间，
-            # 不应覆盖飞书的值（PLAN_B_LWW.md 第六节场景1）
-            if local_ts == 0 and feishu_ts == 0:
-                # 两端都没时间戳（首次部署或字段未建），默认飞书赢
-                winner = "feishu"
-            elif local_ts == 0:
-                # 本地无时间戳（旧记录），飞书赢
-                winner = "feishu"
-            elif feishu_ts == 0:
-                # 飞书无时间戳（字段未建），保守选择飞书赢
-                winner = "feishu"
-            elif local_ts > feishu_ts:
-                winner = "local"
-            else:
-                winner = "feishu"  # 包括相等的情况（保守选择）
-
-            if winner == "local":
-                # 本地赢，推送本地值到飞书
-                if local_val not in (None, "", 0):
-                    serialized = self._serialize_for_feishu(field, local_val)
-                    if serialized is not None:
-                        to_feishu[field] = serialized
-            else:
-                # 飞书赢，更新本地
-                parsed = self._extract_field_value(field, feishu_val)
-                if parsed is not None:
-                    to_local[field] = parsed
-
-        return to_feishu, to_local
-
-    # ========== 同步核心：本地 → 飞书（增量） ==========
-
-    def _sync_to_feishu(self, db_table: str) -> dict:
-        """本地 → 飞书 增量同步（含飞书删除检测 + 墓碑推送 + 字段差异更新）
-
-        关键顺序（防止删除被恢复）：
-        1. 推送本地墓碑 → 删飞书（先传播本地删除）
-        2. 拉取飞书全表
-        3. 检测飞书删除 → 删本地（避免下面把已删记录推回去）
-        4. 重新拉取本地记录（删除检测后可能少了记录）
-        5. 比对推送（创建/更新）
-        """
-        result = {"created": 0, "updated": 0, "deleted": 0,
-                  "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0,
-                  "failed": 0, "errors": []}
+        result = self._empty_result()
         cfg = self.TABLE_CONFIG.get(db_table)
         if not cfg:
             return result
+        label = cfg["label"]
         table_id = self._get_table_id(db_table)
         if not table_id:
-            result["errors"].append(f"{cfg['label']} 未配置 table_id")
+            result["errors"].append(f"{label} 未配置 table_id")
             return result
 
+        business_key = self.BUSINESS_KEYS[db_table]
+        feishu_bk = self.FEISHU_BUSINESS_KEYS.get(db_table, business_key)
         build_fn = getattr(self, cfg["build_fields"])
-        update_fn = getattr(self.db, cfg["update"])
-
-        try:
-            # Step 1: 推送本地墓碑 → 删飞书
-            tombstone_result = self._push_tombstones_to_feishu(table_id, db_table)
-            result = self._merge_results(result, tombstone_result)
-
-            # Step 2: 拉取飞书全表，建立索引（按 record_id 和业务键）
-            feishu_records = self.feishu.get_all_records(self.app_token, table_id)
-
-            # Step 3: 检测飞书端删除 → 删本地（关键：防止后续步骤把已删记录推回去）
-            deletion_result = self._detect_feishu_deletions(table_id, db_table, feishu_records)
-            result = self._merge_results(result, deletion_result)
-
-            # Step 4: 建立飞书索引（按 record_id 和业务键）
-            feishu_by_id = {r["record_id"]: r for r in feishu_records}
-            feishu_ids_set = set(feishu_by_id.keys())  # 用于检测飞书端重复业务键
-            business_key = self.BUSINESS_KEYS.get(db_table)
-            feishu_bk = self.FEISHU_BUSINESS_KEYS.get(db_table, business_key)
-            feishu_by_key = {}
-            for r in feishu_records:
-                key_val = self._parse_text_value(r.get("fields", {}).get(feishu_bk, ""))
-                if key_val:
-                    feishu_by_key[key_val] = r
-
-            # Step 5: 遍历本地记录（删除检测后重新拉取），比对并推送
-            get_all_fn = getattr(self.db, cfg["get_all_local"])
-            local_records = get_all_fn()
-
-            to_create = []  # [{fields, local_record}]
-            to_update = []  # [{record_id, fields, local_record}]
-
-            for local in local_records:
-                rid = local.get("record_id", "")
-                is_synced = bool(local.get("synced", False))
-                matched_feishu = None
-                match_by = None  # "id" or "key"
-
-                # 优先按 record_id 匹配
-                if rid and rid in feishu_by_id:
-                    matched_feishu = feishu_by_id[rid]
-                    match_by = "id"
-                else:
-                    # 按 business_key 匹配（跨端去重）
-                    local_key = local.get(business_key, "")
-                    if local_key and local_key in feishu_by_key:
-                        matched_feishu = feishu_by_key[local_key]
-                        match_by = "key"
-
-                if matched_feishu is None:
-                    # 本地有飞书没有
-                    # 关键保护：如果本地 synced=1（曾同步过），说明飞书删了它
-                    # 即使删除检测被空结果/比例保护跳过，也不能推回去（会撤销用户删除）
-                    # 只有 synced=0 才是真正的本地新建未推送
-                    if is_synced:
-                        result["skipped_invalid"] += 1
-                        logger.info(f"{db_table} 跳过 synced=1 孤儿记录 {rid}（飞书已删但被保护未同步删除）")
-                        continue
-                    # synced=0 才推送到飞书
-                    fields = build_fn(local)
-                    if fields:
-                        to_create.append({"fields": fields, "local": local})
-                    else:
-                        result["skipped_invalid"] += 1
-                else:
-                    # 都有 → 按字段归属合并
-                    to_feishu_updates, _ = self._compute_field_updates(db_table, local, matched_feishu)
-                    if to_feishu_updates:
-                        # 同步时间总是更新
-                        to_feishu_updates["同步时间"] = int(_time.time() * 1000)
-                        # URL 字段特殊处理
-                        for url_field in ("头像", "链接"):
-                            if url_field in to_feishu_updates and to_feishu_updates[url_field]:
-                                to_feishu_updates[url_field] = {
-                                    "link": to_feishu_updates[url_field],
-                                    "text": url_field,
-                                }
-                        to_update.append({
-                            "record_id": matched_feishu["record_id"],
-                            "fields": to_feishu_updates,
-                            "local": local,
-                        })
-                        # 如果之前是按业务键匹配但 record_id 不一样，更新本地 record_id
-                        if match_by == "key" and local.get("record_id") != matched_feishu["record_id"]:
-                            try:
-                                _sync_data = {"record_id": matched_feishu["record_id"], "synced": True}
-                                _existing_ts = local.get("local_updated_at")
-                                if _existing_ts:
-                                    _sync_data["local_updated_at"] = _existing_ts
-                                update_fn(local["record_id"], _sync_data)
-                            except Exception:
-                                pass
-                    else:
-                        result["skipped_uptodate"] += 1
-                        # 如果是按业务键匹配但 record_id 不一样，仍然更新本地 record_id
-                        if match_by == "key" and local.get("record_id") != matched_feishu["record_id"]:
-                            try:
-                                _sync_data = {"record_id": matched_feishu["record_id"], "synced": True}
-                                _existing_ts = local.get("local_updated_at")
-                                if _existing_ts:
-                                    _sync_data["local_updated_at"] = _existing_ts
-                                update_fn(local["record_id"], _sync_data)
-                            except Exception:
-                                pass
-
-            # Step 4: 批量创建（每批 500 条）
-            for i in range(0, len(to_create), 500):
-                batch = to_create[i:i + 500]
-                try:
-                    payload = [{"fields": b["fields"]} for b in batch]
-                    resp = self.feishu.batch_create_records(self.app_token, table_id, payload)
-                    if resp.get("code") == 0:
-                        result["created"] += len(batch)
-                        # 更新本地的 record_id 和 synced 标记
-                        recs = resp.get("data", {}).get("records", [])
-                        for j, rec in enumerate(recs):
-                            if j < len(batch):
-                                nid = rec.get("record_id", "")
-                                oid = batch[j]["local"].get("record_id", "")
-                                if nid and oid:
-                                    try:
-                                        _sync_data = {"record_id": nid, "synced": True}
-                                        _existing_ts = batch[j]["local"].get("local_updated_at")
-                                        if _existing_ts:
-                                            _sync_data["local_updated_at"] = _existing_ts
-                                        update_fn(oid, _sync_data)
-                                    except Exception as e:
-                                        logger.warning(f"更新 record_id 失败 {oid}→{nid}: {e}")
-                                elif nid:
-                                    # 本地没 record_id，直接更新
-                                    try:
-                                        _sync_data = {"synced": True}
-                                        _existing_ts = batch[j]["local"].get("local_updated_at")
-                                        if _existing_ts:
-                                            _sync_data["local_updated_at"] = _existing_ts
-                                        update_fn(oid, _sync_data)
-                                    except Exception:
-                                        pass
-                    else:
-                        result["failed"] += len(batch)
-                        result["errors"].append(f"批量创建失败: {resp.get('msg', '')}")
-                except Exception as e:
-                    result["failed"] += len(batch)
-                    result["errors"].append(f"创建异常: {e}")
-
-            # Step 5: 批量更新（每批 500 条）
-            for i in range(0, len(to_update), 500):
-                batch = to_update[i:i + 500]
-                try:
-                    payload = [{"record_id": b["record_id"], "fields": b["fields"]} for b in batch]
-                    resp = self.feishu.batch_update_records(self.app_token, table_id, payload)
-                    if resp.get("code") == 0:
-                        result["updated"] += len(batch)
-                        # 更新本地的 synced 标记
-                        for b in batch:
-                            oid = b["local"].get("record_id", "")
-                            if oid:
-                                try:
-                                    _sync_data = {"synced": True}
-                                    _existing_ts = b["local"].get("local_updated_at")
-                                    if _existing_ts:
-                                        _sync_data["local_updated_at"] = _existing_ts
-                                    update_fn(oid, _sync_data)
-                                except Exception:
-                                    pass
-                    else:
-                        result["failed"] += len(batch)
-                        result["errors"].append(f"批量更新失败: {resp.get('msg', '')}")
-                except Exception as e:
-                    result["failed"] += len(batch)
-                    result["errors"].append(f"更新异常: {e}")
-
-        except Exception as e:
-            result["errors"].append(f"{db_table} 同步异常: {e}")
-            logger.exception(f"{db_table} → 飞书 同步失败")
-
-        return result
-
-    # ========== 同步核心：飞书 → 本地（增量） ==========
-
-    def _sync_from_feishu(self, db_table: str) -> dict:
-        """飞书 → 本地 增量同步（含差集反推删除 + 字段差异更新）"""
-        result = {"created": 0, "updated": 0, "deleted": 0,
-                  "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0,
-                  "failed": 0, "errors": []}
-        cfg = self.TABLE_CONFIG.get(db_table)
-        if not cfg:
-            return result
-        table_id = self._get_table_id(db_table)
-        if not table_id:
-            result["errors"].append(f"{cfg['label']} 未配置 table_id")
-            return result
-
         convert_fn = getattr(self, cfg["from_feishu"])
-        get_by_id_fn = getattr(self.db, cfg["get_by_id"])
-        # 业务键查询：走 db（除 Cookie 外都是 db 的方法）
-        biz_key_method = cfg["get_by_business_key"]
-        if biz_key_method == "_get_cookie_by_value":
-            get_by_key_fn = self._get_cookie_by_value
-        else:
-            get_by_key_fn = getattr(self.db, biz_key_method)
+        get_all_fn = getattr(self.db, cfg["get_all_local"])
         insert_fn = getattr(self.db, cfg["insert"])
         update_fn = getattr(self.db, cfg["update"])
-        business_key = self.BUSINESS_KEYS.get(db_table)
+
+        # 自愈：确保「修改时间」等必需字段存在（幂等；失败不阻断同步）
+        table_kind = {"share_cache": "collection", "account_cache": "account",
+                      "cookie_cache": "cookie"}[db_table]
+        try:
+            self.feishu.ensure_fields(self.app_token, table_id, table_kind)
+        except Exception as e:
+            logger.warning(f"{label} ensure_fields 失败（不阻断同步）: {e}")
 
         try:
-            # Step 1: 检测飞书端删除（差集反推）
-            deletion_result = self._detect_feishu_deletions(table_id, db_table)
-            result = self._merge_results(result, deletion_result)
-
-            # Step 2: 拉取飞书全表
             feishu_records = self.feishu.get_all_records(self.app_token, table_id)
-            feishu_ids_set = {r["record_id"] for r in feishu_records}  # 用于检测飞书端重复业务键
+        except Exception as e:
+            result["errors"].append(f"{label} 拉取飞书失败: {e}")
+            result["failed"] += 1
+            logger.exception(f"{db_table} 拉取飞书失败")
+            return result
 
-            # Step 3: 遍历飞书记录，比对并更新/创建本地
-            for record in feishu_records:
-                rid = record.get("record_id", "")
-                fields = record.get("fields", {})
-                local_data = convert_fn(record)
-                if not local_data:
-                    result["skipped_invalid"] += 1
-                    continue
-
-                # 查找本地是否已有此记录
-                existing = None
-                # 优先按 record_id 查
-                if rid:
-                    existing = get_by_id_fn(rid)
-                # 按 business_key 查（跨端去重）
-                if not existing:
-                    key_val = local_data.get(business_key, "")
-                    if key_val:
-                        existing = get_by_key_fn(key_val)
-                        # 检测飞书端重复业务键
-                        if existing and existing.get("record_id"):
-                            existing_rid = existing["record_id"]
-                            if existing_rid != rid and existing_rid in feishu_ids_set:
-                                # 飞书端有重复业务键（existing.record_id 也在飞书）
-                                # 这条 record 是冗余的，跳过避免 record_id 反复横跳
-                                result["skipped_duplicate"] += 1
-                                logger.warning(
-                                    f"{db_table} 飞书端检测到重复业务键 {business_key}={key_val}，"
-                                    f"已有 {existing_rid}，跳过冗余记录 {rid}（请去飞书清理）"
-                                )
-                                continue
-                            # 否则正常合并 + 更新 record_id
-                            if existing_rid and existing_rid != rid:
-                                try:
-                                    _sync_data = {"record_id": rid, "synced": True}
-                                    _existing_ts = existing.get("local_updated_at")
-                                    if _existing_ts:
-                                        _sync_data["local_updated_at"] = _existing_ts
-                                    update_fn(existing_rid, _sync_data)
-                                    existing["record_id"] = rid
-                                except Exception:
-                                    pass
-
-                if existing:
-                    # 都有 → 按字段归属合并
-                    _, to_local_updates = self._compute_field_updates(db_table, existing, record)
-                    if to_local_updates:
-                        # 方案 B：用飞书的最后更新时间作为本地的 local_updated_at，
-                        # 避免下次同步误判为"本地后改"。
-                        feishu_ts = self._get_feishu_timestamp(record)
-                        if feishu_ts:
-                            to_local_updates["local_updated_at"] = datetime.fromtimestamp(
-                                feishu_ts / 1000
-                            ).strftime("%Y-%m-%d %H:%M:%S")
-                        to_local_updates["synced"] = True
-                        try:
-                            update_fn(rid or existing["record_id"], to_local_updates)
-                            result["updated"] += 1
-                        except Exception as e:
-                            result["failed"] += 1
-                            result["errors"].append(f"{rid}: {e}")
-                    else:
-                        # 字段相同，但可能需要补 synced 标记
-                        if not existing.get("synced"):
-                            try:
-                                _sync_data = {"synced": True}
-                                _existing_ts = existing.get("local_updated_at")
-                                if _existing_ts:
-                                    _sync_data["local_updated_at"] = _existing_ts
-                                update_fn(rid or existing["record_id"], _sync_data)
-                            except Exception:
-                                pass
-                        result["skipped_uptodate"] += 1
+        # --- 索引 ---
+        feishu_by_key = {}
+        feishu_ids = set()
+        for r in feishu_records:
+            rid = r.get("record_id", "")
+            feishu_ids.add(rid)
+            kv = self._parse_text_value(r.get("fields", {}).get(feishu_bk, ""))
+            if kv:
+                if kv in feishu_by_key:
+                    result["skipped_duplicate"] += 1
+                    logger.warning(f"{db_table} 飞书端重复业务键 {feishu_bk}={kv}，跳过多余记录")
                 else:
-                    # 飞书有本地没有 → 插入本地
-                    local_data["record_id"] = rid
-                    local_data["synced"] = True
-                    try:
-                        insert_fn(local_data)
-                        result["created"] += 1
-                    except sqlite3.IntegrityError:
-                        result["skipped_duplicate"] += 1
-                    except Exception as e:
-                        result["failed"] += 1
-                        result["errors"].append(f"{rid}: {e}")
+                    feishu_by_key[kv] = r
+            else:
+                result["skipped_invalid"] += 1
 
-        except Exception as e:
-            result["errors"].append(f"{db_table} 同步异常: {e}")
-            logger.exception(f"飞书 → {db_table} 同步失败")
+        local_rows = get_all_fn()
+        local_by_key = {}
+        for row in local_rows:
+            kv = str(row.get(business_key) or "")
+            if kv:
+                local_by_key[kv] = row
+            else:
+                result["skipped_invalid"] += 1
 
-        return result
+        mapping = self.db.get_sync_map(db_table)
 
-    # ========== 删除同步 ==========
+        to_create = []       # (local, fields)
+        to_update = []       # (rid, fields, key, local)
+        delete_local = []    # (key, local)  飞书删了 → 删本地
+        delete_feishu = []   # (key, rid)    本地删了 → 删飞书
+        map_bind = []        # (key, rid, f_ts, l_ts)  内容一致时的映射刷新
+        new_local_rows = []  # 飞书新建 → 插入本地
 
-    def _push_tombstones_to_feishu(self, table_id: str, db_table: str) -> dict:
-        """本地墓碑 → 删飞书：把本地标了 is_deleted=1 的记录从飞书删掉"""
-        result = {"created": 0, "updated": 0, "deleted": 0,
-                  "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0,
-                  "failed": 0, "errors": []}
-        try:
-            tombstone_ids = self.db.get_deleted_ids(db_table)
-            if not tombstone_ids:
-                return result
+        # --- Pass 1: 遍历本地行 ---
+        for key, local in local_by_key.items():
+            f_rec = feishu_by_key.get(key)
+            m = mapping.get(key)
+            local_ts = self._parse_local_timestamp(local.get("local_updated_at"))
 
-            # 检查飞书是否真有这些记录
-            feishu_records = self.feishu.get_all_records(self.app_token, table_id)
-            feishu_ids = {r["record_id"] for r in feishu_records}
-            to_delete = [rid for rid in tombstone_ids if rid in feishu_ids]
-
-            if not to_delete:
-                # 飞书端已经没有这些记录了，直接清墓碑
-                for rid in tombstone_ids:
-                    self.db.purge_tombstone(db_table, rid)
-                return result
-
-            for i in range(0, len(to_delete), 500):
-                batch = to_delete[i:i + 500]
-                try:
-                    resp = self.feishu.batch_delete_records(self.app_token, table_id, batch)
-                    if resp.get("code") == 0:
-                        result["deleted"] += len(batch)
-                        for rid in batch:
-                            self.db.purge_tombstone(db_table, rid)
+            if f_rec is None:
+                if m:
+                    # 曾同步过（映射在）而飞书已无此记录 → 飞书端删除 → 删本地
+                    delete_local.append((key, local))
+                else:
+                    # 本地新建，从未同步 → 推送到飞书
+                    fields = build_fn(local)
+                    if fields:
+                        to_create.append((local, fields))
                     else:
-                        result["failed"] += len(batch)
-                        result["errors"].append(f"删除失败: {resp.get('msg', '')}")
-                except Exception as e:
-                    result["failed"] += len(batch)
-                    result["errors"].append(f"删除异常: {e}")
-        except Exception as e:
-            result["errors"].append(f"墓碑推送异常: {e}")
-            logger.exception(f"{db_table} 墓碑推送失败")
-        return result
+                        result["skipped_invalid"] += 1
+                continue
 
-    def _detect_feishu_deletions(self, table_id: str, db_table: str, feishu_records: list = None) -> dict:
-        """飞书删除 → 删本地：飞书有、本地没有（且 synced=1）说明飞书删了
+            rid = f_rec.get("record_id", "")
+            f_ts = self._get_feishu_timestamp(f_rec)
+            feishu_fields = f_rec.get("fields", {})
+            push_fields = self._row_push_fields(db_table, local, feishu_fields)
 
-        安全保护：
-        - synced=1 过滤：本地新建未同步的不会被误删
-        - 空结果保护：飞书返回 0 条直接跳过
-        - 比例保护：飞书返回 < 本地 50% 时跳过
+            if self._fields_equal(push_fields, feishu_fields):
+                # 内容一致：只刷新映射（record_id 可能因键匹配而变化）
+                map_bind.append((key, rid, f_ts, local_ts))
+                result["skipped_uptodate"] += 1
+                if local.get("record_id") != rid and local.get("record_id"):
+                    try:
+                        update_fn(local["record_id"], {"record_id": rid, "synced": True,
+                                                       "local_updated_at": local.get("local_updated_at")})
+                    except Exception:
+                        pass
+                continue
 
-        参数：
-        - feishu_records: 可选，预查询的飞书记录列表（避免重复拉取）
-        """
-        result = {"created": 0, "updated": 0, "deleted": 0,
-                  "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0,
-                  "failed": 0, "errors": []}
-        try:
-            if feishu_records is None:
-                feishu_records = self.feishu.get_all_records(self.app_token, table_id)
-            # 空结果保护
-            if not feishu_records:
-                result["skipped_invalid"] += 1
-                logger.warning(f"{db_table} 飞书返回空，跳过删除检测")
-                return result
+            feishu_changed = (m is None) or (f_ts != m.get("feishu_ts", 0))
+            local_changed = (m is None) or (local_ts != m.get("local_ts", 0))
 
-            feishu_ids = {r["record_id"] for r in feishu_records}
-            local_synced_ids = self.db.get_synced_active_ids(db_table)
+            if feishu_changed and local_changed:
+                # 双方都改过 → LWW：时间戳新者赢（相等时飞书赢，保守）
+                winner = "local" if local_ts > f_ts else "feishu"
+            elif local_changed:
+                winner = "local"
+            elif feishu_changed:
+                winner = "feishu"
+            else:
+                # 映射时间戳一致但内容不一致：上次推送/回写中途失败的残局，
+                # 以本地权威重推一次自愈
+                winner = "local"
 
-            # 比例保护
-            if local_synced_ids and len(feishu_records) < len(local_synced_ids) * self.DELETE_SAFETY_RATIO:
-                result["skipped_invalid"] += 1
-                msg = (f"{db_table} 安全保护触发：飞书 {len(feishu_records)} 条 < 本地 {len(local_synced_ids)} 条的 {self.DELETE_SAFETY_RATIO*100:.0f}%，"
-                       f"跳过删除检测")
-                result["errors"].append(msg)
-                logger.warning(msg)
-                return result
-
-            orphan_ids = [rid for rid in local_synced_ids if rid not in feishu_ids]
-            for rid in orphan_ids:
+            if winner == "local":
+                if local_ts > 0 or f_ts > 0 or m is None:
+                    to_update.append((rid, push_fields, key, local))
+                else:
+                    result["skipped_invalid"] += 1
+            else:
+                # 飞书赢 → 整行写回本地（含清空），local_updated_at 对齐飞书
+                pull = self._row_pull_data(db_table, f_rec)
+                pull["record_id"] = rid
+                pull["synced"] = True
+                if f_ts:
+                    pull["local_updated_at"] = self._ms_to_local_str(f_ts)
+                oid = local.get("record_id", "") or rid
                 try:
-                    self.db.hard_delete(db_table, rid)
-                    result["deleted"] += 1
+                    if oid:
+                        update_fn(oid, pull)
+                        result["updated"] += 1
+                        self.db.upsert_sync_map(
+                            db_table, key, rid,
+                            f_ts, self._ms_to_local_str_ms(f_ts),
+                        )
+                    else:
+                        result["skipped_invalid"] += 1
                 except Exception as e:
                     result["failed"] += 1
-                    result["errors"].append(f"删除孤儿 {rid}: {e}")
-        except Exception as e:
-            result["errors"].append(f"删除检测异常: {e}")
-            logger.exception(f"{db_table} 删除检测失败")
+                    result["errors"].append(f"{label} {key}: {e}")
+                    logger.warning(f"{db_table} 回写本地失败 {key}: {e}")
+
+        # --- Pass 2: 遍历飞书记录（本地没有的） ---
+        for r in feishu_records:
+            rid = r.get("record_id", "")
+            kv = self._parse_text_value(r.get("fields", {}).get(feishu_bk, ""))
+            if not kv or kv in local_by_key:
+                continue
+            if kv in mapping:
+                # 映射在、本地行没了 → 本地删除 → 传播到飞书
+                delete_feishu.append((kv, rid))
+                continue
+            # 飞书新建 → 插入本地
+            f_ts = self._get_feishu_timestamp(r)
+            data = convert_fn(r)
+            if not data:
+                result["skipped_invalid"] += 1
+                continue
+            data["record_id"] = rid
+            data["synced"] = True
+            if f_ts:
+                data["local_updated_at"] = self._ms_to_local_str(f_ts)
+            new_local_rows.append((kv, data, rid, f_ts))
+
+        # --- 删除传播（双向，各带比例保护；小表（映射<4行）不设防，避免单条删除永远被拦） ---
+        mapped_total = max(len(mapping), 1)
+        guard_on = len(mapping) >= 4
+
+        if delete_local:
+            if guard_on and len(delete_local) > mapped_total * self.DELETE_SAFETY_RATIO:
+                result["skipped_invalid"] += len(delete_local)
+                msg = (f"{label} 安全保护：飞书侧疑似批量删除（{len(delete_local)} 条 > "
+                       f"映射 {mapped_total} 条的 {self.DELETE_SAFETY_RATIO:.0%}），跳过删除本地")
+                result["errors"].append(msg)
+                logger.warning(msg)
+            else:
+                for key, local in delete_local:
+                    try:
+                        oid = local.get("record_id", "")
+                        if oid:
+                            self.db.hard_delete(db_table, oid)
+                        result["deleted"] += 1
+                        self.db.delete_sync_map(db_table, key)
+                    except Exception as e:
+                        result["failed"] += 1
+                        result["errors"].append(f"{label} 删除本地 {key}: {e}")
+
+        if delete_feishu:
+            if guard_on and len(delete_feishu) > mapped_total * self.DELETE_SAFETY_RATIO:
+                result["skipped_invalid"] += len(delete_feishu)
+                msg = (f"{label} 安全保护：本地侧疑似批量删除（{len(delete_feishu)} 条），"
+                       f"跳过删除飞书")
+                result["errors"].append(msg)
+                logger.warning(msg)
+            else:
+                rids = [rid for _, rid in delete_feishu if rid]
+                ok = True
+                for i in range(0, len(rids), 500):
+                    try:
+                        resp = self.feishu.batch_delete_records(self.app_token, table_id, rids[i:i + 500])
+                        if resp.get("code") != 0:
+                            ok = False
+                            result["failed"] += len(rids[i:i + 500])
+                            result["errors"].append(f"{label} 删除飞书失败: {resp.get('msg', '')}")
+                    except Exception as e:
+                        ok = False
+                        result["failed"] += len(rids[i:i + 500])
+                        result["errors"].append(f"{label} 删除飞书异常: {e}")
+                if ok:
+                    result["deleted"] += len(rids)
+                    for key, _ in delete_feishu:
+                        self.db.delete_sync_map(db_table, key)
+
+        # --- 新建：本地 → 飞书（批量创建） ---
+        for i in range(0, len(to_create), 500):
+            batch = to_create[i:i + 500]
+            try:
+                payload = [{"fields": b[1]} for b in batch]
+                resp = self.feishu.batch_create_records(self.app_token, table_id, payload)
+                if resp.get("code") == 0:
+                    result["created"] += len(batch)
+                    recs = resp.get("data", {}).get("records", [])
+                    now_ms = int(_time.time() * 1000)
+                    for j, rec in enumerate(recs):
+                        if j >= len(batch):
+                            break
+                        local, fields = batch[j]
+                        key = str(local.get(business_key) or "")
+                        nid = rec.get("record_id", "")
+                        lts = self._parse_local_timestamp(local.get("local_updated_at"))
+                        self.db.upsert_sync_map(db_table, key, nid, now_ms, lts)
+                        oid = local.get("record_id", "")
+                        if nid and oid:
+                            try:
+                                update_fn(oid, {"record_id": nid, "synced": True,
+                                                "local_updated_at": local.get("local_updated_at")
+                                                or self._ms_to_local_str(now_ms)})
+                            except Exception as e:
+                                logger.warning(f"更新本地 record_id 失败 {oid}→{nid}: {e}")
+                else:
+                    result["failed"] += len(batch)
+                    result["errors"].append(f"{label} 批量创建失败: {resp.get('msg', '')}")
+            except Exception as e:
+                result["failed"] += len(batch)
+                result["errors"].append(f"{label} 创建异常: {e}")
+
+        # --- 更新：本地 → 飞书（批量整行覆盖） ---
+        for i in range(0, len(to_update), 500):
+            batch = to_update[i:i + 500]
+            try:
+                payload = [{"record_id": b[0], "fields": b[1]} for b in batch if b[0]]
+                resp = self.feishu.batch_update_records(self.app_token, table_id, payload)
+                if resp.get("code") == 0:
+                    result["updated"] += len(payload)
+                    now_ms = int(_time.time() * 1000)
+                    for rid, _fields, key, local in batch:
+                        lts = self._parse_local_timestamp(local.get("local_updated_at"))
+                        self.db.upsert_sync_map(db_table, key, rid, now_ms, lts)
+                        oid = local.get("record_id", "")
+                        if oid:
+                            try:
+                                update_fn(oid, {"synced": True,
+                                                "local_updated_at": local.get("local_updated_at")
+                                                or self._ms_to_local_str(now_ms)})
+                            except Exception:
+                                pass
+                else:
+                    result["failed"] += len(payload)
+                    result["errors"].append(f"{label} 批量更新失败: {resp.get('msg', '')}")
+            except Exception as e:
+                result["failed"] += len(payload)
+                result["errors"].append(f"{label} 更新异常: {e}")
+
+        # --- 新建：飞书 → 本地 ---
+        for key, data, rid, f_ts in new_local_rows:
+            try:
+                insert_fn(data)
+                result["created"] += 1
+                self.db.upsert_sync_map(
+                    db_table, key, rid, f_ts,
+                    self._parse_local_timestamp(data.get("local_updated_at")),
+                )
+            except sqlite3.IntegrityError:
+                result["skipped_duplicate"] += 1
+            except Exception as e:
+                result["failed"] += 1
+                result["errors"].append(f"{label} {key}: {e}")
+
+        # --- 映射刷新（内容一致） ---
+        for key, rid, f_ts, l_ts in map_bind:
+            self.db.upsert_sync_map(db_table, key, rid, f_ts, l_ts)
+
+        # --- 映射 GC：两端都不存在了就清掉 ---
+        for key, m in mapping.items():
+            if key not in local_by_key and m.get("record_id") not in feishu_ids:
+                self.db.delete_sync_map(db_table, key)
+
         return result
 
-    # ========== 公开入口：单表单方向同步（供 SSE 进度展示用）==========
+    @staticmethod
+    def _ms_to_local_str_ms(ms: int) -> int:
+        """毫秒时间戳取整到秒精度（与 local_updated_at 字符串往返一致）"""
+        return int(ms) // 1000 * 1000
+
+    # ========== 公开入口：单表同步（兼容 v3 签名） ==========
 
     def sync_collection_to_feishu(self) -> dict:
-        """本地 → 云端：分享表"""
-        return self._sync_to_feishu("share_cache")
+        return self._sync_table("share_cache")
 
     def sync_account_to_feishu(self) -> dict:
-        """本地 → 云端：账号表"""
-        return self._sync_to_feishu("account_cache")
+        return self._sync_table("account_cache")
 
     def sync_cookie_to_feishu(self) -> dict:
-        """本地 → 云端：Cookie表"""
-        return self._sync_to_feishu("cookie_cache")
+        return self._sync_table("cookie_cache")
 
     def sync_collection_from_feishu(self) -> dict:
-        """云端 → 本地：分享表"""
-        return self._sync_from_feishu("share_cache")
+        return self._sync_table("share_cache")
 
     def sync_account_from_feishu(self) -> dict:
-        """云端 → 本地：账号表"""
-        return self._sync_from_feishu("account_cache")
+        return self._sync_table("account_cache")
 
     def sync_cookie_from_feishu(self) -> dict:
-        """云端 → 本地：Cookie表"""
-        return self._sync_from_feishu("cookie_cache")
+        return self._sync_table("cookie_cache")
 
-    # ========== 公开入口：增量同步（双向 6 步） ==========
+    # ========== 公开入口：增量同步（3 表双向） ==========
 
     def _record_sync_history(self, all_results: dict, started: datetime, trigger: str = "manual") -> None:
-        """把一次飞书同步的合并结果写进任务历史（best-effort，绝不影响同步主流程）。
-
-        飞书同步原先**完全不写历史** —— 它一直在失败（调用点漏改的 _safe_text），
-        用户在「后台任务 → 历史 / 失败」里却什么都看不到，只能翻日志。
-        """
+        """把一次飞书同步的合并结果写进任务历史（best-effort，绝不影响同步主流程）"""
         try:
             total = success = failed = 0
             errors: list[str] = []
@@ -1089,55 +863,38 @@ class FeishuSyncer:
             pass  # 留痕失败不影响同步
 
     def sync_incremental(self, trigger: str = "manual") -> dict:
-        """增量双向同步（6 步：3 表 × 2 方向）
+        """增量双向同步（3 表，每表一次全量拉取 + 行级 LWW）
 
-        返回 {label: result} 形式的合并结果（用于启动时自动同步等不显示进度的场景）
-        UI 调用应使用 get_incremental_steps() 拆分为 6 个独立步骤以获得进度展示
-
-        trigger：写进任务历史的 trigger_source（startup / sync_before / manual …）
+        返回 {label: result} 形式的合并结果。
         """
         started = datetime.now()
         all_results = {}
-        try:
-            # 本地 → 飞书（3 表）
-            for db_table in ("share_cache", "account_cache", "cookie_cache"):
-                cfg = self.TABLE_CONFIG[db_table]
-                label = f"本地 → 云端：{cfg['label']}"
-                try:
-                    all_results[label] = self._sync_to_feishu(db_table)
-                except Exception as e:
-                    all_results[label] = {"failed": 1, "errors": [str(e)]}
-            # 飞书 → 本地（3 表）
-            for db_table in ("share_cache", "account_cache", "cookie_cache"):
-                cfg = self.TABLE_CONFIG[db_table]
-                label = f"云端 → 本地：{cfg['label']}"
-                try:
-                    all_results[label] = self._sync_from_feishu(db_table)
-                except Exception as e:
-                    all_results[label] = {"failed": 1, "errors": [str(e)]}
-        except Exception as e:  # 兜底：单表异常已被内层吞掉，这里防的是更外层的意外
-            all_results["同步中断"] = {"failed": 1, "errors": [str(e)]}
+        for db_table in ("share_cache", "account_cache", "cookie_cache"):
+            cfg = self.TABLE_CONFIG[db_table]
+            label = f"双向同步：{cfg['label']}"
+            try:
+                all_results[label] = self._sync_table(db_table)
+            except Exception as e:
+                all_results[label] = {"failed": 1, "errors": [str(e)]}
         self._record_sync_history(all_results, started, trigger)
         return all_results
 
     def get_incremental_steps(self) -> list:
-        """获取增量同步的 6 个独立步骤（用于 SSE 进度展示）
+        """获取同步的 3 个独立步骤（用于后台任务进度展示）
 
-        返回 [(label, callable), ...]
+        返回 [(label, callable), ...]，callable 返回单表结果 dict
         """
         return [
-            ("本地 → 云端：分享表", self.sync_collection_to_feishu),
-            ("本地 → 云端：账号表", self.sync_account_to_feishu),
-            ("本地 → 云端：Cookie表", self.sync_cookie_to_feishu),
-            ("云端 → 本地：分享表", self.sync_collection_from_feishu),
-            ("云端 → 本地：账号表", self.sync_account_from_feishu),
-            ("云端 → 本地：Cookie表", self.sync_cookie_from_feishu),
+            ("双向同步：分享表", self.sync_collection_to_feishu),
+            ("双向同步：账号表", self.sync_account_to_feishu),
+            ("双向同步：Cookie表", self.sync_cookie_to_feishu),
         ]
 
     def get_full_steps(self, direction: str) -> list:
-        """获取全盘同步的步骤列表（用于 SSE 进度展示）
+        """获取全盘覆盖的步骤列表（用于 SSE 进度展示）
 
         direction: "to-feishu"（以本地覆盖云端） | "from-feishu"（以云端覆盖本地）
+        v4：按键差异覆盖（不再清空重建，record_id 稳定，中途失败不出空表）
         """
         if direction == "to-feishu":
             return [
@@ -1152,13 +909,10 @@ class FeishuSyncer:
                 ("覆盖本地：Cookie表", lambda: self._full_from_feishu_single("cookie_cache")),
             ]
 
-    # ========== 公开入口：全盘同步（清空+重建，整体调用） ==========
+    # ========== 公开入口：全盘覆盖（按键差异，不再清空重建） ==========
 
     def sync_full_to_feishu(self) -> dict:
-        """全盘同步：以本地为基准，清空飞书 → 推送本地全部
-
-        ⚠️ 危险操作：会清空飞书表所有数据，二次确认后才能调用
-        """
+        """以本地为基准覆盖飞书：本地全部推送（按键建/改），飞书多余的删除"""
         all_results = {}
         for db_table in ("share_cache", "account_cache", "cookie_cache"):
             cfg = self.TABLE_CONFIG[db_table]
@@ -1170,10 +924,7 @@ class FeishuSyncer:
         return all_results
 
     def sync_full_from_feishu(self) -> dict:
-        """全盘同步：以飞书为基准，清空本地 → 拉取飞书全部
-
-        ⚠️ 危险操作：会清空本地表所有数据（含墓碑），二次确认后才能调用
-        """
+        """以飞书为基准覆盖本地：飞书全部写回（按键建/改），本地多余的删除"""
         all_results = {}
         for db_table in ("share_cache", "account_cache", "cookie_cache"):
             cfg = self.TABLE_CONFIG[db_table]
@@ -1185,121 +936,225 @@ class FeishuSyncer:
         return all_results
 
     def _full_to_feishu_single(self, db_table: str) -> dict:
-        """以本地为基准覆盖飞书单表"""
-        result = {"created": 0, "updated": 0, "deleted": 0,
-                  "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0,
-                  "failed": 0, "errors": []}
-        cfg = self.TABLE_CONFIG[db_table]
+        """以本地为基准覆盖飞书单表（按键差异：建/改/删，不清空重建）"""
+        result = self._empty_result()
+        cfg = self.TABLE_CONFIG.get(db_table)
+        if not cfg:
+            return result
         table_id = self._get_table_id(db_table)
         if not table_id:
             result["errors"].append(f"{cfg['label']} 未配置 table_id")
             return result
 
+        business_key = self.BUSINESS_KEYS[db_table]
+        feishu_bk = self.FEISHU_BUSINESS_KEYS.get(db_table, business_key)
         build_fn = getattr(self, cfg["build_fields"])
-        update_fn = getattr(self.db, cfg["update"])
         get_all_fn = getattr(self.db, cfg["get_all_local"])
+        update_fn = getattr(self.db, cfg["update"])
 
         try:
-            # Step 1: 拉取飞书全表，全删
             feishu_records = self.feishu.get_all_records(self.app_token, table_id)
-            all_feishu_ids = [r["record_id"] for r in feishu_records]
-            for i in range(0, len(all_feishu_ids), 500):
-                batch = all_feishu_ids[i:i + 500]
-                try:
-                    resp = self.feishu.batch_delete_records(self.app_token, table_id, batch)
-                    if resp.get("code") == 0:
-                        result["deleted"] += len(batch)
-                    else:
-                        result["failed"] += len(batch)
-                        result["errors"].append(f"清空失败: {resp.get('msg', '')}")
-                except Exception as e:
-                    result["failed"] += len(batch)
-                    result["errors"].append(f"清空异常: {e}")
+            feishu_by_key = {}
+            feishu_ids = set()
+            for r in feishu_records:
+                feishu_ids.add(r.get("record_id", ""))
+                kv = self._parse_text_value(r.get("fields", {}).get(feishu_bk, ""))
+                if kv and kv not in feishu_by_key:
+                    feishu_by_key[kv] = r
 
-            # Step 2: 把本地全部记录推送到飞书
-            local_records = get_all_fn()
-            to_create = []
-            for local in local_records:
-                fields = build_fn(local)
-                if fields:
-                    to_create.append({"fields": fields, "local": local})
-                else:
+            local_rows = get_all_fn()
+            local_keys = set()
+            to_create, to_update = [], []
+            for local in local_rows:
+                kv = str(local.get(business_key) or "")
+                if not kv:
                     result["skipped_invalid"] += 1
+                    continue
+                local_keys.add(kv)
+                f_rec = feishu_by_key.get(kv)
+                if f_rec:
+                    to_update.append((f_rec.get("record_id", ""), build_fn(local), kv, local))
+                else:
+                    to_create.append((local, build_fn(local)))
 
+            # 飞书多余（本地没有该键）→ 删除
+            orphans = [
+                (self._parse_text_value(r.get("fields", {}).get(feishu_bk, "")), r.get("record_id", ""))
+                for r in feishu_records
+                if self._parse_text_value(r.get("fields", {}).get(feishu_bk, ""))
+                and self._parse_text_value(r.get("fields", {}).get(feishu_bk, "")) not in local_keys
+            ]
+            rids = [rid for _, rid in orphans if rid]
+            for i in range(0, len(rids), 500):
+                try:
+                    resp = self.feishu.batch_delete_records(self.app_token, table_id, rids[i:i + 500])
+                    if resp.get("code") == 0:
+                        result["deleted"] += len(rids[i:i + 500])
+                        for kv, _ in orphans[i:i + 500]:
+                            self.db.delete_sync_map(db_table, kv)
+                    else:
+                        result["failed"] += len(rids[i:i + 500])
+                        result["errors"].append(f"{cfg['label']} 删除多余记录失败: {resp.get('msg', '')}")
+                except Exception as e:
+                    result["failed"] += len(rids[i:i + 500])
+                    result["errors"].append(f"{cfg['label']} 删除多余记录异常: {e}")
+
+            # 批量创建
+            now_ms = int(_time.time() * 1000)
             for i in range(0, len(to_create), 500):
                 batch = to_create[i:i + 500]
                 try:
-                    payload = [{"fields": b["fields"]} for b in batch]
+                    payload = [{"fields": b[1]} for b in batch]
                     resp = self.feishu.batch_create_records(self.app_token, table_id, payload)
                     if resp.get("code") == 0:
                         result["created"] += len(batch)
-                        # 更新本地 record_id 为飞书新分配的，标记 synced=1
                         recs = resp.get("data", {}).get("records", [])
                         for j, rec in enumerate(recs):
-                            if j < len(batch):
-                                nid = rec.get("record_id", "")
-                                oid = batch[j]["local"].get("record_id", "")
-                                if nid and oid:
-                                    try:
-                                        _sync_data = {"record_id": nid, "synced": True}
-                                        _existing_ts = batch[j]["local"].get("local_updated_at")
-                                        if _existing_ts:
-                                            _sync_data["local_updated_at"] = _existing_ts
-                                        update_fn(oid, _sync_data)
-                                    except Exception as e:
-                                        logger.warning(f"更新 record_id 失败 {oid}→{nid}: {e}")
+                            if j >= len(batch):
+                                break
+                            local, _fields = batch[j]
+                            key = str(local.get(business_key) or "")
+                            nid = rec.get("record_id", "")
+                            self.db.upsert_sync_map(
+                                db_table, key, nid, now_ms,
+                                self._parse_local_timestamp(local.get("local_updated_at")),
+                            )
+                            oid = local.get("record_id", "")
+                            if nid and oid:
+                                try:
+                                    update_fn(oid, {"record_id": nid, "synced": True,
+                                                    "local_updated_at": local.get("local_updated_at")
+                                                    or self._ms_to_local_str(now_ms)})
+                                except Exception:
+                                    pass
                     else:
                         result["failed"] += len(batch)
-                        result["errors"].append(f"重建失败: {resp.get('msg', '')}")
+                        result["errors"].append(f"{cfg['label']} 创建失败: {resp.get('msg', '')}")
                 except Exception as e:
                     result["failed"] += len(batch)
-                    result["errors"].append(f"重建异常: {e}")
+                    result["errors"].append(f"{cfg['label']} 创建异常: {e}")
+
+            # 批量更新（整行覆盖，不看时间戳）
+            for i in range(0, len(to_update), 500):
+                batch = to_update[i:i + 500]
+                try:
+                    payload = [{"record_id": b[0], "fields": b[1]} for b in batch if b[0]]
+                    resp = self.feishu.batch_update_records(self.app_token, table_id, payload)
+                    if resp.get("code") == 0:
+                        result["updated"] += len(payload)
+                        for rid, _fields, key, local in batch:
+                            self.db.upsert_sync_map(
+                                db_table, key, rid, now_ms,
+                                self._parse_local_timestamp(local.get("local_updated_at")),
+                            )
+                            oid = local.get("record_id", "")
+                            if oid:
+                                try:
+                                    update_fn(oid, {"synced": True,
+                                                    "local_updated_at": local.get("local_updated_at")
+                                                    or self._ms_to_local_str(now_ms)})
+                                except Exception:
+                                    pass
+                    else:
+                        result["failed"] += len(payload)
+                        result["errors"].append(f"{cfg['label']} 更新失败: {resp.get('msg', '')}")
+                except Exception as e:
+                    result["failed"] += len(payload)
+                    result["errors"].append(f"{cfg['label']} 更新异常: {e}")
         except Exception as e:
             result["errors"].append(f"{db_table} 全盘推送异常: {e}")
             logger.exception(f"{db_table} 全盘推送失败")
         return result
 
     def _full_from_feishu_single(self, db_table: str) -> dict:
-        """以飞书为基准覆盖本地单表"""
-        result = {"created": 0, "updated": 0, "deleted": 0,
-                  "skipped_uptodate": 0, "skipped_duplicate": 0, "skipped_invalid": 0,
-                  "failed": 0, "errors": []}
-        cfg = self.TABLE_CONFIG[db_table]
+        """以飞书为基准覆盖本地单表（按键差异：建/改/删，不清空重建）"""
+        result = self._empty_result()
+        cfg = self.TABLE_CONFIG.get(db_table)
+        if not cfg:
+            return result
         table_id = self._get_table_id(db_table)
         if not table_id:
             result["errors"].append(f"{cfg['label']} 未配置 table_id")
             return result
 
+        business_key = self.BUSINESS_KEYS[db_table]
+        feishu_bk = self.FEISHU_BUSINESS_KEYS.get(db_table, business_key)
         convert_fn = getattr(self, cfg["from_feishu"])
+        get_all_fn = getattr(self.db, cfg["get_all_local"])
         insert_fn = getattr(self.db, cfg["insert"])
+        update_fn = getattr(self.db, cfg["update"])
 
         try:
-            # Step 1: 清空本地表（含墓碑）
-            with self.db._connect() as conn:
-                conn.execute(f"DELETE FROM {db_table}")
-                conn.commit()
-
-            # Step 2: 拉取飞书全表，逐条插入
             feishu_records = self.feishu.get_all_records(self.app_token, table_id)
-            for record in feishu_records:
-                rid = record.get("record_id", "")
-                local_data = convert_fn(record)
-                if not local_data:
+            feishu_by_key = {}
+            for r in feishu_records:
+                kv = self._parse_text_value(r.get("fields", {}).get(feishu_bk, ""))
+                if kv and kv not in feishu_by_key:
+                    feishu_by_key[kv] = r
+
+            now_ms = int(_time.time() * 1000)
+            local_keys = set()
+            for r in feishu_records:
+                rid = r.get("record_id", "")
+                kv = self._parse_text_value(r.get("fields", {}).get(feishu_bk, ""))
+                if not kv:
                     result["skipped_invalid"] += 1
                     continue
-                local_data["record_id"] = rid
-                local_data["synced"] = True
+                data = convert_fn(r)
+                if not data:
+                    result["skipped_invalid"] += 1
+                    continue
+                f_ts = self._get_feishu_timestamp(r)
+                data["record_id"] = rid
+                data["synced"] = True
+                if f_ts:
+                    data["local_updated_at"] = self._ms_to_local_str(f_ts)
+                existing = None
                 try:
-                    insert_fn(local_data)
-                    result["created"] += 1
-                except sqlite3.IntegrityError:
-                    result["skipped_duplicate"] += 1
-                except Exception as e:
-                    result["failed"] += 1
-                    result["errors"].append(f"{rid}: {e}")
+                    biz = cfg["get_by_business_key"]
+                    if biz == "_get_cookie_by_value":
+                        existing = self._get_cookie_by_value(kv)
+                    else:
+                        existing = getattr(self.db, biz)(kv)
+                except Exception:
+                    existing = None
+                if existing:
+                    local_keys.add(kv)
+                    oid = existing.get("record_id", "") or rid
+                    try:
+                        update_fn(oid, data)
+                        result["updated"] += 1
+                        self.db.upsert_sync_map(
+                            db_table, kv, rid,
+                            f_ts, self._parse_local_timestamp(data.get("local_updated_at")),
+                        )
+                    except Exception as e:
+                        result["failed"] += 1
+                        result["errors"].append(f"{cfg['label']} {kv}: {e}")
+                else:
+                    try:
+                        insert_fn(data)
+                        result["created"] += 1
+                        self.db.upsert_sync_map(
+                            db_table, kv, rid,
+                            f_ts, self._parse_local_timestamp(data.get("local_updated_at")),
+                        )
+                    except sqlite3.IntegrityError:
+                        result["skipped_duplicate"] += 1
+                    except Exception as e:
+                        result["failed"] += 1
+                        result["errors"].append(f"{cfg['label']} {kv}: {e}")
 
-            # 记录清空的删除数（统计用）
-            result["deleted"] = 0  # 已经清空了，不再额外统计
+            # 本地多余（飞书没有该键）→ 硬删除 + 清映射
+            for local in get_all_fn():
+                kv = str(local.get(business_key) or "")
+                if not kv or kv in feishu_by_key or kv in local_keys:
+                    continue
+                oid = local.get("record_id", "")
+                if oid:
+                    self.db.hard_delete(db_table, oid)
+                self.db.delete_sync_map(db_table, kv)
+                result["deleted"] += 1
         except Exception as e:
             result["errors"].append(f"{db_table} 全盘拉取异常: {e}")
             logger.exception(f"{db_table} 全盘拉取失败")

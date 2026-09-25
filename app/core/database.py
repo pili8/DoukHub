@@ -1276,6 +1276,85 @@ class Database:
             conn.commit()
             return True
 
+    # ========== 飞书同步映射表（v4 行级 LWW） ==========
+    # 记录「本地业务键 ↔ 飞书 record_id」+ 两端上次同步时的时间戳。
+    # 懒建表（CREATE IF NOT EXISTS，无迁移负担）；
+    # local_key 恒为业务键（share_cache=share_code / account_cache=sec_user_id / cookie_cache=Cookie）。
+
+    def _ensure_sync_map(self, conn) -> None:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS feishu_sync_map (
+                table_type TEXT NOT NULL,
+                local_key TEXT NOT NULL,
+                record_id TEXT NOT NULL DEFAULT '',
+                feishu_ts INTEGER NOT NULL DEFAULT 0,
+                local_ts INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT,
+                PRIMARY KEY (table_type, local_key)
+            )"""
+        )
+
+    def get_sync_map(self, table_type: str) -> dict:
+        """返回 {local_key: {record_id, feishu_ts, local_ts}}"""
+        with self._connect() as conn:
+            self._ensure_sync_map(conn)
+            rows = conn.execute(
+                "SELECT local_key, record_id, feishu_ts, local_ts "
+                "FROM feishu_sync_map WHERE table_type = ?",
+                (table_type,),
+            ).fetchall()
+            return {
+                r["local_key"]: {
+                    "record_id": r["record_id"],
+                    "feishu_ts": r["feishu_ts"],
+                    "local_ts": r["local_ts"],
+                }
+                for r in rows
+            }
+
+    def upsert_sync_map(
+        self,
+        table_type: str,
+        local_key: str,
+        record_id: str,
+        feishu_ts: int = 0,
+        local_ts: int = 0,
+    ) -> None:
+        if not local_key:
+            return
+        with self._connect() as conn:
+            self._ensure_sync_map(conn)
+            conn.execute(
+                """INSERT INTO feishu_sync_map
+                       (table_type, local_key, record_id, feishu_ts, local_ts, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(table_type, local_key) DO UPDATE SET
+                       record_id = excluded.record_id,
+                       feishu_ts = excluded.feishu_ts,
+                       local_ts = excluded.local_ts,
+                       updated_at = excluded.updated_at""",
+                (
+                    table_type,
+                    local_key,
+                    record_id or "",
+                    int(feishu_ts or 0),
+                    int(local_ts or 0),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+            conn.commit()
+
+    def delete_sync_map(self, table_type: str, local_key: str) -> None:
+        if not local_key:
+            return
+        with self._connect() as conn:
+            self._ensure_sync_map(conn)
+            conn.execute(
+                "DELETE FROM feishu_sync_map WHERE table_type = ? AND local_key = ?",
+                (table_type, local_key),
+            )
+            conn.commit()
+
     # ========== 统计和查询 ==========
 
     def get_table_counts(self) -> dict:
