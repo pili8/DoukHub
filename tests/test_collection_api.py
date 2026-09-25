@@ -10,7 +10,7 @@ import app.main as app_main
 
 
 @pytest.fixture
-def batch_client(tmp_path):
+def batch_client(tmp_path, monkeypatch):
     database = MagicMock()
     manager = MagicMock()
     manager.start = AsyncMock(
@@ -52,6 +52,19 @@ def batch_client(tmp_path):
     config = MagicMock()
     config.storage_profiles = {"batch": storage_profile, "single": storage_profile}
 
+    # 低空间确认分支：磁盘紧张时 /api/collection/batches 会提前返回 needs_confirm，
+    # 根本不会调用 manager.start。宿主机剩余空间不该左右测试结果
+    # （本机 C: 只剩 2.3GB 时这两个用例就误报过），这里统一伪装成空间充足；
+    # 低空间分支本身由文件末尾 test_start_batch_asks_confirm_when_disk_low 覆盖。
+    import shutil as _shutil
+
+    class _RoomyUsage:
+        total = 100 * 1024**3
+        used = 0
+        free = 100 * 1024**3
+
+    monkeypatch.setattr(_shutil, "disk_usage", lambda _path: _RoomyUsage)
+
     saved = (
         app_main.config,
         app_main.database,
@@ -83,6 +96,38 @@ def test_start_batch_rejects_empty_selection(batch_client):
     response = client.post("/api/collection/batches", json={})
     assert response.status_code == 400
     assert "没有符合条件的账号" in response.json()["message"]
+
+
+def test_start_batch_asks_confirm_when_disk_low(batch_client, monkeypatch):
+    """剩余空间 <5GB 时先返回 needs_confirm（不启动批次）；带 force_low_space 才继续。
+
+    这是 /api/collection/batches 里真实存在的分支，原先没有任何用例覆盖，
+    导致它一旦被误触发（例如宿主机磁盘只剩 2GB），别的用例会以 KeyError: 'batches' 的形式误报。
+    """
+    client, _, manager = batch_client
+    import shutil as _shutil
+
+    class _TightUsage:
+        total = 10 * 1024**3
+        used = 9 * 1024**3
+        free = 1 * 1024**3  # 剩 1GB，低于 5GB 阈值
+
+    monkeypatch.setattr(_shutil, "disk_usage", lambda _path: _TightUsage)
+
+    response = client.post("/api/collection/batches", json={})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["needs_confirm"] is True
+    assert "剩余空间不足" in data["message"]
+    assert "batches" not in data
+    assert manager.start.await_count == 0  # 确认前不得真的启动批次
+
+    # 用户确认后带 force_low_space 重发 → 走正常流程、返回批次
+    response = client.post(
+        "/api/collection/batches", json={"force_low_space": True}
+    )
+    assert response.status_code == 200
+    assert response.json()["batches"][0]["id"] == "b1"
 
 
 def test_batch_detail_contains_items_and_log(batch_client):
