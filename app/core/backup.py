@@ -22,8 +22,68 @@ def db_path() -> Path:
     return app_data_root() / "doukhub.db"
 
 
-# 保留的备份份数
+# 保留的备份份数（每一类备份各自保留这么多份）
 BACKUP_KEEP_COUNT = 7
+
+# 备份文件的三类：glob 模式 + 展示名。清理与列表都按这三类分别处理。
+BACKUP_KINDS = {
+    "db": ("doukhub_*.db", "主库"),
+    "ttd-db": ("ttd-ledger_*.db", "TTD 台账"),
+    "ttd-settings": ("ttd-settings_*.json", "TTD 配置"),
+}
+
+
+def ttd_volume_dir() -> Path:
+    """TikTokDownloader 的 Volume 目录（含已下载台账与含 cookie 的配置）。"""
+    from .config import Config
+
+    return Path(Config().ttd_path) / "Volume"
+
+
+def backup_ttd_files(timestamp: str) -> list:
+    """备份 TTD 的已下载台账与配置，两份独立文件、共用同一时间戳。
+
+    - 台账 `DouK-Downloader.db`：用 VACUUM INTO 导出一致性副本（与主库同法，不锁库不丢 WAL）
+    - 配置 `settings.json`：直接复制（内含 cookie）
+    这两份都不能省：台账丢了已下载的记录会被全部重下，配置丢了要重新扫码登录。
+    """
+    volume = ttd_volume_dir()
+    backup_dir = get_backup_dir()
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    results = []
+
+    ledger_src = volume / "DouK-Downloader.db"
+    ledger_dst = backup_dir / f"ttd-ledger_{timestamp}.db"
+    if not ledger_src.exists():
+        results.append({"kind": "ttd-db", "filename": None, "error": "台账文件不存在"})
+    else:
+        try:
+            conn = sqlite3.connect(str(ledger_src), timeout=30.0)
+            conn.execute("VACUUM INTO '{}'".format(str(ledger_dst).replace("'", "''")))
+            conn.close()
+            results.append({"kind": "ttd-db", "filename": ledger_dst.name,
+                            "size": ledger_dst.stat().st_size})
+        except Exception as e:
+            if ledger_dst.exists():
+                try:
+                    ledger_dst.unlink()
+                except OSError:
+                    pass
+            results.append({"kind": "ttd-db", "filename": None, "error": str(e)})
+
+    settings_src = volume / "settings.json"
+    settings_dst = backup_dir / f"ttd-settings_{timestamp}.json"
+    if not settings_src.exists():
+        results.append({"kind": "ttd-settings", "filename": None, "error": "配置文件不存在"})
+    else:
+        try:
+            shutil.copy2(str(settings_src), str(settings_dst))
+            results.append({"kind": "ttd-settings", "filename": settings_dst.name,
+                            "size": settings_dst.stat().st_size})
+        except Exception as e:
+            results.append({"kind": "ttd-settings", "filename": None, "error": str(e)})
+
+    return results
 
 
 def get_backup_dir() -> Path:
@@ -40,10 +100,11 @@ def get_backup_dir() -> Path:
 
 
 def create_backup(reason: str = "手动备份") -> dict:
-    """创建数据库备份。
+    """创建一次完整备份：主库 + TTD 台账 + TTD 配置（三者共用同一时间戳）。
 
-    使用 VACUUM INTO 让 SQLite 自己导出一份干净一致的副本，
+    主库与 TTD 台账都用 VACUUM INTO 让 SQLite 自己导出一份干净一致的副本，
     避免直接拷贝文件时遇到正在写入导致的损坏，也不会锁库。
+    TTD 那两份的失败不影响主库备份的成功，会在 ttd_error 里单独报告。
     """
     if not db_path().exists():
         return {"success": False, "error": "数据库文件不存在", "filename": None}
@@ -61,6 +122,9 @@ def create_backup(reason: str = "手动备份") -> dict:
         conn.close()
 
         size = backup_path.stat().st_size
+        # 同一次备份顺带导出 TTD 的台账与配置，时间戳一致便于配对
+        ttd_files = backup_ttd_files(timestamp)
+        ttd_errors = [f"{t['kind']}：{t['error']}" for t in ttd_files if t.get("error")]
         return {
             "success": True,
             "filename": backup_filename,
@@ -68,6 +132,8 @@ def create_backup(reason: str = "手动备份") -> dict:
             "size": size,
             "timestamp": timestamp,
             "reason": reason,
+            "ttd_files": ttd_files,
+            "ttd_error": "；".join(ttd_errors) if ttd_errors else None,
         }
     except Exception as e:
         # 清理可能产生的半成品
@@ -79,28 +145,43 @@ def create_backup(reason: str = "手动备份") -> dict:
         return {"success": False, "error": str(e), "filename": None}
 
 
-def list_backups() -> list:
-    """列出所有备份文件，按时间倒序。"""
+def list_backups(kind: Optional[str] = None) -> list:
+    """列出备份文件，按时间倒序。
+
+    kind 取 BACKUP_KINDS 的键（"db" / "ttd-db" / "ttd-settings"），不传则返回全部三类。
+    每条结果带 kind / label 字段，便于界面区分「可恢复的主库」与「仅存档的 TTD 文件」。
+    """
     backup_dir = get_backup_dir()
     if not backup_dir.exists():
         return []
 
+    kinds = [kind] if kind else list(BACKUP_KINDS)
     backups = []
-    for f in backup_dir.glob("doukhub_*.db"):
-        stat = f.stat()
-        try:
-            timestamp = f.stem.replace("doukhub_", "")
-            dt = datetime.strptime(timestamp, "%Y-%m-%d_%H-%M-%S")
-            time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            time_str = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    for k in kinds:
+        if k not in BACKUP_KINDS:
+            continue
+        pattern, label = BACKUP_KINDS[k]
+        prefix = pattern.split("*")[0]
+        for f in backup_dir.glob(pattern):
+            try:
+                stat = f.stat()
+            except OSError:
+                continue
+            stamp = f.stem[len(prefix):] if f.stem.startswith(prefix) else f.stem
+            try:
+                dt = datetime.strptime(stamp, "%Y-%m-%d_%H-%M-%S")
+                time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                time_str = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
 
-        backups.append({
-            "filename": f.name,
-            "filepath": str(f),
-            "size": stat.st_size,
-            "time": time_str,
-        })
+            backups.append({
+                "filename": f.name,
+                "filepath": str(f),
+                "size": stat.st_size,
+                "time": time_str,
+                "kind": k,
+                "label": label,
+            })
 
     backups.sort(key=lambda x: x["time"], reverse=True)
     return backups
@@ -215,17 +296,17 @@ def restore_backup(filename: str) -> dict:
 
 
 def cleanup_old_backups(keep_count: int = BACKUP_KEEP_COUNT) -> dict:
-    """清理旧备份，只保留最近 keep_count 份。"""
-    backups = list_backups()
-    if len(backups) <= keep_count:
-        return {"deleted": 0, "kept": len(backups)}
-
+    """清理旧备份：主库 / TTD 台账 / TTD 配置三类各自保留最近 keep_count 份。"""
     deleted = 0
-    for backup in backups[keep_count:]:
-        if delete_backup(backup["filename"])["success"]:
-            deleted += 1
+    kept = 0
+    for kind in BACKUP_KINDS:
+        backups = list_backups(kind)
+        kept += min(len(backups), keep_count)
+        for backup in backups[keep_count:]:
+            if delete_backup(backup["filename"])["success"]:
+                deleted += 1
 
-    return {"deleted": deleted, "kept": keep_count}
+    return {"deleted": deleted, "kept": kept}
 
 
 def get_db_stats() -> dict:
@@ -341,8 +422,11 @@ def vacuum_database() -> dict:
 
 
 def check_daily_backup() -> dict:
-    """检查是否需要每日备份（距离上次备份超过 24 小时则创建）。"""
-    backups = list_backups()
+    """检查是否需要每日备份（距离上次**主库**备份超过 24 小时则创建）。
+
+    只看主库：TTD 那两份是跟着主库一起产出的，不能拿它们来判断「今天备过没有」。
+    """
+    backups = list_backups("db")
     if not backups:
         result = create_backup(reason="首次自动备份")
         if result["success"]:

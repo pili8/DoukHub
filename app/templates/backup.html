@@ -126,7 +126,12 @@
             </div>`;
             return;
         }
-        el.innerHTML = backups.map(b => `
+        el.innerHTML = backups.map(b => {
+            const isDb = (b.kind || 'db') === 'db';
+            const action = isDb
+                ? `<button class="btn btn-warning btn-sm" onclick="restoreBackup('${b.filename}')"><i class="ph ph-arrow-counter-clockwise"></i> 恢复</button>`
+                : `<span class="bk-meta" title="TTD 台账/配置属于独立存档，恢复时手动放回 TTD 的 Volume 目录">仅存档</span>`;
+            return `
             <div class="backup-row">
                 <div class="bk-info">
                     <div class="bk-name">${b.filename}</div>
@@ -134,17 +139,19 @@
                 </div>
                 <div class="bk-actions">
                     <a class="btn btn-secondary btn-sm" href="/api/backup/download/${b.filename}" download><i class="ph ph-download-simple"></i> 下载</a>
-                    <button class="btn btn-warning btn-sm" onclick="restoreBackup('${b.filename}')"><i class="ph ph-arrow-counter-clockwise"></i> 恢复</button>
+                    ${action}
                     <button class="btn btn-danger btn-sm" onclick="deleteBackup('${b.filename}')"><i class="ph ph-trash"></i> 删除</button>
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
     }
 
     async function createBackup() {
         const data = await apiCall('/api/backup/create', 'POST');
         if (data.success) {
-            showToast('备份成功：' + data.filename);
+            // TTD 台账/配置的失败不影响主库备份成功，单独提示
+            if (data.ttd_error) showToast('备份成功：' + data.filename + '（TTD 未成功：' + data.ttd_error + '）', 'error');
+            else showToast('备份成功：' + data.filename);
         } else {
             showToast('备份失败：' + (data.error || '未知错误'), 'error');
         }

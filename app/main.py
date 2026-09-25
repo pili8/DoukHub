@@ -661,6 +661,26 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         logger.warning(f"启动备份检查失败（不影响使用）: {_e}")
 
+    # 备份定时检查：每小时看一次
+    # （原先只在容器启动时检查一次 → 容器长期不重启就永远不会再自动备份）
+    def _backup_loop():
+        import time as _t
+        _t.sleep(120)
+        while True:
+            try:
+                _b = backup.check_daily_backup()
+                if _b.get("success"):
+                    logger.info(f"定时自动备份：{_b.get('filename')}")
+                    _record_system_event(
+                        "backup", "done",
+                        message=f"自动备份：{_b.get('filename')}",
+                        trigger="daily",
+                    )
+            except Exception as _be:
+                logger.warning(f"定时备份检查异常（不影响使用）: {_be}")
+            _t.sleep(3600)
+    threading.Thread(target=_backup_loop, daemon=True).start()
+
     # 初始化文件查重的回收区目录
     try:
         dedup.set_recycle_dir(config.get("dedup.recycle_dir", ""))
