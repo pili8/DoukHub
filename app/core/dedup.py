@@ -20,10 +20,26 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from .data_root import app_data_root
 from .tasks import get_task_manager
 
-# 数据目录：与主库同目录（~/.doukhub/）
-_DATA_DIR = Path.home() / ".doukhub"
+
+def _resolve_data_dir() -> Path:
+    """查重的数据目录：跟随应用数据根目录（与主库 doukhub.db、backups/ 同级）。
+
+    这里必须用 app_data_root() 而不是 Path.home()/".doukhub"：容器里 HOME=/root，
+    后者会落到 /root/.doukhub —— 那是**容器可写层**，不在任何挂载卷上，
+    容器一重建，查重缓存与回收区全部丢失，且在 NAS 文件管理器里根本看不到。
+    桌面端 app_data_root() 默认也是 ~/.doukhub，行为不变。
+    取不到根目录时退回旧默认，避免模块导入即失败。
+    """
+    try:
+        return app_data_root()
+    except Exception:
+        return Path.home() / ".doukhub"
+
+
+_DATA_DIR = _resolve_data_dir()
 _CACHE_FILE = _DATA_DIR / "dedup_cache.json"
 _RESULT_FILE = _DATA_DIR / "dedup_result.json"
 _DEFAULT_RECYCLE_DIR = _DATA_DIR / "dedup_recycle"

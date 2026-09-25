@@ -1257,7 +1257,11 @@ async def api_dedup_move(payload: dict):
 @app.get("/api/dedup/recycle")
 async def api_dedup_recycle():
     """回收区文件列表。"""
-    return {"success": True, "items": dedup.list_recycle(), "recycle_dir": str(dedup.RECYCLE_DIR)}
+    return {
+        "success": True,
+        "items": dedup.list_recycle(),
+        "recycle_dir": str(dedup.get_recycle_dir()),
+    }
 
 
 @app.post("/api/dedup/restore")
@@ -1280,7 +1284,7 @@ async def api_dedup_open_recycle():
     import subprocess
     import sys
     import os
-    recycle = dedup.RECYCLE_DIR
+    recycle = dedup.get_recycle_dir()
     recycle.mkdir(parents=True, exist_ok=True)
     try:
         if sys.platform == "win32":
