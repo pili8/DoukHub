@@ -30,7 +30,7 @@
     <div class="dh-panel-row">
         <div class="dh-panel-info">
             <div class="dh-panel-info-title">双向自动同步</div>
-            <p class="dh-panel-info-desc">本地改动约 1 分钟内自动推送，云端变化按设定间隔自动检查；两端都改过的行按修改时间新旧自动取舍。点「立即同步」可随时手动对齐一次。</p>
+            <p class="dh-panel-info-desc">双向自动同步，冲突行按修改时间新旧取舍；点「立即同步」可手动对齐。</p>
         </div>
         <button class="btn btn-primary" onclick="feishuSyncRun('/api/feishu/sync', '增量同步（本地与云端）')" id="btn-incremental"><i class="ph ph-lightning"></i> 立即同步</button>
     </div>
@@ -44,7 +44,7 @@
                 <i class="ph ph-warning"></i> 全盘同步
                 <span>数据混乱时的托底手段</span>
             </div>
-            <p class="dh-panel-danger-desc">以选定一方为准，逐行覆盖另一方（差异覆盖，不清空重建）。属于纠偏/恢复工具，日常无需使用。</p>
+            <p class="dh-panel-danger-desc">以一方为准逐行覆盖另一方（不清空重建），仅数据混乱时纠偏用。</p>
             <div class="btn-group">
                 <button class="btn btn-warning" onclick="fullSyncConfirm('to-feishu')" id="btn-full-to"><i class="ph ph-cloud-arrow-up"></i> 以本地覆盖云端</button>
                 <button class="btn btn-warning" onclick="fullSyncConfirm('from-feishu')" id="btn-full-from"><i class="ph ph-cloud-arrow-down"></i> 以云端覆盖本地</button>
@@ -172,6 +172,19 @@
     margin: 0 0 10px; font-size: 12.5px; line-height: 1.6; color: var(--dh-text-secondary);
 }
 .dh-panel .dh-panel-danger-desc strong { color: var(--dh-text); }
+
+/* 危险区按钮：底色与危险区同源，必须描边区分（黄底上黄按钮会退化成纯文字） */
+.dh-panel .dh-panel-danger .btn-warning {
+    background: transparent;
+    color: var(--dh-warning);
+    border: 1px solid var(--dh-warning);
+}
+.dh-panel .dh-panel-danger .btn-warning:hover {
+    background: var(--dh-warning);
+    color: var(--dh-surface, #fff);
+    box-shadow: none;
+    filter: none;
+}
 
 /* 状态 / 进度 / 结果 */
 .dh-panel .dh-panel-status { font-size: 13px; margin-top: 12px; }
