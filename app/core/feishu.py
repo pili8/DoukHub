@@ -295,7 +295,7 @@ class FeishuClient:
             return [
                 ("分享码", 1, None),             # 文本，抖音分享码（如 iMLuCKjq）
                 ("平台", 3, {"options": [{"name": "douyin"}, {"name": "tiktok"}, {"name": "xhs"}]}),
-                ("等级", 2, None),             # 数字 1-4
+                ("等级", 2, {"formatter": "0"}),             # 数字 1-4，整数显示（无小数点）
                 ("标签", 4, None),             # 多选标签
                 ("sec_user_id", 1, None),      # 自动回填
                 ("解析状态", 3, {"options": [{"name": "待解析"}, {"name": "已就绪"}, {"name": "已生成"}, {"name": "已删除"}, {"name": "解析失败"}, {"name": "链接失效"}, {"name": "非主页链接"}, {"name": "暂不支持"}]}),  # 单选：状态枚举
@@ -325,7 +325,7 @@ class FeishuClient:
                 ("平台", 3, {"options": [{"name": "douyin"}, {"name": "tiktok"}, {"name": "xhs"}]}),
                 ("链接", 15, None),
                 ("sec_user_id", 1, None),
-                ("等级", 2, None),             # 数字 1-4
+                ("等级", 2, {"formatter": "0"}),             # 数字 1-4，整数显示（无小数点）
                 ("标签", 4, None),
                 ("启用", 7, None),
                 ("采集类型", 3, {"options": [{"name": "发布"}, {"name": "喜欢"}, {"name": "收藏"}]}),
