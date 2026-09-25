@@ -2178,6 +2178,21 @@ class Database:
             conn.commit()
             return cursor.lastrowid
 
+    def fail_stale_running_sync(self) -> int:
+        """把遗留 running 状态的 cloud_sync 记录标记为中断（服务启动时调用）。
+
+        托盘自动重启会把正在跑的同步进程拦腰砍断，sync_history 永远停在 running
+        （僵尸记录），导致界面"上次同步"显示异常 —— 启动时统一收尸。
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE sync_history SET status = 'failed', error = '服务重启中断', "
+                "finished_at = ? WHERE task_type = 'cloud_sync' AND status = 'running'",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
+            )
+            conn.commit()
+            return cursor.rowcount
+
     def get_sync_history(self, task_type: Optional[str] = None, limit: int = 50, offset: int = 0) -> list[dict]:
         """获取同步历史记录。可按 task_type 过滤，支持分页。"""
         with self._connect() as conn:

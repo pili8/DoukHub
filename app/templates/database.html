@@ -16,26 +16,26 @@
     <div class="empty-state compact" style="grid-column:1/-1;"><i class="ph ph-spinner"></i><div class="es-title">加载中...</div></div>
 </div>
 
-<!-- 功能面板：卡头（chip 图标 + 标题）+ 米色行条，与 /status 页同一套结构语言 -->
-<div class="card dh-panel">
+<!-- 功能面板：卡头（chip 图标 + 标题 + 总闸开关）+ 米色行条，与 /status 页同一套结构语言（§11.5） -->
+<div class="card dh-panel" id="sync-panel">
     <div class="dh-panel-head">
         <h3><i class="ph ph-cloud-arrow-up"></i> 云端同步</h3>
-        <span class="dh-panel-meta" id="dh-panel-meta"></span>
         <label class="sync-gate" title="关闭后为纯本地模式：所有自动与手动同步都会停用">
             <input type="checkbox" id="sync-gate-check" onchange="toggleAutoSync(this.checked)">
             <span class="sync-gate-track"><span class="sync-gate-knob"></span></span>
-            <span class="sync-gate-text" id="sync-gate-text">已启用</span>
+            <span class="sync-gate-text" id="sync-gate-text">云同步已启用</span>
         </label>
     </div>
 
-    <div class="dh-panel-row" id="sync-main-area">
+    <div class="dh-panel-row">
         <div class="dh-panel-info">
-            <div class="dh-panel-info-title">增量同步</div>
-            <p class="dh-panel-info-desc">双向同步本地与云端；两端都改过的行按修改时间新旧自动取舍，其余各自跟随。本地改动约 1 分钟内自动推送，云端变化按设定间隔自动检查。</p>
+            <div class="dh-panel-info-title">双向自动同步</div>
+            <p class="dh-panel-info-desc">本地改动约 1 分钟内自动推送，云端变化按设定间隔自动检查；两端都改过的行按修改时间新旧自动取舍。点「立即同步」可随时手动对齐一次。</p>
         </div>
+        <button class="btn btn-primary" onclick="feishuSyncRun('/api/feishu/sync', '增量同步（本地与云端）')" id="btn-incremental"><i class="ph ph-lightning"></i> 立即同步</button>
     </div>
-    <button class="sync-big-btn" onclick="feishuSyncRun('/api/feishu/sync', '增量同步（本地与云端）')" id="btn-incremental"><i class="ph ph-lightning"></i> <span>立即同步</span></button>
-    <p class="sync-hint">点一下就跑，无需确认 · 关闭开关即进入纯本地模式</p>
+
+    <div class="sync-meta-line" id="dh-panel-meta"><i class="ph ph-spinner ph-spin"></i> 正在读取同步状态…</div>
 
     <details class="sync-adv" id="sync-adv-area">
         <summary><i class="ph ph-wrench"></i> 高级恢复（纠偏用，日常不用）</summary>
@@ -124,13 +124,6 @@
     margin-bottom: 14px; flex-wrap: wrap;
 }
 .dh-panel .dh-panel-head h3 { margin: 0; }
-.dh-panel .dh-panel-meta {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 12px; color: var(--dh-text-muted);
-}
-.dh-panel .dh-panel-meta i { font-size: 14px; }
-.dh-panel .dh-panel-meta.ok { color: var(--dh-success); }
-.dh-panel .dh-panel-meta.err { color: var(--dh-danger); }
 
 /* 行条：左说明 + 右操作，L2 降级面 */
 .dh-panel .dh-panel-row {
@@ -148,6 +141,17 @@
     margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--dh-text-secondary);
 }
 .dh-panel .dh-panel-row > .btn { flex: 0 0 auto; }
+
+/* 上次同步摘要行：行条下方的小字状态行 */
+.sync-meta-line {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin-top: 10px; padding: 0 2px;
+    font-size: 12px; color: var(--dh-text-secondary);
+}
+.sync-meta-line i { font-size: 14px; }
+.sync-meta-line.ok { color: var(--dh-success); }
+.sync-meta-line.err { color: var(--dh-danger); }
+.sync-meta-line.run { color: var(--dh-accent); }
 
 /* 危险区：浅底 + 细左边，不与日常区抢视觉权重 */
 .dh-panel .dh-panel-danger {
@@ -211,18 +215,6 @@
 .sync-gate input:checked + .sync-gate-track .sync-gate-knob { left: 20px; }
 .sync-gate-text { font-size: 13px; color: var(--dh-text-secondary); }
 
-/* ===== 通栏大同步按钮 ===== */
-.sync-big-btn {
-    width: 100%; height: 44px; margin-top: 4px;
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    background: var(--dh-accent); color: #fff; border: none; border-radius: var(--dh-radius);
-    font-size: 14px; font-weight: 500; cursor: pointer; transition: opacity .15s;
-}
-.sync-big-btn:hover { opacity: .9; }
-.sync-big-btn:disabled { opacity: .45; cursor: not-allowed; }
-.sync-big-btn i { font-size: 17px; }
-.sync-hint { font-size: 12px; color: var(--dh-text-muted); text-align: center; margin: 8px 0 0; }
-
 /* ===== 高级恢复折叠区 ===== */
 .sync-adv { margin-top: 14px; border-top: 0.5px solid var(--dh-border); padding-top: 10px; }
 .sync-adv summary {
@@ -235,7 +227,8 @@
 .sync-adv[open] .dh-panel-danger { margin-top: 8px; }
 
 /* 总闸关闭时的半透明态 */
-.sync-panel-off .sync-big-btn, .sync-panel-off .sync-adv { opacity: .4; pointer-events: none; }
+.sync-panel-off .dh-panel-row, .sync-panel-off .sync-adv, .sync-panel-off .sync-meta-line { opacity: .4; pointer-events: none; }
+.sync-panel-off .sync-gate-text { color: var(--dh-text-muted); }
 </style>
 
 {% endblock %}
@@ -247,7 +240,9 @@
     refreshStats();
     loadLastSync();
 
-    // 上次同步摘要：复用现有 /api/sync/history/{task_type}，零后端改动
+    // 上次同步摘要：复用现有 /api/sync/history/{task_type}，零后端改动。
+    // ⚠️ 历史里可能存在 running 僵尸记录（托盘重启把同步进程拦腰砍断，状态永远停在 running），
+    // 展示口径：最近一条已完成记录算"上次同步"；running 且刚开始 <30 分钟才算"进行中"。
     function _relTime(ts) {
         if (!ts) return '';
         const d = new Date(String(ts).replace(' ', 'T'));
@@ -265,18 +260,29 @@
         try {
             const r = await fetch('/api/sync/history/cloud_sync');
             const d = await r.json();
-            const h = (d.history || [])[0];
-            if (!h) { el.textContent = ''; el.className = 'dh-panel-meta'; return; }
+            const list = d.history || [];
+            const running = list.find(h => h.status === 'running');
+            if (running) {
+                const fresh = (Date.now() - new Date(String(running.started_at || '').replace(' ', 'T')).getTime()) < 10 * 60 * 1000;
+                if (fresh) {
+                    el.className = 'sync-meta-line run';
+                    el.innerHTML = '<i class="ph ph-spinner ph-spin"></i> 同步进行中…（开始于 ' + _relTime(running.started_at) + '）';
+                    return;
+                }
+                // 超过 30 分钟还 running → 僵尸记录，按无进行中处理
+            }
+            const h = list.find(x => x.status !== 'running');
+            if (!h) { el.className = 'sync-meta-line'; el.textContent = '暂无同步记录'; return; }
             const ok = h.status === 'done' && !(h.failed > 0);
-            const when = _relTime(h.finished_at || h.started_at);
-            el.className = 'dh-panel-meta ' + (ok ? 'ok' : 'err');
+            const dur = h.duration_sec != null ? ' · 耗时 ' + (h.duration_sec >= 60 ? Math.round(h.duration_sec / 60) + ' 分' : Math.round(h.duration_sec) + ' 秒') : '';
+            el.className = 'sync-meta-line ' + (ok ? 'ok' : 'err');
             el.innerHTML = '<i class="ph ' + (ok ? 'ph-check-circle' : 'ph-warning-circle') + '"></i>'
-                + '上次同步 ' + (when || '时间未知')
-                + ' · 成功 ' + (h.success || 0) + '/' + (h.total || 6)
-                + (h.failed ? ' · 失败 ' + h.failed : '');
+                + '上次同步 ' + (_relTime(h.finished_at || h.started_at) || '时间未知')
+                + ' · 成功 ' + (h.success || 0) + '/' + (h.total || 3) + ' 步'
+                + (h.failed ? ' · 失败 ' + h.failed : '') + dur;
         } catch (e) {
-            el.textContent = '';
-            el.className = 'dh-panel-meta';
+            el.className = 'sync-meta-line';
+            el.textContent = '同步状态读取失败';
         }
     }
 
@@ -470,8 +476,8 @@
 
     // ===== 云同步总闸开关 =====
     function applyGateState(on) {
-        const panel = document.querySelector('.dh-panel');
-        document.getElementById('sync-gate-text').textContent = on ? '已启用' : '已关闭';
+        const panel = document.getElementById('sync-panel');
+        document.getElementById('sync-gate-text').textContent = on ? '云同步已启用' : '纯本地模式';
         if (panel) panel.classList.toggle('sync-panel-off', !on);
     }
 

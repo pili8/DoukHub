@@ -531,7 +531,6 @@ def _record_system_event(
         logger.warning(f"记录系统事件历史失败（{task_type}）: {e}")
 
 
-@asynccontextmanager
 def _auto_sync_loop():
     """自动同步后台线程（Syncthing 模式）：
 
@@ -597,8 +596,17 @@ def _auto_sync_loop():
             _t.sleep(60)
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     import threading
+
+    # 收尸：上次进程中断遗留的 running 云同步记录（托盘重启拦腰砍断）标记为中断
+    try:
+        n = get_database().fail_stale_running_sync()
+        if n:
+            logger.warning(f"已将 {n} 条遗留 running 状态的云同步记录标记为中断")
+    except Exception as e:
+        logger.warning(f"清理遗留同步记录失败: {e}")
 
     # 后台启动 Downloader 服务（不阻塞 UI）
     svc = get_services()
