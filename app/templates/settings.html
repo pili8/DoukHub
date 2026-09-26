@@ -23,10 +23,9 @@
 /* 折叠态箭头反转（与展开态视觉一致：collapsed 显示为未旋转的下箭头） */
 .settings-card.collapsed .settings-card-head .card-arrow svg[data-lucide] { transform: rotate(0deg); }
 
-/* ===== 分组 Tab 导航（替代长滚动：点击切换，每组一张面板） ===== */
+/* ===== 分组胶囊 Tab 导航（点击切换，每组一张面板） ===== */
 .settings-tabs-wrap {
   position: sticky; top: 0; z-index: 50;
-  background: var(--dh-background);
   padding: 10px 0 8px; margin-bottom: 6px;
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   background: color-mix(in srgb, var(--dh-background) 88%, transparent);
@@ -48,11 +47,13 @@
   transition: all .15s; font-family: inherit;
 }
 .settings-tab:hover { color: var(--text-primary); background: var(--menu-hover); }
-.settings-tab.active {
-  background: var(--accent); color: var(--text-on-accent);
-}
+.settings-tab.active { background: var(--accent); color: var(--text-on-accent); }
 .settings-tab.active svg[data-lucide] { color: var(--text-on-accent); }
 .settings-tab svg[data-lucide] { width: 13px; height: 13px; flex-shrink: 0; }
+@media (max-width: 768px) {
+  .settings-tabs { display: flex; width: 100%; }
+  .settings-tab { flex: 1; justify-content: center; padding: 6px 8px; }
+}
 
 /* ===== 分组面板：只有当前组显示 ===== */
 .settings-group { display: none; }
@@ -179,19 +180,21 @@
         </div>
     </div>
 
-    <!-- ===== 分组 Tab 导航（点击切换面板，不滚动长页） ===== -->
+    <!-- ===== 分组胶囊 Tab 导航（点击切换面板，不滚动长页） ===== -->
     <div class="settings-tabs-wrap">
-      <nav class="settings-tabs" id="settings-tabs">
-        <button type="button" class="settings-tab active" data-target="group-doukhub" onclick="switchSettingsTab(this)"><i data-lucide="sliders-horizontal"></i> DoukHub配置</button>
-        <button type="button" class="settings-tab" data-target="group-download" onclick="switchSettingsTab(this)"><i data-lucide="folder-down"></i> 存储方案</button>
-        <button type="button" class="settings-tab" data-target="group-service" onclick="switchSettingsTab(this)"><i data-lucide="cpu"></i> 内核服务</button>
-        <button type="button" class="settings-tab" data-target="group-feature" onclick="switchSettingsTab(this)"><i data-lucide="webhook"></i> 功能配置</button>
-      </nav>
+    <nav class="settings-tabs" id="settings-tabs">
+      <button type="button" class="settings-tab active" data-target="group-download" onclick="switchSettingsTab(this)"><i data-lucide="folder-down"></i> 存储方案</button>
+      <button type="button" class="settings-tab" data-target="group-collect" onclick="switchSettingsTab(this)"><i data-lucide="cookie"></i> 采集</button>
+      <button type="button" class="settings-tab" data-target="group-feishu" onclick="switchSettingsTab(this)"><i data-lucide="cloud"></i> 云端</button>
+      <button type="button" class="settings-tab" data-target="group-api" onclick="switchSettingsTab(this)"><i data-lucide="webhook"></i> 接口</button>
+      <button type="button" class="settings-tab" data-target="group-app" onclick="switchSettingsTab(this)"><i data-lucide="sliders-horizontal"></i> 应用</button>
+    </nav>
     </div>
+    <div class="settings-groups-wrap">
 
-    <!-- ═══ 分组: DoukHub配置 ═══ -->
-    <div class="settings-group active" id="group-doukhub">
-    <div class="settings-group-label"><i data-lucide="sliders-horizontal"></i> DoukHub配置</div>
+    <!-- ═══ 分组: 应用 ═══ -->
+    <div class="settings-group" id="group-app">
+    <div class="settings-group-label"><i data-lucide="sliders-horizontal"></i> 应用</div>
 
     <div class="card settings-card open">
         <button type="button" class="settings-card-head" onclick="toggleCard(this)">
@@ -256,7 +259,7 @@
         </div>
     </div>
 
-    </div><!-- /group-doukhub -->
+    </div><!-- /group-app -->
 
     <!-- ═══ 分组: 下载与文件 ═══ -->
     <style>
@@ -480,7 +483,7 @@
 }
     </style>
 
-    <div class="settings-group" id="group-download">
+    <div class="settings-group active" id="group-download">
     <!-- 存储调度台：机器层（深色机柜）+ 人工层（纸质工单） -->
     <div class="bay" id="storage-bay">
         <div class="bay-head">
@@ -528,9 +531,55 @@
     </div><!-- /group-download -->
 
 
-    <!-- ═══ 分组: 内核服务 ═══ -->
-    <div class="settings-group" id="group-service">
-    <div class="settings-group-label"><i data-lucide="cpu"></i> 内核服务</div>
+    <!-- ═══ 分组: 采集 ═══ -->
+    <div class="settings-group" id="group-collect">
+    <div class="settings-group-label"><i data-lucide="cookie"></i> 采集</div>
+
+    <!-- 卡片:采集与Cookie (合并) -->
+    <div class="card settings-card">
+        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
+            <i data-lucide="cookie"></i><span class="card-title">采集与 Cookie</span>
+            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="settings-card-body">
+            <div class="settings-grid">
+                <div class="form-group" style="margin:0;">
+                    <label>并发采集账号数</label>
+                    <input type="number" name="concurrent_accounts" value="{{ config.concurrent_accounts or 3 }}" min="1" max="10">
+                    <small>同时下载的账号数</small>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label>Cookie 轮换模式</label>
+                    <select name="cookie.rotation_mode">
+                        <option value="random" {{ 'selected' if config.cookie.rotation_mode == 'random' }}>随机</option>
+                        <option value="sequential" {{ 'selected' if config.cookie.rotation_mode == 'sequential' }}>顺序</option>
+                    </select>
+                    <small>多 Cookie 轮换策略</small>
+                </div>
+            </div>
+            <div class="form-group" style="margin-top:12px;">
+                <label>单个 Cookie 使用次数上限</label>
+                <input type="number" name="cookie.usage_limit" value="{{ config.cookie.usage_limit or 10 }}">
+                <small>超过此次数后轮换到下一个 Cookie</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- 卡片:标签映射（自「功能配置」迁入：规范标签供采集方案打标签下拉使用） -->
+    <div class="card settings-card">
+        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
+            <i data-lucide="tag"></i><span class="card-title">标签映射</span>
+            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
+        </button>
+        <div class="settings-card-body">
+            <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">每行一个映射, 格式: 缩写=完整标签。未匹配的缩写会作为新标签保留。</p>
+            <div class="form-group">
+                <textarea name="tags_text" rows="12" style="font-family:var(--font-mono);font-size:13px;" placeholder="个=个人&#10;图=图集&#10;分享=分享&#10;街拍=街拍">{% for k, v in config.tags.items() %}{{ k }}={{ v }}
+{% endfor %}</textarea>
+            </div>
+            <small>示例: 个=个人 | 图=图集 | 街拍=街拍 | 太多=多</small>
+        </div>
+    </div>
 
     <!-- 卡片:内核服务 -->
     <div class="card settings-card">
@@ -581,41 +630,11 @@
         </div>
     </div>
 
-    <!-- 卡片:采集与Cookie (合并) -->
-    <div class="card settings-card">
-        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
-            <i data-lucide="cookie"></i><span class="card-title">采集与 Cookie</span>
-            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
-        </button>
-        <div class="settings-card-body">
-            <div class="settings-grid">
-                <div class="form-group" style="margin:0;">
-                    <label>并发采集账号数</label>
-                    <input type="number" name="concurrent_accounts" value="{{ config.concurrent_accounts or 3 }}" min="1" max="10">
-                    <small>同时下载的账号数</small>
-                </div>
-                <div class="form-group" style="margin:0;">
-                    <label>Cookie 轮换模式</label>
-                    <select name="cookie.rotation_mode">
-                        <option value="random" {{ 'selected' if config.cookie.rotation_mode == 'random' }}>随机</option>
-                        <option value="sequential" {{ 'selected' if config.cookie.rotation_mode == 'sequential' }}>顺序</option>
-                    </select>
-                    <small>多 Cookie 轮换策略</small>
-                </div>
-            </div>
-            <div class="form-group" style="margin-top:12px;">
-                <label>单个 Cookie 使用次数上限</label>
-                <input type="number" name="cookie.usage_limit" value="{{ config.cookie.usage_limit or 10 }}">
-                <small>超过此次数后轮换到下一个 Cookie</small>
-            </div>
-        </div>
-    </div>
+    </div><!-- /group-collect -->
 
-    </div><!-- /group-service -->
-
-    <!-- ═══ 分组: 功能配置 ═══ -->
-    <div class="settings-group" id="group-feature">
-    <div class="settings-group-label"><i data-lucide="webhook"></i> 功能配置</div>
+    <!-- ═══ 分组: 飞书 ═══ -->
+    <div class="settings-group" id="group-feishu">
+    <div class="settings-group-label"><i data-lucide="cloud"></i> 云端</div>
 
     <!-- 卡片:云端配置 -->
     <div class="card settings-card">
@@ -666,6 +685,12 @@
         </div>
     </div>
 
+    </div><!-- /group-feishu -->
+
+    <!-- ═══ 分组: 接口 ═══ -->
+    <div class="settings-group" id="group-api">
+    <div class="settings-group-label"><i data-lucide="webhook"></i> 接口</div>
+
     <!-- 卡片:API 模式 -->
     <div class="card settings-card">
         <button type="button" class="settings-card-head" onclick="toggleCard(this)">
@@ -710,22 +735,9 @@
         </div>
     </div>
 
-    <!-- 卡片:标签映射 -->
-    <div class="card settings-card">
-        <button type="button" class="settings-card-head" onclick="toggleCard(this)">
-            <i data-lucide="tag"></i><span class="card-title">标签映射</span>
-            <span class="card-arrow"><i data-lucide="chevron-down"></i></span>
-        </button>
-        <div class="settings-card-body">
-            <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">每行一个映射, 格式: 缩写=完整标签。未匹配的缩写会作为新标签保留。</p>
-            <div class="form-group">
-                <textarea name="tags_text" rows="12" style="font-family:var(--font-mono);font-size:13px;" placeholder="个=个人&#10;图=图集&#10;分享=分享&#10;街拍=街拍">{% for k, v in config.tags.items() %}{{ k }}={{ v }}
-{% endfor %}</textarea>
-            </div>
-            <small>示例: 个=个人 | 图=图集 | 街拍=街拍 | 太多=多</small>
-        </div>
-    </div>
-    </div><!-- /group-feature -->
+    </div><!-- /group-api -->
+
+    </div><!-- /settings-groups-wrap -->
 </form>
 
 {% include "partials/directory_picker.html" %}
@@ -794,7 +806,7 @@
         if (window._doukhubRefreshIcons) window._doukhubRefreshIcons();
     }
 
-    // ===== 分组 Tab：点击切换面板 =====
+    // ===== 分组切换：胶囊 Tab 点击切面板 =====
     function switchSettingsTab(btn) {
         var targetId = btn.dataset.target;
         document.querySelectorAll('.settings-tab').forEach(function(item) { item.classList.remove('active'); });
