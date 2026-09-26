@@ -527,6 +527,7 @@ class Syncer:
                             "作品数": info.get("aweme_count", 0),
                             "签名": info.get("signature", ""),
                             "头像": info.get("avatar", ""),
+                            "uid": str(info.get("uid") or ""),
                             "获取状态": "已获取",
                         })
                     else:

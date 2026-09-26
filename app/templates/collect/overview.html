@@ -10,7 +10,9 @@
   .recent-batch-table th:nth-child(2),
   .recent-batch-table td:nth-child(2),
   .recent-batch-table th:nth-child(4),
-  .recent-batch-table td:nth-child(4) { display: none; }
+  .recent-batch-table td:nth-child(4),
+  .recent-batch-table th:nth-child(8),
+  .recent-batch-table td:nth-child(8) { display: none; }
   /* 指标区:窄屏2列 */
   .workflow-metrics { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .workflow-metric { padding: 10px 8px; text-align: center; }
@@ -53,6 +55,8 @@
         <div class="workflow-metric"><span class="metric-value">{{ latest_batch.success_accounts or 0 }}</span><span class="metric-label">成功</span></div>
         <div class="workflow-metric"><span class="metric-value">{{ latest_batch.failed_accounts or 0 }}</span><span class="metric-label">失败</span></div>
         <div class="workflow-metric"><span class="metric-value">{{ latest_batch.skipped_accounts or 0 }}</span><span class="metric-label">跳过</span></div>
+        <div class="workflow-metric"><span class="metric-value" style="color:var(--md-primary);">{{ latest_batch.works_downloaded or 0 }}</span><span class="metric-label">新增作品</span></div>
+        <div class="workflow-metric"><span class="metric-value">{{ latest_batch.works_skipped or 0 }}</span><span class="metric-label">重复跳过</span></div>
     </div>
     {% else %}
     <div class="empty-state"><i data-lucide="inbox"></i>暂无采集批次</div>
@@ -66,7 +70,7 @@
     {% if batches %}
     <div class="table-scroll">
         <table class="recent-batch-table">
-            <thead><tr><th>批次</th><th>平台</th><th>状态</th><th>账号</th><th>成功</th><th>失败</th><th>开始时间</th></tr></thead>
+            <thead><tr><th>批次</th><th>平台</th><th>状态</th><th>账号</th><th>成功</th><th>失败</th><th>新增作品</th><th>开始时间</th></tr></thead>
             <tbody>
                 {% for batch in batches %}
                 <tr>
@@ -76,6 +80,7 @@
                     <td>{{ batch.total_accounts or 0 }}</td>
                     <td>{{ batch.success_accounts or 0 }}</td>
                     <td>{{ batch.failed_accounts or 0 }}</td>
+                    <td>{{ batch.works_downloaded if batch.works_downloaded is not none else '-' }}</td>
                     <td>{{ batch.started_at or '-' }}</td>
                 </tr>
                 {% endfor %}

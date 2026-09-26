@@ -281,6 +281,14 @@
     loadSingleWorkHistory();
     if (singleWorkState.works.length) { el('settings-panel').style.display = 'block'; }
     updateSelection();
+    // URL 带 ?link= 时预填（表浏览分享表"下载作品"跳转入口）
+    try {
+        var pre = new URLSearchParams(window.location.search).get('link');
+        if (pre) {
+            el('links-input').value = pre;
+            renderLinkLines();
+        }
+    } catch (e) { /* 忽略：不支持 URLSearchParams 的场景直接跳过预填 */ }
 })();
 
 // ===== 清空 / 快捷粘贴 =====

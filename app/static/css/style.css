@@ -1399,6 +1399,7 @@ td a.health-link:hover { border-bottom-color: var(--accent, #4f8cff); }
 
 .workflow-status.skipped,
 .workflow-status.warning,
+.workflow-status.partial,
 .workflow-status.cancelled {
   background: var(--md-warning-container);
   color: var(--md-on-warning-container);

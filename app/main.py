@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import os
 import secrets
 import socket
 import httpx
@@ -132,6 +133,9 @@ def get_download_worker() -> DownloadWorker:
             client=get_single_work_client(),
             ttd_url=f"http://127.0.0.1:{config.ttd_port}",
         )
+        # 单作品优先：下载/解析期间冻结批量子进程，结束自动恢复
+        _bm = get_collection_batch_manager()
+        download_worker.freeze_hooks = (_bm.suspend_for_single_work, _bm.resume_after_single_work)
     return download_worker
 
 
@@ -739,7 +743,7 @@ async def lifespan(app: FastAPI):
         single_work_client = None
 
 
-app = FastAPI(title="DoukHub", version="2.4.0", lifespan=lifespan)
+app = FastAPI(title="DoukHub", version="2.4.1", lifespan=lifespan)
 
 
 
@@ -1350,6 +1354,12 @@ async def page_collect(request: Request):
 async def page_collect_overview(request: Request):
     db = get_database()
     batches = db.list_collection_batches(limit=5)
+    # 老批次统计列为 NULL（改造前入库）：按 collection_works + 日志实时回填，
+    # 避免"明明采过却显示 -"。新批次结算时已写入，直接用。
+    for b in batches:
+        if b.get("works_downloaded") is None:
+            stats = db.get_batch_work_stats(b["id"], str(b.get("log_path") or ""))
+            b.update(stats)
     return templates.TemplateResponse(request, "collect/overview.html", context={
         "request": request,
         "batches": batches,
@@ -2300,6 +2310,7 @@ async def _run_sync_account(task):
                 "作品数": info.get("aweme_count", 0),
                 "签名": info.get("signature", ""),
                 "头像": info.get("avatar", ""),
+                "uid": info.get("uid", ""),
                 "获取状态": "已获取",
             })
             consecutive_ttd_failures = 0
@@ -3555,18 +3566,24 @@ async def _download_single_work_and_record(
     try:
         if work is None:
             work = await single_work.fetch_work(client, ttd_url, link, platform)
-        paths = await single_work.download_work(
-            client,
-            work,
-            target_dir,
-            template,
-            filename_override=filename_override,
-            asset_indexes=asset_indexes,
-            include_music=include_music,
-            include_static_cover=include_static_cover,
-            include_dynamic_cover=include_dynamic_cover,
-            folder_mode=folder_mode,
-        )
+        # 单作品优先：下载期间冻结批量子进程，结束自动恢复
+        _bm = get_collection_batch_manager()
+        _bm.suspend_for_single_work()
+        try:
+            paths = await single_work.download_work(
+                client,
+                work,
+                target_dir,
+                template,
+                filename_override=filename_override,
+                asset_indexes=asset_indexes,
+                include_music=include_music,
+                include_static_cover=include_static_cover,
+                include_dynamic_cover=include_dynamic_cover,
+                folder_mode=folder_mode,
+            )
+        finally:
+            _bm.resume_after_single_work()
         db.update_single_work_history(
             history_id,
             status="success",
@@ -3605,16 +3622,22 @@ async def api_resolve_single_works(request: SingleWorkResolveRequest):
     ttd_url = f"http://127.0.0.1:{config.ttd_port}"
     db = get_database()
     cookie_list = get_cookie_list()
+    # 单作品优先：解析期间冻结批量子进程
+    _bm = get_collection_batch_manager()
+    _bm.suspend_for_single_work()
     works = []
     errors = []
-    for i, (link, platform) in enumerate(links):
-        try:
-            cookie = cookie_list[i % len(cookie_list)] if cookie_list else ""
-            works.append(
-                await single_work.fetch_work(client, ttd_url, link, platform, cookie, mode=resolve_mode)
-            )
-        except Exception as error:
-            errors.append({"link": link, "message": str(error)})
+    try:
+        for i, (link, platform) in enumerate(links):
+            try:
+                cookie = cookie_list[i % len(cookie_list)] if cookie_list else ""
+                works.append(
+                    await single_work.fetch_work(client, ttd_url, link, platform, cookie, mode=resolve_mode)
+                )
+            except Exception as error:
+                errors.append({"link": link, "message": str(error)})
+    finally:
+        _bm.resume_after_single_work()
     return {"success": bool(works), "works": works, "errors": errors}
 
 
@@ -3637,6 +3660,9 @@ async def api_resolve_single_works_stream(request: SingleWorkResolveRequest):
 
     async def resolve_stream():
         import asyncio as _aio
+        # 单作品优先：解析期间冻结批量子进程，流结束（含客户端断开）自动恢复
+        _bm = get_collection_batch_manager()
+        _bm.suspend_for_single_work()
         try:
             mode_label = {"auto": "自动 (API+TTD)", "api": "仅 API", "ttd": "仅 TTD"}.get(resolve_mode, resolve_mode)
             yield f"data: {json.dumps({'type': 'start', 'total': total, 'mode': resolve_mode, 'message': f'开始解析 {total} 个链接 · 模式: {mode_label}' + ('' if cookie_list else '（警告：无可用 Cookie，可能解析失败）')})}\n\n"
@@ -3685,6 +3711,8 @@ async def api_resolve_single_works_stream(request: SingleWorkResolveRequest):
             yield f"data: {json.dumps({'type': 'complete', 'success': success_count > 0, 'total': total, 'success_count': success_count, 'failed_count': failed_count, 'works': works, 'message': f'解析完成: {success_count} 成功, {failed_count} 失败'})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'complete', 'success': False, 'message': f'异常: {str(e)}'})}\n\n"
+        finally:
+            _bm.resume_after_single_work()
 
     return StreamingResponse(
         resolve_stream(),
@@ -4033,6 +4061,128 @@ async def api_proxy_download(url: str, filename: str = "download"):
         media_type=content_type,
         headers=headers_out,
     )
+
+
+class OpenAccountDirRequest(BaseModel):
+    table: str = "account_cache"
+    record_id: str = ""
+
+
+@app.post("/api/table/open-account-dir")
+async def api_open_account_dir(request: OpenAccountDirRequest):
+    """打开账号的下载文件夹（表浏览行操作）。"""
+    db = get_database()
+    table = request.table if request.table in ("account_cache", "share_cache") else "account_cache"
+    with db._connect() as conn:
+        r = conn.execute(
+            f"SELECT sec_user_id, uid FROM {table} WHERE record_id = ?",
+            (request.record_id,),
+        ).fetchone()
+        if not r:
+            return {"success": False, "message": "记录不存在"}
+        sec_user_id, uid = str(r[0] or ""), str(r[1] or "")
+        if not uid:
+            return {"success": False, "message": "该账号还没有数字 UID，请先「回填UID」或获取账号信息"}
+        # 首选：作品表最近一条的真实目录（可能指向作品子目录，向上找账号根）
+        target: Path | None = None
+        w = conn.execute(
+            "SELECT download_dir FROM collection_works WHERE sec_user_id = ?"
+            " AND download_dir IS NOT NULL AND download_dir != ''"
+            " ORDER BY id DESC LIMIT 1",
+            (sec_user_id,),
+        ).fetchone()
+    if w and w[0]:
+        d = Path(w[0])
+        if d.name.startswith(f"UID{uid}_"):
+            target = d
+        elif d.parent.name.startswith(f"UID{uid}_"):
+            target = d.parent
+    # 回退：批量存储方案根目录下按 UID 前缀匹配
+    if target is None:
+        try:
+            from .core import storage_profiles as _sp
+            profile, _diag = _sp.resolve_pair(config, "batch", None, None)
+            if profile:
+                base = Path(str(profile.get("path", ""))).expanduser()
+                if base.exists():
+                    hits = sorted(base.glob(f"UID{uid}_*"))
+                    if hits:
+                        target = hits[0]
+        except Exception:
+            pass
+    if target is None or not target.exists():
+        return {"success": False, "mode": "copy", "path": str(target or ""),
+                "message": f"未找到 UID{uid} 的下载文件夹（路径不在服务器上，可复制路径手动打开）"}
+    from .core.os_open import open_folder
+    ok, err = open_folder(target)
+    if not ok:
+        # 无 GUI（Docker）或系统调用失败：把路径交回前端复制兜底
+        return {"success": False, "mode": "copy", "path": str(target),
+                "message": f"服务器无法直接打开，路径已可复制: {err}"}
+    return {"success": True, "mode": "opened", "path": str(target), "message": f"已打开: {target.name}"}
+
+
+class ResolveShareRowRequest(BaseModel):
+    record_id: str = ""
+
+
+@app.post("/api/table/resolve-share-row")
+async def api_resolve_share_row(request: ResolveShareRowRequest):
+    """分享表「非主页链接」行的下一步动作：重新解析分享码。
+
+    分享码拼回短链 → 解析出作品 → 取作者 sec_user_id/uid/昵称回填该行，
+    解析状态改为「已就绪」（后续可正常生成账号表/采集）。
+    """
+    db = get_database()
+    with db._connect() as conn:
+        r = conn.execute(
+            "SELECT share_code FROM share_cache WHERE record_id = ?",
+            (request.record_id,),
+        ).fetchone()
+    if not r:
+        return {"success": False, "message": "记录不存在"}
+    share_code = str(r[0] or "").strip()
+    if not share_code:
+        return {"success": False, "message": "该行没有 share_code，无法解析"}
+    link = share_code if share_code.startswith("http") else f"https://v.douyin.com/{share_code}/"
+    client = get_single_work_client()
+    cookie_list = get_cookie_list()
+    cookie = cookie_list[0] if cookie_list else ""
+    try:
+        work = await single_work.fetch_work(
+            client, f"http://127.0.0.1:{config.ttd_port}", link, "douyin", cookie, mode="auto"
+        )
+    except Exception as e:
+        # 区分直播分享链接（webcast.amemv.com）：无法解析为作品账号，标记暂不支持
+        try:
+            resp = await client.get(link, follow_redirects=True)
+            if "webcast.amemv.com" in str(resp.url) or "/webcast/reflow/" in str(resp.url):
+                db.update_collection(request.record_id, {"解析状态": "暂不支持"})
+                return {"success": False, "message": "这是直播分享链接，无法解析为作品账号（已标记「暂不支持」）"}
+        except Exception:
+            pass
+        return {"success": False, "message": f"解析失败: {str(e)[:150]}"}
+    author_info = work.get("author_info") or {}
+    sec = str(author_info.get("sec_uid") or "")
+    uid = str(author_info.get("uid") or "")
+    nickname = str(work.get("author") or author_info.get("nickname") or "")
+    if not sec:
+        return {"success": False, "message": "未获取到作者主页信息（作品可能已删除或私密）"}
+    try:
+        db.update_collection(request.record_id, {
+            "sec_user_id": sec,
+            "uid": uid,
+            "账号名称": nickname,
+            "解析状态": "已就绪",
+        })
+    except Exception as e:
+        return {"success": False, "message": f"回填失败: {e}"}
+    return {
+        "success": True,
+        "message": f"已识别作者「{nickname}」并回填（解析状态 → 已就绪）",
+        "home_url": f"https://www.douyin.com/user/{sec}",
+        "work_url": link,
+    }
 
 
 class QuickAddShareRequest(BaseModel):
@@ -5044,12 +5194,14 @@ async def api_collection_work_open(request: WorkOpenRequest):
     if request.mode == "dir":
         target = work.get("download_dir") or ""
         if not target or not os.path.isdir(target):
-            return {"success": False, "message": f"目录不存在: {target or '未记录'}"}
-        try:
-            os.startfile(target)
-            return {"success": True}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
+            return {"success": False, "mode": "copy", "path": target,
+                    "message": f"目录不存在: {target or '未记录'}（路径已可复制）"}
+        from .core.os_open import open_folder
+        ok, err = open_folder(Path(target))
+        if not ok:
+            return {"success": False, "mode": "copy", "path": target,
+                    "message": f"服务器无法直接打开，路径已可复制: {err}"}
+        return {"success": True, "mode": "opened"}
     target = work.get("file_path") or ""
     if not target:
         return {"success": False, "message": "该记录无文件路径"}

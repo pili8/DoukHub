@@ -24,6 +24,8 @@ class DownloadWorker:
         self.db = db
         self.client = client
         self.ttd_url = ttd_url
+        # 单作品优先钩子：(挂起批量, 恢复批量)，由 main 注入 batch manager 的方法
+        self.freeze_hooks: tuple | None = None
         self._queue: asyncio.Queue[int] = asyncio.Queue()
         self._worker: Optional[asyncio.Task] = None
 
@@ -75,6 +77,13 @@ class DownloadWorker:
         link = h.get("source_link") or ""
         platform = h.get("platform") or "douyin"
 
+        # 单作品优先：下载期间冻结批量子进程，结束在 finally 恢复
+        freeze, unfreeze = self.freeze_hooks if self.freeze_hooks else (None, None)
+        if freeze:
+            try:
+                freeze()
+            except Exception:
+                unfreeze = None
         try:
             work = None
             if h.get("work_json"):
@@ -111,6 +120,12 @@ class DownloadWorker:
             )
         except Exception as error:
             self.db.update_single_work_history(history_id, status="failed", error=str(error))
+        finally:
+            if unfreeze:
+                try:
+                    unfreeze()
+                except Exception:
+                    pass
 
     def _pick_cookie(self) -> str:
         cookies = self.db.get_enabled_cookies()

@@ -186,6 +186,35 @@ class CollectionBatchManager:
                 proc.resume()
         self._paused = value
 
+    def suspend_for_single_work(self) -> bool:
+        """单作品优先：临时冻结批量子进程（不改批次状态，用户无感知）。
+
+        与手动暂停互不干扰：批次处于手动暂停时不再重复 suspend；
+        恢复用 resume_after_single_work，只有本方法挂起的才由它恢复。
+        """
+        if self._paused or getattr(self, "_sw_freeze_count", 0) > 0:
+            # 已被手动暂停或已在冻结中（嵌套调用），只累加计数
+            self._sw_freeze_count = getattr(self, "_sw_freeze_count", 0) + 1
+            return True
+        if self._active_process and self._active_process.returncode is None:
+            try:
+                psutil.Process(self._active_process.pid).suspend()
+            except psutil.Error:
+                return False
+            self._sw_freeze_count = 1
+            return True
+        return False
+
+    def resume_after_single_work(self) -> None:
+        """单作品流程结束后解除冻结（有计数保护，全部结束才真正 resume）。"""
+        self._sw_freeze_count = max(0, getattr(self, "_sw_freeze_count", 0) - 1)
+        if self._sw_freeze_count == 0 and not self._paused:
+            if self._active_process and self._active_process.returncode is None:
+                try:
+                    psutil.Process(self._active_process.pid).resume()
+                except psutil.Error:
+                    pass
+
     def pause(self, batch_id: str) -> bool:
         batch = self.db.get_collection_batch(batch_id)
         if not batch or batch["status"] != "running" or batch_id != self._active_batch_id:
@@ -641,6 +670,9 @@ class CollectionBatchManager:
         self._batch_login_fail = 0
         self._batch_cookie_rid = ""
         self._consecutive_403 = 0
+        # 当前账号块内是否出现过"获取账号信息失败"（TTD API 降级信号，
+        # 此时作品列表可能不完整，结果不可信 → 见 _apply_marker 的降级处理）
+        self._current_info_fail = False
         batch = self.db.get_collection_batch(batch_id)
         items = self.db.get_collection_batch_items(batch_id)
         # 从 filter_json 中解析采集设置
@@ -797,6 +829,9 @@ class CollectionBatchManager:
                         marker = marker_line(line)
                         if marker:
                             self._apply_marker(batch_id, marker)
+                        elif ("获取账号信息失败" in line
+                              or "获取账号简略失败" in line):
+                            self._current_info_fail = True
                 finally:
                     watchdog_task.cancel()
 
@@ -941,6 +976,7 @@ class CollectionBatchManager:
         batch = self.db.get_collection_batch(batch_id)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if marker_type == "account_start":
+            self._current_info_fail = False
             self.db.update_collection_batch_item(
                 item["id"], status="running", started_at=now
             )
@@ -948,6 +984,22 @@ class CollectionBatchManager:
             return True
 
         message = str(marker.get("message") or "")
+        # TTD 对"进程没抛异常"一律回报 success——但账号信息获取失败意味着
+        # 本轮 API 已降级，作品列表可能不完整，"成功"不可信：
+        # - 0 作品 → 判为失败，交给既有的"失败账号自动重试一轮"兜底自愈
+        # - 有作品 → 保留成功，但话术明示数据可能不完整
+        if marker_type == "account_result" and status == "success" and self._current_info_fail:
+            got = self.db.count_batch_account_works(
+                batch_id,
+                sec_user_id=str(marker.get("sec_user_id") or ""),
+                account_name=str(marker.get("account_name") or ""),
+            )
+            if got == 0:
+                status = "failed"
+                message = "获取账号信息失败，本轮未采到新作品（自动重试中）"
+            else:
+                message = "下载完成（账号信息获取失败，数据可能不完整）"
+        self._current_info_fail = False
         if status != "success":
             self._note_account_failure(message)
         self.db.update_collection_batch_item(
@@ -1105,15 +1157,65 @@ class CollectionBatchManager:
                     sec_user_id=str(item.get("sec_user_id") or ""),
                     account_name=str(item.get("account_name") or ""),
                 )
+                # 账号信息获取失败但仍有作品下载成功的，保留"可能不完整"警示
+                warning = (
+                    "（账号信息获取失败，可能不完整）"
+                    if "账号信息获取失败" in str(item.get("message") or "")
+                    else ""
+                )
                 self.db.update_collection_batch_item(
                     item["id"],
-                    message=(f"下载 {count} 条" if count else "无新作品（窗口内 0 条）"),
+                    message=(f"下载 {count} 条{warning}" if count else "无新作品（窗口内 0 条）"),
                 )
         except Exception:
             logger.warning(f"[批次 {batch_id}] 补作品条数失败", exc_info=True)
 
     # 批次终态 → 任务历史状态（sync_history.status 用的是 done/failed/cancelled 三值）
-    _HISTORY_STATUS = {"completed": "done", "failed": "failed", "cancelled": "cancelled"}
+    _HISTORY_STATUS = {"completed": "done", "partial": "done", "failed": "failed", "cancelled": "cancelled"}
+
+    def _finalize(
+        self,
+        batch_id: str,
+        status: str,
+        return_code: int,
+        message: str = "",
+    ) -> dict:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        terminal_status = "cancelled" if status == "cancelled" else "failed"
+        with self.db._connect() as conn:
+            conn.execute(
+                """
+                UPDATE collection_batch_items
+                SET status = ?, message = ?, finished_at = ?
+                WHERE batch_id = ? AND status IN ('pending', 'running')
+                """,
+                (terminal_status, message or "批次结束前未收到账号结果", now, batch_id),
+            )
+            conn.commit()
+        counts = self.db.refresh_collection_batch_counts(batch_id)
+        # 状态语义：引擎正常退出但部分账号失败 → partial（部分成功），全失败才叫 failed
+        if status == "completed":
+            success = int(counts.get("success") or 0)
+            failed = int(counts.get("failed") or 0)
+            if failed > 0:
+                if success > 0:
+                    status = "partial"
+                else:
+                    status = "failed"
+                    message = message or "所有账号均未采集成功"
+        # 新增统计：下载/失败作品来自 collection_works 实时落库，跳过数解析 TTD 日志
+        batch = self.db.get_collection_batch(batch_id) or {}
+        stats = self.db.get_batch_work_stats(batch_id, str(batch.get("log_path") or ""))
+        self.db.update_collection_batch(
+            batch_id,
+            status=status,
+            finished_at=now,
+            message=message,
+            **stats,
+        )
+        self._annotate_item_works(batch_id)
+        self._record_history(batch_id, status, message, counts, now)
+        return counts
 
     def _record_history(
         self, batch_id: str, status: str, message: str, counts: dict, finished_at: str

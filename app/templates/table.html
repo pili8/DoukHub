@@ -1410,8 +1410,8 @@ input[type="checkbox"]:disabled {
     };
 
     var TABLE_MODAL_READONLY_ON_EDIT = {
-        'share_cache': ['sec_user_id'],
-        'account_cache': ['sec_user_id'],
+        'share_cache': ['sec_user_id', 'uid'],
+        'account_cache': ['sec_user_id', 'uid'],
     };
 
     var TAGS_MAPPING = {{ tags_mapping_json | safe }};
@@ -1454,7 +1454,7 @@ var FIELD_EDITORS = {
     var FIELD_WIDTHS = {
         '等级': 80, '启用': 70, '采集类型': 90, '平台': 80, '状态': 80,
         '备注': 150, 'Cookie': 240, '链接': 200, '头像': 60, '标签': 150,
-        '签名': 200, 'sec_user_id': 200, 'record_id': 200, '同步时间': 140,
+        '签名': 200, 'sec_user_id': 200, 'uid': 150, 'record_id': 200, '同步时间': 140,
         'created_at': 140, '粉丝数': 90, '作品数': 90, '账号名称': 120,
         '获取状态': 90, '解析状态': 90, 'synced': 70,
         'last_collected_at': 140, 'collect_window_days': 110,
@@ -1469,7 +1469,7 @@ var FIELD_EDITORS = {
         'account_cache': [
             'sec_user_id',
             '平台', '等级', '标签', '备注',
-            '获取状态', '采集类型', '启用',
+            '获取状态', 'uid', '采集类型', '启用',
             '账号名称', '粉丝数', '作品数', '签名', '链接', '头像',
             'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
             'collect_window_days', 'last_collected_at',
@@ -1477,7 +1477,7 @@ var FIELD_EDITORS = {
         'share_cache': [
             'share_code',
             '平台', '等级', '标签', '备注',
-            '解析状态', 'sec_user_id',
+            '解析状态', 'uid', 'sec_user_id',
             '账号名称', '粉丝数', '作品数',
             'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
         ],
@@ -1492,7 +1492,7 @@ var FIELD_EDITORS = {
         'account_cache': {
             'sec_user_id': 'original',
             '平台': 'edit', '等级': 'edit', '标签': 'edit', '备注': 'edit',
-            '获取状态': 'control', '采集类型': 'control', '启用': 'control',
+            '获取状态': 'control', 'uid': 'fetched', '采集类型': 'control', '启用': 'control',
             '链接': 'fetched', '账号名称': 'fetched', '粉丝数': 'fetched', '作品数': 'fetched', '签名': 'fetched', '头像': 'fetched',
             'record_id': 'system', '同步时间': 'system', 'created_at': 'system',
             'synced': 'system', 'local_updated_at': 'system', 'is_deleted': 'system', 'deleted_at': 'system',
@@ -1501,7 +1501,7 @@ var FIELD_EDITORS = {
         'share_cache': {
             'share_code': 'original',
             '平台': 'edit', '等级': 'edit', '标签': 'edit', '备注': 'edit',
-            '解析状态': 'control', 'sec_user_id': 'control',
+            '解析状态': 'control', 'uid': 'fetched', 'sec_user_id': 'control',
             '账号名称': 'fetched', '粉丝数': 'fetched', '作品数': 'fetched',
             'created_at': 'system', 'record_id': 'system', '同步时间': 'system',
             'synced': 'system', 'local_updated_at': 'system', 'is_deleted': 'system', 'deleted_at': 'system',
@@ -1589,6 +1589,16 @@ var FIELD_EDITORS = {
         const href = val.startsWith('http') ? val : 'https://' + val;
         const display = val.length > 40 ? val.substring(0, 40) + '…' : val;
         return '<a href="' + href + '" target="_blank" rel="noopener" style="color: var(--accent); text-decoration: none; font-weight: 500;">' + display + '</a>';
+    }
+
+    // UID 渲染器：有值时为可点击链接，点击直接打开该账号的下载文件夹
+    function uidLinkRenderer(params) {
+        const uid = String(params.value || '').trim();
+        if (!uid) return '<span style="color: var(--text-muted);">-</span>';
+        const recordId = params.data ? (params.data.record_id || '') : '';
+        if (!recordId) return htmlEscape(uid);
+        const safeId = recordId.replace(/'/g, "\\'");
+        return '<a href="javascript:void(0)" onclick="openAccountFolder(currentTable, \'' + safeId + '\')" title="点击打开 UID 对应的下载文件夹" style="color: var(--accent); text-decoration: none; font-weight: 500;">' + htmlEscape(uid) + '</a>';
     }
 
     function avatarRenderer(params) {
@@ -1731,6 +1741,10 @@ function fetchStatusRenderer(params) {
         if (currentTable === 'cookie_cache') {
             html += '<button class="tbl-action-btn" onclick="copyCookieValue(\'' + safeId + '\')" title="复制 Cookie"><i class="ph ph-copy"></i></button>';
         }
+        if (currentTable === 'share_cache' && params.data['解析状态'] === '非主页链接') {
+            html += '<button class="tbl-action-btn" onclick="resolveShareRow(\'' + safeId + '\')" title="解析此链接：识别作品 → 回填作者主页"><i class="ph ph-magnifying-glass"></i></button>';
+            html += '<button class="tbl-action-btn" onclick="jumpSingleWorkFromShare(\'' + encodeURIComponent(String(params.data.share_code || '')) + '\')" title="下载该作品（跳转单作品采集）"><i class="ph ph-download-simple"></i></button>';
+        }
         html += '<button class="tbl-action-btn tbl-action-delete" onclick="deleteRecord(\'' + currentTable + '\', \'' + safeId + '\')" title="删除"><i class="ph ph-trash"></i></button>';
         html += '</div>';
         return html;
@@ -1753,6 +1767,58 @@ async function copyCookieValue(recordId) {
     } catch (e) {
         showToast('复制失败，请手动复制', 'error');
     }
+}
+
+// 打开账号/分享行对应的下载文件夹（后端按数字 UID 匹配目录）
+async function openAccountFolder(table, recordId) {
+    try {
+        const resp = await fetch('/api/table/open-account-dir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ table: table, record_id: recordId })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(data.message || '已打开', 'success');
+            return;
+        }
+        // 打不开（目录不在/NAS 无 GUI）：路径自动复制到剪贴板兜底
+        if (data.path && navigator.clipboard) {
+            try {
+                await navigator.clipboard.writeText(data.path);
+                showToast('路径已复制，粘贴到资源管理器地址栏即可打开：' + data.path, 'info');
+                return;
+            } catch (e) { /* 剪贴板失败则落到普通提示 */ }
+        }
+        showToast(data.message || '打开失败', 'error');
+    } catch (e) {
+        showToast('请求失败: ' + e.message, 'error');
+    }
+}
+
+// 分享表「非主页链接」行：重新解析 → 回填作者主页信息
+async function resolveShareRow(recordId) {
+    showToast('正在解析…', 'info');
+    try {
+        const resp = await fetch('/api/table/resolve-share-row', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ record_id: recordId })
+        });
+        const data = await resp.json();
+        showToast(data.message || (data.success ? '解析完成' : '解析失败'), data.success ? 'success' : 'error');
+        if (data.success) showTable(currentTable, currentPage, currentKeyword);
+    } catch (e) {
+        showToast('请求失败: ' + e.message, 'error');
+    }
+}
+
+// 分享表「非主页链接」行：跳转单作品采集页并预填链接
+function jumpSingleWorkFromShare(encodedCode) {
+    const code = decodeURIComponent(encodedCode || '');
+    if (!code) { showToast('该行没有分享码', 'error'); return; }
+    const link = code.startsWith('http') ? code : ('https://v.douyin.com/' + code + '/');
+    window.location.href = '/collect/detail?link=' + encodeURIComponent(link);
 }
 
 // 账号表 sec_user_id 渲染器：显示 sec + "作品"入口按钮
@@ -1789,6 +1855,7 @@ var FIELD_RENDERERS = {
 '验证说明': verifyNoteRenderer,
 '解析状态': parseStatusRenderer,
 '获取状态': fetchStatusRenderer,
+'uid': uidLinkRenderer,
 };
 
     // =========================================================================

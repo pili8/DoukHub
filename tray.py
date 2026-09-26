@@ -14,8 +14,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app.core.data_root import DataRootError, app_data_root
 
 import httpx
-import pystray
-from PIL import Image, ImageDraw
+
+# 托盘 GUI 依赖：Docker 等无 GUI 环境可能导入失败，main() 里按平台降级
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+except Exception:  # pragma: no cover
+    pystray = None
+    Image = ImageDraw = None
 
 logger = logging.getLogger("doukhub.tray")
 
@@ -54,6 +60,8 @@ SERVER_PROC: subprocess.Popen | None = None
 
 def free_port() -> None:
     """清理占用 PORT 端口的残留进程(上次异常退出可能遗留孤儿进程)。"""
+    if sys.platform != "win32":
+        return  # netstat/taskkill 是 Windows 专属，非 Windows 交给进程自身生命周期
     try:
         out = subprocess.run(
             ["netstat", "-aon"], capture_output=True, text=True,
@@ -91,7 +99,7 @@ def start_server() -> bool:
         SERVER_PROC = subprocess.Popen(
             cmd,
             cwd=str(ROOT),
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             stdout=server_log,
             stderr=subprocess.STDOUT,
         )
@@ -325,9 +333,10 @@ def data_root_ready() -> bool:
         return True
     except DataRootError as exc:
         logger.error(str(exc))
-        ctypes.windll.user32.MessageBoxW(
-            None,
-            f"{exc}\n\n请修复目录或恢复引导文件后重新启动。",
+        if sys.platform == "win32":
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                f"{exc}\n\n请修复目录或恢复引导文件后重新启动。",
             "DoukHub 应用数据目录不可用",
             0x10 | 0x40000,
         )
@@ -335,6 +344,24 @@ def data_root_ready() -> bool:
 
 
 def main():
+    if sys.platform != "win32":
+        # macOS / Linux / Docker：无 Windows 互斥量与托盘 GUI，直接前台跑服务 + 热重载监控
+        if not data_root_ready():
+            return
+        logger.info("非 Windows 环境：跳过托盘图标，前台运行服务")
+        start_downloaders_async()
+        start_server()
+        _watch_files()  # 前台阻塞轮询（内部自带循环）
+        return
+    if pystray is None:
+        logger.error("pystray 导入失败，仅启动服务（无托盘图标）")
+        if not data_root_ready():
+            return
+        start_downloaders_async()
+        start_server()
+        threading.Thread(target=_watch_files, daemon=True).start()
+        threading.Event().wait()  # 常驻
+        return
     if not acquire_single_instance():
         _notify_already_running()
         return

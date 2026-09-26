@@ -164,8 +164,16 @@
         body: JSON.stringify({ work_id: id, mode: mode })
       });
       var data = await r.json();
-      if (data.success) toast(mode === 'dir' ? '已打开目录' : '已定位文件');
-      else toast(data.message || '打开失败', true);
+      if (data.success) { toast(mode === 'dir' ? '已打开目录' : '已定位文件'); return; }
+      // 打不开（目录不在/NAS 无 GUI）：路径自动复制到剪贴板兜底
+      if (data.path && navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(data.path);
+          toast('路径已复制，粘贴到资源管理器地址栏即可打开：' + data.path);
+          return;
+        } catch (e) { /* 剪贴板失败则落到普通提示 */ }
+      }
+      toast(data.message || '打开失败', true);
     } catch (e) {
       toast('请求失败: ' + (e.message || e));
     }

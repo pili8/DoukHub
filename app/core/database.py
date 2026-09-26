@@ -1,6 +1,7 @@
 """DoukHub 本地数据库管理"""
 import sqlite3
 import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -55,6 +56,7 @@ class Database:
                     等级 INTEGER,
                     标签 TEXT,
                     sec_user_id TEXT,
+                    uid TEXT,
                     解析状态 TEXT DEFAULT '待解析',
                     备注 TEXT,
                     粉丝数 INTEGER,
@@ -77,6 +79,7 @@ class Database:
                     平台 TEXT,
                     链接 TEXT,
                     sec_user_id TEXT UNIQUE NOT NULL,
+                    uid TEXT,
                     等级 INTEGER,
                     标签 TEXT,
                     启用 BOOLEAN DEFAULT 1,
@@ -135,6 +138,10 @@ class Database:
                     success_accounts INTEGER DEFAULT 0,
                     failed_accounts INTEGER DEFAULT 0,
                     skipped_accounts INTEGER DEFAULT 0,
+                    works_downloaded INTEGER,
+                    works_failed INTEGER,
+                    works_skipped INTEGER,
+                    accounts_with_new INTEGER,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -419,6 +426,19 @@ class Database:
             "account_cache": ["昵称", "获取错误"],
             "share_cache": ["昵称", "签名", "头像", "同步错误"],
         }
+
+        # v2.4.1：批次新增统计（新增作品/失败作品/重复跳过/有新增的账号数）
+        # NULL = 老批次未统计，由查询路径实时回填（collection_works + 日志解析）
+        add_columns.setdefault("collection_batches", []).extend([
+            ("works_downloaded", "INTEGER"),
+            ("works_failed", "INTEGER"),
+            ("works_skipped", "INTEGER"),
+            ("accounts_with_new", "INTEGER"),
+        ])
+
+        # v2.4.2：数字 UID（文件夹命名 UID{uid}_名字 的关键，表浏览快捷打开文件夹用）
+        add_columns.setdefault("share_cache", []).append(("uid", "TEXT"))
+        add_columns.setdefault("account_cache", []).append(("uid", "TEXT"))
 
         # v2.3：批次回填「定时任务」溯源字段（用于按任务 ID 精确匹配执行历史）
         # scheduled_task_id 为空 = 手动发起的采集；不会误配到任何定时任务
@@ -732,6 +752,7 @@ class Database:
     _BATCH_FIELDS = {
         "status", "process_pid", "log_path", "started_at", "finished_at",
         "total_accounts", "success_accounts", "failed_accounts", "skipped_accounts",
+        "works_downloaded", "works_failed", "works_skipped", "accounts_with_new",
         "message",
     }
     _BATCH_ITEM_FIELDS = {
@@ -961,12 +982,13 @@ class Database:
     def count_batch_account_works(
         self, batch_id: str, sec_user_id: str = "", account_name: str = ""
     ) -> int:
-        """统计某批次里某个账号**实际落库**的作品条数。
+        """统计某批次里某个账号**实际下载成功**的作品条数。
 
         用于把笼统的「下载完成」补成真实条数，避免"显示成功、目录却空"的误导。
+        只统计 status='success'（失败行 message='下载失败'，不该计入"下载 N 条"）。
         优先按 sec_user_id 匹配；没有则退回账号名；两者都没有则返回 0。
         """
-        conds = ["batch_id = ?"]
+        conds = ["batch_id = ?", "status = 'success'"]
         params: list = [batch_id]
         if sec_user_id:
             conds.append("sec_user_id = ?")
@@ -982,6 +1004,48 @@ class Database:
                 params,
             ).fetchone()
             return int(row[0]) if row else 0
+
+    def get_batch_work_stats(self, batch_id: str, log_path: str = "") -> dict:
+        """聚合某批次的新增数据统计（"本次采到了多少"的结构化口径）。
+
+        - works_downloaded: 下载成功的作品数（collection_works 实时落库，准确）
+        - works_failed:     下载失败的作品数
+        - accounts_with_new: 有新增作品的账号数
+        - works_skipped:    被"下载记录已存在/文件已存在"跳过的作品数
+                            （只在 TTD 终端日志里有计数，需解析日志；老批次也适用）
+        """
+        stats = {
+            "works_downloaded": 0,
+            "works_failed": 0,
+            "works_skipped": 0,
+            "accounts_with_new": 0,
+        }
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS dl,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS fl,
+                    COUNT(DISTINCT CASE WHEN status = 'success'
+                        THEN COALESCE(NULLIF(sec_user_id, ''), account_name) END) AS acc
+                FROM collection_works WHERE batch_id = ?
+                """,
+                (batch_id,),
+            ).fetchone()
+        if row:
+            stats["works_downloaded"] = int(row["dl"] or 0)
+            stats["works_failed"] = int(row["fl"] or 0)
+            stats["accounts_with_new"] = int(row["acc"] or 0)
+        # 跳过数只能从 TTD 终端日志解析（每账号块尾的"跳过XX作品 N 个"汇总行）
+        if log_path:
+            try:
+                text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+                stats["works_skipped"] = sum(
+                    int(m) for m in re.findall(r"跳过(?:视频|图集|实况)作品\s*(\d+)\s*个", text)
+                )
+            except OSError:
+                pass
+        return stats
 
     def list_batch_works(self, batch_id: str) -> list[dict]:
         with self._connect() as conn:
