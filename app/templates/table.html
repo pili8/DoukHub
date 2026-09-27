@@ -1011,7 +1011,7 @@
     display: inline-block;
     padding: 0 6px;
     border-radius: var(--radius-xs);
-    font-size: 10.5px; line-height: 17px;
+    font-size: 11px; line-height: 18px;
     margin-right: 3px;
     white-space: nowrap;
 }
@@ -1059,6 +1059,57 @@
     box-shadow: var(--shadow-xs), var(--glow-danger);
     transform: scale(1.05);
 }
+/* 行尾「更多」触发按钮：行操作收敛为一个入口，具体动作在菜单里显示文字 */
+.tbl-more-btn {
+    background: var(--menu-hover);
+    color: var(--text-secondary);
+    padding: 0 8px;
+}
+.tbl-more-btn i { font-size: 14px; transition: transform var(--transition-fast); }
+/* 菜单打开时箭头转向下，指示当前状态 */
+.tbl-more-btn.is-open i { transform: rotate(90deg); }
+.tbl-more-btn:hover,
+.tbl-more-btn.is-open {
+    color: var(--accent-text);
+    box-shadow: var(--shadow-xs), var(--glow-primary);
+}
+/* 「更多」浮层菜单：视觉跟随筛选弹窗（同底色/描边/圆角/阴影/入场动画） */
+.tbl-row-menu {
+    position: fixed;
+    z-index: 20500;
+    min-width: 132px;
+    padding: 4px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    color: var(--text-primary);
+    font-size: 13px;
+    user-select: none;
+    animation: tbl-menu-in 130ms cubic-bezier(0.2, 0, 0, 1);
+}
+.tbl-row-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 10px;
+    border: none;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    text-align: left;
+}
+.tbl-row-menu-item i { font-size: 15px; color: var(--text-secondary); }
+.tbl-row-menu-item:hover { background: var(--bg-hover); }
+/* 危险项（删除）：常态即红字，hover 浅红底 */
+.tbl-row-menu-item.is-danger { color: var(--danger-text); }
+.tbl-row-menu-item.is-danger i { color: var(--danger-text); }
+.tbl-row-menu-item.is-danger:hover { background: var(--danger-light); }
 
 /* ===== 分页 / 加载状态条 ===== */
 .tbl-pagination { margin-top: 12px; flex-shrink: 0; }
@@ -1469,15 +1520,15 @@ var FIELD_EDITORS = {
         'account_cache': [
             'sec_user_id',
             '平台', '等级', '标签', '备注',
-            '获取状态', 'uid', '采集类型', '启用',
-            '账号名称', '粉丝数', '作品数', '签名', '链接', '头像',
+            '获取状态', '采集类型', '启用',
+            '账号名称', '粉丝数', '作品数', '签名', '链接', 'uid', '头像',
             'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
             'collect_window_days', 'last_collected_at',
         ],
         'share_cache': [
             'share_code',
             '平台', '等级', '标签', '备注',
-            '解析状态', 'uid', 'sec_user_id',
+            '解析状态', 'sec_user_id', '分享链接', 'uid',
             '账号名称', '粉丝数', '作品数',
             'created_at', '同步时间', 'record_id', 'is_deleted', 'deleted_at', 'synced', 'local_updated_at',
         ],
@@ -1580,7 +1631,7 @@ var FIELD_EDITORS = {
         if (val === null || val === undefined || val === 0) {
             return '<span style="color: var(--text-muted);">-</span>';
         }
-        return '<span style="color: var(--warning); letter-spacing: 1px; font-size: 14px;">' + '★'.repeat(val) + '</span>';
+        return '<span style="color: var(--warning); letter-spacing: 1px; font-size: 13px;">' + '★'.repeat(val) + '</span>';
     }
 
     function linkRenderer(params) {
@@ -1588,17 +1639,22 @@ var FIELD_EDITORS = {
         if (!val) return '<span style="color: var(--text-muted);">-</span>';
         const href = val.startsWith('http') ? val : 'https://' + val;
         const display = val.length > 40 ? val.substring(0, 40) + '…' : val;
-        return '<a href="' + href + '" target="_blank" rel="noopener" style="color: var(--accent); text-decoration: none; font-weight: 500;">' + display + '</a>';
+        return '<a href="' + href + '" target="_blank" rel="noopener" style="color: var(--accent); text-decoration: none;">' + display + '</a>';
     }
 
-    // UID 渲染器：有值时为可点击链接，点击直接打开该账号的下载文件夹
+    // UID 渲染器：纯文本展示（打开文件夹的操作收进行尾「更多」菜单，不再做点击超链接）
     function uidLinkRenderer(params) {
         const uid = String(params.value || '').trim();
         if (!uid) return '<span style="color: var(--text-muted);">-</span>';
-        const recordId = params.data ? (params.data.record_id || '') : '';
-        if (!recordId) return htmlEscape(uid);
-        const safeId = recordId.replace(/'/g, "\\'");
-        return '<a href="javascript:void(0)" onclick="openAccountFolder(currentTable, \'' + safeId + '\')" title="点击打开 UID 对应的下载文件夹" style="color: var(--accent); text-decoration: none; font-weight: 500;">' + htmlEscape(uid) + '</a>';
+        return '<span>' + htmlEscape(uid) + '</span>';
+    }
+
+    // 分享表虚拟列「分享链接」：由分享码拼出的短链（不落库，纯展示），点击新窗口打开
+    function shareCodeLinkRenderer(params) {
+        const code = String((params.data && params.data.share_code) || '').trim();
+        if (!code) return '<span style="color: var(--text-muted);">-</span>';
+        const href = 'https://v.douyin.com/' + encodeURIComponent(code) + '/';
+        return '<a href="' + href + '" target="_blank" rel="noopener" style="color: var(--accent); text-decoration: none;">' + htmlEscape(href) + '</a>';
     }
 
     function avatarRenderer(params) {
@@ -1701,7 +1757,7 @@ function fetchStatusRenderer(params) {
         const val = params.value;
         if (!val) return '<span style="color: var(--text-muted);">-</span>';
         const display = val.length > 30 ? val.substring(0, 30) + '…' : val;
-        return '<span title="' + String(val).replace(/"/g, '&quot;') + '" style="font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);">' + display + '</span>';
+        return '<span title="' + String(val).replace(/"/g, '&quot;') + '" style="font-family: var(--font-mono); font-size: 13px; color: var(--text-secondary);">' + display + '</span>';
     }
 
     function errorRenderer(params) {
@@ -1709,7 +1765,7 @@ function fetchStatusRenderer(params) {
         if (!val) return '<span style="color: var(--text-muted);">-</span>';
         let display = String(val);
         if (display.length > 40) display = display.substring(0, 40) + '…';
-        return '<span title="' + String(val).replace(/"/g, '&quot;') + '" style="color: var(--danger); font-size: 12px;">' + display + '</span>';
+        return '<span title="' + String(val).replace(/"/g, '&quot;') + '" style="color: var(--danger); font-size: 13px;">' + display + '</span>';
     }
 
     // 验证说明渲染器：空值灰色"-"，有内容时根据关键词着色
@@ -1731,23 +1787,77 @@ function fetchStatusRenderer(params) {
         return statusPillHtml(val, STATUS_TONES[val] || 'muted');
     }
 
+    // 操作列：收敛为一个「更多」入口，菜单项直接显示操作文字（编辑/打开文件夹/复制 Cookie/解析/下载/删除）
     function actionsRenderer(params) {
         if (!params.data) return ''; // infinite 模型占位行无数据
         const recordId = params.data.record_id || String(params.data.ID || '');
         if (!recordId) return '';
         const safeId = recordId.replace(/'/g, "\\'");
-        let html = '<div style="display: flex; gap: 4px; align-items: center;">';
-        html += '<button class="tbl-action-btn tbl-action-edit" onclick="openAddModal(\'' + safeId + '\')" title="编辑"><i class="ph ph-pencil-simple"></i></button>';
-        if (currentTable === 'cookie_cache') {
-            html += '<button class="tbl-action-btn" onclick="copyCookieValue(\'' + safeId + '\')" title="复制 Cookie"><i class="ph ph-copy"></i></button>';
+        return '<button class="tbl-action-btn tbl-more-btn" onclick="rowMenuToggle(event, \'' + safeId + '\')" title="更多操作" aria-label="更多操作"><i class="ph ph-caret-right"></i></button>';
+    }
+
+    // ===== 行尾「更多」菜单 =====
+    var _rowMenuEl = null;
+
+    function _closeRowMenu() {
+        if (_rowMenuEl) { _rowMenuEl.remove(); _rowMenuEl = null; }
+        document.querySelectorAll('.tbl-more-btn.is-open').forEach(function(b) { b.classList.remove('is-open'); });
+    }
+
+    function rowMenuToggle(event, recordId) {
+        event.stopPropagation();
+        const btn = event.target.closest('.tbl-more-btn');
+        const wasOpen = btn.classList.contains('is-open');
+        _closeRowMenu();
+        if (wasOpen) return; // 再点一次收起
+
+        // 从已加载行里找回该行数据，据此决定菜单项
+        let data = null;
+        if (gridApi) {
+            gridApi.forEachNode(function(node) {
+                if (!node.data) return;
+                if ((node.data.record_id || String(node.data.ID || '')) === recordId) data = node.data;
+            });
         }
-        if (currentTable === 'share_cache' && params.data['解析状态'] === '非主页链接') {
-            html += '<button class="tbl-action-btn" onclick="resolveShareRow(\'' + safeId + '\')" title="解析此链接：识别作品 → 回填作者主页"><i class="ph ph-magnifying-glass"></i></button>';
-            html += '<button class="tbl-action-btn" onclick="jumpSingleWorkFromShare(\'' + encodeURIComponent(String(params.data.share_code || '')) + '\')" title="下载该作品（跳转单作品采集）"><i class="ph ph-download-simple"></i></button>';
+        if (!data) return;
+
+        const uid = String(data.uid || '').trim();
+        const isCookie = currentTable === 'cookie_cache';
+        const canResolve = currentTable === 'share_cache' && data['解析状态'] === '非主页链接';
+
+        const menu = document.createElement('div');
+        menu.className = 'tbl-row-menu';
+        function addItem(icon, label, fn, danger) {
+            const it = document.createElement('button');
+            it.type = 'button';
+            it.className = 'tbl-row-menu-item' + (danger ? ' is-danger' : '');
+            it.innerHTML = '<i class="ph ' + icon + '"></i>' + htmlEscape(label);
+            it.addEventListener('click', function(e) { e.stopPropagation(); _closeRowMenu(); fn(); });
+            menu.appendChild(it);
         }
-        html += '<button class="tbl-action-btn tbl-action-delete" onclick="deleteRecord(\'' + currentTable + '\', \'' + safeId + '\')" title="删除"><i class="ph ph-trash"></i></button>';
-        html += '</div>';
-        return html;
+
+        addItem('ph-pencil-simple', '编辑', function() { openAddModal(recordId); });
+        if (uid) addItem('ph-folder-open', '打开文件夹', function() { openAccountFolder(currentTable, recordId); });
+        if (isCookie) addItem('ph-copy', '复制 Cookie', function() { copyCookieValue(recordId); });
+        if (canResolve) {
+            addItem('ph-magnifying-glass', '解析此链接', function() { resolveShareRow(recordId); });
+            addItem('ph-download-simple', '下载该作品', function() {
+                jumpSingleWorkFromShare(encodeURIComponent(String(data.share_code || '')));
+            });
+        }
+        addItem('ph-trash', '删除', function() { deleteRecord(currentTable, recordId); }, true);
+
+        // 定位：按钮正下方右对齐；下方放不下时向上翻，都不出视口
+        const rect = btn.getBoundingClientRect();
+        document.body.appendChild(menu);
+        const mw = menu.offsetWidth, mh = menu.offsetHeight;
+        let left = Math.max(8, Math.min(rect.right - mw, window.innerWidth - mw - 8));
+        let top = rect.bottom + 4;
+        if (top + mh > window.innerHeight - 8) top = Math.max(8, rect.top - mh - 4);
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+        btn.classList.add('is-open');
+        _rowMenuEl = menu;
     }
 
 async function copyCookieValue(recordId) {
@@ -1842,7 +1952,7 @@ function secUserIdLinkRenderer(params) {
     var text = String(val);
     var display = text.length > 13 ? '…' + text.slice(-12) : text;
     var html = text.replace(/[&<>"']/g, function(ch) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]; });
-    return '<a href="javascript:void(0)" title="' + html + '" onclick="jumpToAccount(\'' + val.replace(/'/g, "\\'") + '\')" style="color: var(--accent); text-decoration: none; font-weight: 500; cursor: pointer;">' + display + '</a>';
+    return '<a href="javascript:void(0)" title="' + html + '" onclick="jumpToAccount(\'' + val.replace(/'/g, "\\'") + '\')" style="color: var(--accent); text-decoration: none; cursor: pointer;">' + display + '</a>';
 }
 
 var FIELD_RENDERERS = {
@@ -2370,12 +2480,19 @@ var FIELD_RENDERERS = {
         if (filterPopupEl && !filterPopupEl.contains(e.target) && !e.target.closest('.tbl-header-menu-btn')) {
             closeFilterPopup();
         }
+        // 行「更多」菜单：点外部收起（触发按钮自身由 rowMenuToggle 的 stopPropagation 处理）
+        if (_rowMenuEl && !_rowMenuEl.contains(e.target)) {
+            _closeRowMenu();
+        }
     };
     window._tblDocKeydown = function(e) {
-        if (e.key === 'Escape') closeFilterPopup();
+        if (e.key === 'Escape') { closeFilterPopup(); _closeRowMenu(); }
     };
+    // 表格滚动时行会移位，固定定位的菜单跟着收起
+    window._tblDocScroll = function() { _closeRowMenu(); };
     document.addEventListener('click', window._tblDocClick);
     document.addEventListener('keydown', window._tblDocKeydown);
+    document.addEventListener('scroll', window._tblDocScroll, true);
 
     // =========================================================================
     // 标签多选编辑器
@@ -2586,6 +2703,23 @@ var FIELD_RENDERERS = {
             colDefs.push(colDef);
         });
 
+        // 分享表虚拟列「分享链接」：由 share_code 拼出，不在数据库（不可排序/筛选）
+        if (tableName === 'share_cache') {
+            colDefs.push({
+                headerName: '分享链接',
+                field: '分享链接',
+                sortable: false,
+                filter: false,
+                floatingFilter: false,
+                editable: false,
+                resizable: true,
+                width: 250,
+                headerClass: 'col-cat-original', // 与来源字段 share_code 同分类，表头样式与各列一致
+                suppressMovable: true,
+                cellRenderer: shareCodeLinkRenderer,
+            });
+        }
+
         const order = COLUMN_ORDER[tableName];
         if (order) {
             colDefs.sort((a, b) => {
@@ -2606,7 +2740,7 @@ var FIELD_RENDERERS = {
                 filter: false,
                 floatingFilter: false,
                 pinned: 'right',
-                width: 90,
+                width: 56,
                 editable: false,
                 resizable: false,
                 suppressMovable: true,
