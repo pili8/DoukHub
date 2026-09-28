@@ -395,6 +395,7 @@
                     <span>禁用 ${acc.disabled || 0}</span>
                     ${acc.not_fetched ? `<span class="warn">待获取 ${acc.not_fetched}</span>` : ''}
                     ${acc.fetch_failed ? `<span class="err">获取失败 ${acc.fetch_failed}</span>` : ''}
+                    ${acc.fetch_deleted ? `<span class="warn">已注销 ${acc.fetch_deleted}</span>` : ''}
                 </div>
             </div>`;
             const ck = s.cookie_cache || {};

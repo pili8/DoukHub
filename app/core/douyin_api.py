@@ -440,19 +440,24 @@ async def fetch_user_profile_direct(
         url = f"{_PROFILE_API_URL}?{params_str}&a_bogus={a_bogus}"
         try:
             data = await _cffi_get(url, headers, timeout=10)
-            user = data.get("user")
-            if user:
-                info = {"sec_user_id": sec_user_id, **_parse_profile(user)}
-                _set_profile_cache(sec_user_id, info)
-                return info
-            # Cookie 失效或封控：返回体里没有 user 字段
-            filter_info = data.get("filter_detail") or {}
-            if filter_info:
-                notice = filter_info.get("notice") or filter_info.get("detail_msg") or "账号不存在"
-                raise RuntimeError(notice)
-            last_error = data.get("status_msg") or "抖音 API 未返回用户数据"
         except Exception as e:
             last_error = str(e)
+            continue
+        user = data.get("user")
+        if user:
+            # 账号已被注销/封禁：抖音仍返回 user 骨架，但 nickname 为空且 user_deleted=true。
+            # 立即抛出（含"已被注销"关键字，上层 no_data 分支直接终判：不轮换 Cookie、不回退 TTD）
+            if user.get("user_deleted"):
+                raise RuntimeError("该账号已被注销或封禁")
+            info = {"sec_user_id": sec_user_id, **_parse_profile(user)}
+            _set_profile_cache(sec_user_id, info)
+            return info
+        # Cookie 失效或封控：返回体里没有 user 字段
+        filter_info = data.get("filter_detail") or {}
+        if filter_info:
+            notice = filter_info.get("notice") or filter_info.get("detail_msg") or "账号不存在"
+            raise RuntimeError(notice)
+        last_error = data.get("status_msg") or "抖音 API 未返回用户数据"
     else:
         raise RuntimeError(last_error or "抖音 API 多次重试后仍未返回用户数据")
 

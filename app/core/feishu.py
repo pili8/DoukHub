@@ -334,7 +334,7 @@ class FeishuClient:
                 ("作品数", 2, None),
                 ("签名", 1, None),
                 ("头像", 15, None),
-                ("获取状态", 3, {"options": [{"name": "待获取"}, {"name": "已获取"}, {"name": "获取失败"}]}),  # 单选：获取状态枚举
+                ("获取状态", 3, {"options": [{"name": "待获取"}, {"name": "已获取"}, {"name": "获取失败"}, {"name": "已注销"}]}),  # 单选：获取状态枚举
                 ("同步时间", 5, None),
                 common_lww_field,             # 方案 B：LWW 时间戳
             ]

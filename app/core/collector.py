@@ -113,8 +113,12 @@ def is_cookie_failure(info: dict) -> bool:
 
     TTD 拿不到 data 时基本只有两种可能：Cookie 过期，或封控；
     两种都该换个 Cookie 再试，所以 no_data 一并归为 Cookie 类故障。
+    `deleted`（直连 API 确认账号已注销/封禁）是账号自身的终态，
+    与 Cookie 无关，换 Cookie 和回退 TTD 都没有意义。
     """
     if not info:
+        return False
+    if info.get("_kind") == "deleted":
         return False
     return info.get("_kind") in ("cookie", "no_data")
 
@@ -480,9 +484,9 @@ class Collector:
                 }
             except RuntimeError as e:
                 msg = str(e)
-                # 账号本身不存在/已注销 → 不必再请求 TTD
+                # 账号本身不存在/已注销 → 终判：不轮换 Cookie、不回退 TTD、不计 Cookie 失败
                 if any(kw in msg for kw in ("账号不存在", "用户不存在", "已被注销", "已被封禁")):
-                    return {"sec_user_id": sec_user_id, "_kind": "no_data", "_error": msg}
+                    return {"sec_user_id": sec_user_id, "_kind": "deleted", "_error": msg}
                 _logger.warning(f"直连 API 获取账号资料失败，回退 TTD: {msg}")
             except Exception as e:
                 _logger.warning(f"直连 API 异常，回退 TTD: {type(e).__name__}: {e}")

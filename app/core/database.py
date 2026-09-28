@@ -2207,6 +2207,7 @@ class Database:
                 "disabled": one("SELECT COUNT(*) FROM account_cache WHERE (启用=0 OR 启用 IS NULL)"),
                 "not_fetched": one("SELECT COUNT(*) FROM account_cache WHERE 获取状态='待获取'"),
                 "fetch_failed": one("SELECT COUNT(*) FROM account_cache WHERE 获取状态='获取失败'"),
+                "fetch_deleted": one("SELECT COUNT(*) FROM account_cache WHERE 获取状态='已注销'"),
             }
             # Cookie表
             stats["cookie_cache"] = {
