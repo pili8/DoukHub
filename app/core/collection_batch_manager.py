@@ -56,6 +56,9 @@ class CollectionBatchManager:
         self._closing = False
         self._paused = False
         self._recovery_wait_timeout = 3.0
+        # 当前账号块内是否出现过「获取账号信息失败」（_run_batch 每轮会重置；
+        # 这里先给默认值，避免只调 _apply_marker 时 AttributeError）
+        self._current_info_fail = False
         # 重启后待续跑的中断批次，由 kick_resume() 送回执行队列
         self._resume_queue: list[str] = []
         # 看门狗分级阈值：超 WARN 秒无输出写警告，超 KILL 秒自动终止进程。
@@ -1114,31 +1117,6 @@ class CollectionBatchManager:
             entry["total"] += 1
         return agg
 
-    def _finalize(
-        self,
-        batch_id: str,
-        status: str,
-        return_code: int,
-        message: str = "",
-    ) -> dict:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        terminal_status = "cancelled" if status == "cancelled" else "failed"
-        with self.db._connect() as conn:
-            conn.execute(
-                """
-                UPDATE collection_batch_items
-                SET status = ?, message = ?, finished_at = ?
-                WHERE batch_id = ? AND status IN ('pending', 'running')
-                """,
-                (terminal_status, message or "批次结束前未收到账号结果", now, batch_id),
-            )
-            conn.commit()
-        self.db.update_collection_batch(batch_id, status=status, finished_at=now, message=message)
-        counts = self.db.refresh_collection_batch_counts(batch_id)
-        self._annotate_item_works(batch_id)
-        self._record_history(batch_id, status, message, counts, now)
-        return counts
-
     def _annotate_item_works(self, batch_id: str) -> None:
         """把笼统的「下载完成」补成实际条数，避免"显示成功、目录却空"的误导。
 
@@ -1214,6 +1192,13 @@ class CollectionBatchManager:
             **stats,
         )
         self._annotate_item_works(batch_id)
+        # 顺带用作品文件夹名回填账号 UID（零请求、零风险），让表浏览的「复制 PC 路径」可用
+        try:
+            filled = self.db.backfill_account_uids()
+            if filled:
+                logger.info(f"[批次 {batch_id}] 顺带回填了 {filled} 个账号的 UID")
+        except Exception:
+            logger.warning(f"[批次 {batch_id}] 回填账号 UID 失败", exc_info=True)
         self._record_history(batch_id, status, message, counts, now)
         return counts
 

@@ -1472,7 +1472,7 @@ var FIELD_EDITORS = {
 '状态': { editor: 'agSelectCellEditor', params: { values: ['正常', '失效'] } },
 '平台': { editor: 'agSelectCellEditor', params: { values: ['douyin', 'tiktok', 'xhs'] } },
 '解析状态': { editor: 'agSelectCellEditor', params: { values: ['待解析', '已就绪', '已生成', '已删除', '解析失败', '链接失效', '非主页链接', '暂不支持'] } },
-'获取状态': { editor: 'agSelectCellEditor', params: { values: ['待获取', '已获取', '获取失败'] } },
+'获取状态': { editor: 'agSelectCellEditor', params: { values: ['待获取', '已获取', '获取失败', '已注销'] } },
 '备注': { editor: 'agTextCellEditor' },
         '任务名称': { editor: 'agTextCellEditor' },
         'Cron表达式': { editor: 'agTextCellEditor' },
@@ -1696,6 +1696,7 @@ var STATUS_TONES = {
     '解析失败': 'danger', '获取失败': 'danger', '失效': 'danger',
     // 终态（已退出流程，不再重试）：用橙与红色「解析失败」区分
     '链接失效': 'warning', '非主页链接': 'warning', '暂不支持': 'warning',
+    '已注销': 'warning',  // 账号在抖音端已注销/封禁，获取终态
 };
 var TONE_VARS = {
     muted:   ['var(--bg-muted)', 'var(--text-secondary)'],
@@ -1711,7 +1712,7 @@ function statusPillHtml(text, tone) {
     return '<span class="tbl-pill" style="background:' + pair[0] + ';color:' + pair[1] + ';">' + htmlEscape(text) + '</span>';
 }
 
-// 获取状态渲染器（枚举：待获取 / 已获取 / 获取失败）
+// 获取状态渲染器（枚举：待获取 / 已获取 / 获取失败 / 已注销）
 function fetchStatusRenderer(params) {
     var val = params.value || '待获取';
     return statusPillHtml(val, STATUS_TONES[val] || 'muted');
@@ -1799,6 +1800,12 @@ function fetchStatusRenderer(params) {
     // ===== 行尾「更多」菜单 =====
     var _rowMenuEl = null;
 
+    // 部署环境能力（页面加载时取一次）：没有图形界面就不显示「打开文件夹」
+    var CAN_OPEN_FOLDER = false;
+    fetch('/api/system/capabilities').then(function(r) { return r.json(); }).then(function(d) {
+        CAN_OPEN_FOLDER = !!(d && d.can_open_folder);
+    }).catch(function() {});
+
     function _closeRowMenu() {
         if (_rowMenuEl) { _rowMenuEl.remove(); _rowMenuEl = null; }
         document.querySelectorAll('.tbl-more-btn.is-open').forEach(function(b) { b.classList.remove('is-open'); });
@@ -1837,7 +1844,13 @@ function fetchStatusRenderer(params) {
         }
 
         addItem('ph-pencil-simple', '编辑', function() { openAddModal(recordId); });
-        if (uid) addItem('ph-folder-open', '打开文件夹', function() { openAccountFolder(currentTable, recordId); });
+        if (uid) {
+            // 服务器没有图形界面（Docker 部署）时不显示「打开」——点了也是白点
+            if (CAN_OPEN_FOLDER) {
+                addItem('ph-folder-open', '打开文件夹', function() { openAccountFolder(currentTable, recordId); });
+            }
+            addItem('ph-clipboard-text', '复制 PC 路径', function() { copyAccountDirPath(currentTable, recordId); });
+        }
         if (isCookie) addItem('ph-copy', '复制 Cookie', function() { copyCookieValue(recordId); });
         if (canResolve) {
             addItem('ph-magnifying-glass', '解析此链接', function() { resolveShareRow(recordId); });
@@ -1876,6 +1889,30 @@ async function copyCookieValue(recordId) {
         showToast('Cookie 已复制', 'success');
     } catch (e) {
         showToast('复制失败，请手动复制', 'error');
+    }
+}
+
+// 复制账号下载文件夹的路径（按当前系统给 PC 或 Mac 能直接用的形式）
+async function copyAccountDirPath(table, recordId) {
+    try {
+        const resp = await fetch('/api/table/account-dir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ table: table, record_id: recordId })
+        });
+        const data = await resp.json();
+        if (!data.success) { showToast(data.message || '未找到该账号的下载文件夹', 'error'); return; }
+        // Mac / iOS 给 smb:// 形式，其余（Windows 等）给 \\host\share 形式
+        const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '');
+        const val = (isMac ? data.mac_path : data.pc_path) || '';
+        if (!val) {
+            showToast('没有可用的 PC 路径（服务器未配置 SMB 映射），原始路径：' + (data.path || ''), 'error');
+            return;
+        }
+        await navigator.clipboard.writeText(val);
+        showToast('已复制路径：' + val, 'success');
+    } catch (e) {
+        showToast('请求失败: ' + e.message, 'error');
     }
 }
 
@@ -3335,7 +3372,7 @@ var FIELD_RENDERERS = {
 } else if (field === '解析状态') {
 container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><option value="">选择…</option><option value="待解析">待解析</option><option value="已就绪">已就绪</option><option value="已生成">已生成</option><option value="已删除">已删除</option><option value="解析失败">解析失败</option><option value="链接失效">链接失效</option><option value="非主页链接">非主页链接</option><option value="暂不支持">暂不支持</option></select>';
 } else if (field === '获取状态') {
-container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><option value="">选择…</option><option value="待获取">待获取</option><option value="已获取">已获取</option><option value="获取失败">获取失败</option></select>';
+container.innerHTML = '<select id="batch-value-input" class="tbl-batch-input"><option value="">选择…</option><option value="待获取">待获取</option><option value="已获取">已获取</option><option value="获取失败">获取失败</option><option value="已注销">已注销</option></select>';
 } else {
             container.innerHTML = '<span id="batch-value-container"><input type="text" id="batch-value-input" class="tbl-batch-input" placeholder="值…"></span>';
         }

@@ -885,9 +885,11 @@ def _account_health(db: Database) -> dict:
         last_status = st.get("last_status") or ""
         last_message = st.get("last_message") or ""
 
-        # 健康判定：解析失败优先 → 未采集 → 按成败分布
+        # 健康判定：账号注销/解析失败优先 → 未采集 → 按成败分布
         total = success + failed
-        if fetch_status == "获取失败":
+        if fetch_status == "已注销":
+            level, label = "abnormal", "已注销"
+        elif fetch_status == "获取失败":
             level, label = "abnormal", "解析失败"
         elif total == 0:
             level, label = "uncollected", "未采集"
@@ -2293,7 +2295,9 @@ async def _run_sync_account(task):
             if not info.get("nickname"):
                 failed += 1
                 reason = info.get("_error") or "TTD 返回空"
-                s.db.update_account(account_id, {"获取状态": "获取失败"})
+                # 直连 API 确认账号已注销/封禁 → 终态「已注销」，与普通失败区分且不再重试
+                new_status = "已注销" if info.get("_kind") == "deleted" else "获取失败"
+                s.db.update_account(account_id, {"获取状态": new_status})
                 tm.add_log(task.task_id, f"X {sec_user_id}: {reason}", "error")
                 tm.update(task.task_id, success=success, failed=failed, skipped=skipped)
                 consecutive_ttd_failures += 1
@@ -2412,6 +2416,14 @@ async def _run_refresh_accounts(task):
     tm = get_task_manager()
     db = get_database()
     tm.add_log(task.task_id, "开始获取账号资料", "info")
+    # 先用「下载文件夹名」免费回填一批 UID（零请求）：能补的当场补上，
+    # 后面的慢速接口就只处理真正缺 UID 且没有作品文件夹的账号。
+    try:
+        filled = db.backfill_account_uids()
+        if filled:
+            tm.add_log(task.task_id, f"已从下载文件夹名免费回填 {filled} 个账号的 UID", "ok")
+    except Exception:
+        logger.warning("回填账号 UID 失败", exc_info=True)
     accounts = db.get_all_accounts()
     to_fetch = [a for a in accounts if a.get("sec_user_id") and a.get("获取状态") in ("待获取", "获取失败")]
     tm.update(task.task_id, total=len(to_fetch))
@@ -2480,7 +2492,9 @@ async def _run_refresh_accounts(task):
             else:
                 failed += 1
                 reason = info.get("_error") or "无法获取资料"
-                db.update_account(account.get("record_id", ""), {"获取状态": "获取失败"})
+                # 直连 API 确认账号已注销/封禁 → 终态「已注销」，与普通失败区分且不再重试
+                new_status = "已注销" if info.get("_kind") == "deleted" else "获取失败"
+                db.update_account(account.get("record_id", ""), {"获取状态": new_status})
                 tm.add_log(task.task_id, f"X {old_name}: {reason}", "error")
                 consecutive_ttd_failures += 1
                 remaining = len(to_fetch) - i - 1
@@ -4068,21 +4082,25 @@ class OpenAccountDirRequest(BaseModel):
     record_id: str = ""
 
 
-@app.post("/api/table/open-account-dir")
-async def api_open_account_dir(request: OpenAccountDirRequest):
-    """打开账号的下载文件夹（表浏览行操作）。"""
+def _resolve_account_dir(table: str, record_id: str) -> dict:
+    """定位某账号的下载文件夹（表浏览行操作共用）。
+
+    返回 {"ok", "uid", "path", "message"}；path 是**容器内**路径，
+    PC / Mac 能用的路径由 `core/path_map` 另行翻译。
+    """
     db = get_database()
-    table = request.table if request.table in ("account_cache", "share_cache") else "account_cache"
+    table = table if table in ("account_cache", "share_cache") else "account_cache"
     with db._connect() as conn:
         r = conn.execute(
             f"SELECT sec_user_id, uid FROM {table} WHERE record_id = ?",
-            (request.record_id,),
+            (record_id,),
         ).fetchone()
         if not r:
-            return {"success": False, "message": "记录不存在"}
+            return {"ok": False, "uid": "", "path": "", "message": "记录不存在"}
         sec_user_id, uid = str(r[0] or ""), str(r[1] or "")
         if not uid:
-            return {"success": False, "message": "该账号还没有数字 UID，请先「回填UID」或获取账号信息"}
+            return {"ok": False, "uid": "", "path": "",
+                    "message": "该账号还没有数字 UID，请先「回填UID」或获取账号信息"}
         # 首选：作品表最近一条的真实目录（可能指向作品子目录，向上找账号根）
         target: Path | None = None
         w = conn.execute(
@@ -4111,15 +4129,49 @@ async def api_open_account_dir(request: OpenAccountDirRequest):
         except Exception:
             pass
     if target is None or not target.exists():
-        return {"success": False, "mode": "copy", "path": str(target or ""),
-                "message": f"未找到 UID{uid} 的下载文件夹（路径不在服务器上，可复制路径手动打开）"}
+        return {"ok": False, "uid": uid, "path": str(target or ""),
+                "message": f"未找到 UID{uid} 的下载文件夹（可能该账号还没采集过）"}
+    return {"ok": True, "uid": uid, "path": str(target), "message": ""}
+
+
+def _dir_payload(resolved: dict) -> dict:
+    """把容器内路径翻译成 PC / Mac 路径，供前端展示与复制。"""
+    from .core import path_map
+    pc, mac = path_map.pc_and_mac(resolved.get("path", ""))
+    return {"path": resolved["path"], "pc_path": pc, "mac_path": mac}
+
+
+@app.post("/api/table/account-dir")
+async def api_table_account_dir(request: OpenAccountDirRequest):
+    """只取账号下载文件夹的路径（**不尝试打开**），供「复制 PC 路径」类菜单项使用。"""
+    resolved = _resolve_account_dir(request.table, request.record_id)
+    return {"success": resolved["ok"], "message": resolved["message"], **_dir_payload(resolved)}
+
+
+@app.get("/api/system/capabilities")
+async def api_system_capabilities():
+    """当前部署环境的能力标记（前端据此决定菜单项是否出现）。"""
+    from .core.os_open import can_open_folder
+    return {"can_open_folder": can_open_folder()}
+
+
+@app.post("/api/table/open-account-dir")
+async def api_open_account_dir(request: OpenAccountDirRequest):
+    """打开账号的下载文件夹（表浏览行操作）。
+
+    服务器没有图形界面时（Docker）不硬报错，而是把路径一并交回前端复制。
+    """
+    resolved = _resolve_account_dir(request.table, request.record_id)
+    payload = _dir_payload(resolved)
+    if not resolved["ok"]:
+        return {"success": False, "mode": "copy", "message": resolved["message"], **payload}
     from .core.os_open import open_folder
-    ok, err = open_folder(target)
+    ok, err = open_folder(Path(resolved["path"]))
     if not ok:
-        # 无 GUI（Docker）或系统调用失败：把路径交回前端复制兜底
-        return {"success": False, "mode": "copy", "path": str(target),
-                "message": f"服务器无法直接打开，路径已可复制: {err}"}
-    return {"success": True, "mode": "opened", "path": str(target), "message": f"已打开: {target.name}"}
+        return {"success": False, "mode": "copy",
+                "message": f"服务器无法直接打开，已可复制路径: {err}", **payload}
+    return {"success": True, "mode": "opened",
+            "message": f"已打开: {Path(resolved['path']).name}", **payload}
 
 
 class ResolveShareRowRequest(BaseModel):

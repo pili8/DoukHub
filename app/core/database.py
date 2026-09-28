@@ -730,6 +730,48 @@ class Database:
             conn.commit()
             return True
 
+    def backfill_account_uids(self) -> int:
+        """从作品表的下载路径里回填账号表的数字 UID，返回补上的条数。
+
+        作品表每条记录都同时存着 sec_user_id 与下载路径，而路径里带
+        `UID{数字}_{名字}_发布作品` 前缀（TTD 建的账号文件夹）。据此可以**精确**回填，
+        不需要靠名字匹配 —— 不怕重名、也不怕改名。
+
+        只动 uid 为空的账号（已有值不覆盖），且只扫这些账号的作品，所以跑过一遍之后
+        开销趋近于零。**不产生任何网络请求**，也就没有限速/风控风险。
+
+        为什么需要它：uid 是 v2.4.2 才加的列，历史数据全是空的；而增量采集与
+        「刷新账号」两条路径都够不着那些"已获取"的老账号。
+        """
+        import re
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT w.sec_user_id, w.download_dir FROM collection_works w"
+                " JOIN account_cache a ON a.sec_user_id = w.sec_user_id"
+                " WHERE (a.uid IS NULL OR a.uid = '')"
+                " AND w.sec_user_id IS NOT NULL AND w.sec_user_id != ''"
+                " AND w.download_dir LIKE '%UID%'"
+            ).fetchall()
+            uid_by_user: dict = {}
+            for sec, path in rows:
+                m = re.search(r"UID(\d+)_", str(path))
+                if m and str(sec) not in uid_by_user:
+                    uid_by_user[str(sec)] = m.group(1)
+            if not uid_by_user:
+                return 0
+
+            updated = 0
+            for sec, uid in uid_by_user.items():
+                cur = conn.execute(
+                    "UPDATE account_cache SET uid = ?"
+                    " WHERE sec_user_id = ? AND (uid IS NULL OR uid = '')",
+                    (uid, sec),
+                )
+                updated += cur.rowcount or 0
+            conn.commit()
+            return updated
+
     def delete_account(self, record_id: str) -> bool:
         """硬删除账号表记录"""
         with self._connect() as conn:

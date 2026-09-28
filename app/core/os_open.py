@@ -13,6 +13,17 @@ import sys
 from pathlib import Path
 
 
+def can_open_folder() -> bool:
+    """当前环境是否**有可能**打开系统文件管理器。
+
+    Docker / 服务器通常没有桌面会话 → False；调用方据此隐藏「打开文件夹」选项，
+    只保留「复制路径」。Windows / macOS 恒为 True。
+    """
+    if sys.platform in ("win32", "darwin"):
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def open_folder(path: Path) -> tuple[bool, str]:
     """尝试用系统文件管理器打开目录，返回 (是否成功, 失败原因)。"""
     p = Path(path)
