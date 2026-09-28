@@ -8,8 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir pytest pytest-asyncio
+# 两套依赖分开拷贝：各自的 pip 层可被缓存，改业务代码时只重建最后的 COPY 层
+COPY requirements.txt ./
+COPY TikTokDownloader/requirements.txt ./ttd-requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -r ttd-requirements.txt \
+    && pip install --no-cache-dir pytest pytest-asyncio
 
 COPY . .
 
